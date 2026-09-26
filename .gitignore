@@ -5,8 +5,11 @@
 # A df-analyze clone belongs next to this repo (../df-analyze), never inside it
 /df-analyze/
 
-# Data and model artifacts
+# Data and model artifacts (including bundles from pack_artifacts.py)
 *.zip
+*.tgz
+*.tgz.part
+*.tar.gz
 *.parquet
 *.npy
 *.npz

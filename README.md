@@ -152,7 +152,7 @@ All metrics are computed on the same held-out test complaints:
 
 Two separate Python environments are needed, because df-analyze manages its own pinned dependencies. `uv` installs the right Python version for each automatically.
 
-**Requirements:** Linux (macOS should work but is untested), [uv](https://docs.astral.sh/uv/) **0.9.16 or newer** (older uv releases cannot download Python 3.13.11, which df-analyze needs; check with `uv --version` and upgrade with `uv self update`; if uv came from a system package manager such as `dnf` that has no newer version, run `uv tool install 'uv>=0.9.16'`, put `~/.local/bin` first on your `PATH` with `uv tool update-shell`, and open a new shell), Git, `wget` or `curl`, and `unzip`. An NVIDIA GPU is optional (used for the GNN later).
+**Requirements:** Linux, macOS, or Windows. On Windows, use **WSL2** (e.g. Debian or Ubuntu from the Microsoft Store): run every command below in the WSL terminal, and clone into the WSL home directory (`~/...`), not `/mnt/c/...`, which is much slower. From Windows, the files are at `\\wsl.localhost\<distro>\home\<user>\...`. A recent NVIDIA Windows driver makes the GPU visible inside WSL2 automatically; check with `nvidia-smi` in the WSL terminal. Stages 1–8 have been run on Windows 11 through WSL2 (Debian 13) with an NVIDIA GPU; macOS is untested. A fresh WSL Debian may lack the tools below: `sudo apt install git curl wget unzip`. Also needed: [uv](https://docs.astral.sh/uv/) **0.9.16 or newer** (older uv releases cannot download Python 3.13.11, which df-analyze needs; check with `uv --version` and upgrade with `uv self update`; if uv came from a system package manager such as `dnf` that has no newer version, run `uv tool install 'uv>=0.9.16'`, put `~/.local/bin` first on your `PATH` with `uv tool update-shell`, and open a new shell), Git, `wget` or `curl`, and `unzip`. An NVIDIA GPU is optional (used for the GNN later).
 
 | Environment | Python | Used for |
 |---|---|---|
@@ -220,6 +220,27 @@ Every invocation writes its config, seed, git commit, and package versions to `o
 
 **Runtime notes:** long narratives are truncated to the model's 512-token limit. df-analyze's runtime grows with the number of classifiers and `htune_trials` (each Optuna trial for GANDALF and the MLP trains a neural network), so consider a pilot run with fewer trials first.
 
+### Sharing outputs with the group
+
+Embedding and df-analyze take hours, so one person can run them and share the results. The results cannot go in git, because they contain complaint narratives and are too large for GitHub (see `AGENTS.md`).
+
+```bash
+# Person who ran the pipeline: bundle every stage output into one file
+uv run pack_artifacts.py            # writes fraud_artifacts_<time>.tgz in the repo root
+```
+
+The bundle includes `data/interim/` (except the embedding scratch files), `data/processed/`, `outputs/reports/`, and the latest finished df-analyze run. It leaves out the raw archives and the per-invocation logs in `outputs/runs/`. It is roughly 1 GB. Share it through OneDrive or Teams, never through the repository.
+
+```bash
+# Group member: after the Setup steps, put the .tgz in the repo root, next to unpack_artifacts.py
+uv run unpack_artifacts.py          # verifies checksums and puts every file where it belongs
+uv run run.py                       # skips the finished stages
+```
+
+On Windows (WSL2), copy the downloaded bundle into the repo in File Explorer at `\\wsl.localhost\<distro>\home\<user>\...\fraud-detect-gnn`, or run `cp /mnt/c/Users/<you>/Downloads/fraud_artifacts_*.tgz .` in the WSL terminal.
+
+Every file is checked against a SHA-256 manifest. If a file already exists with different contents, nothing is written until you pass `--force`. Files are written to a temporary name first, so an interrupted unpack never leaves a partial file that `run.py` would treat as finished. Both scripts print which stages `run.py` will skip. They also warn if the bundle was made at a different git commit or with a different `configs/default.yaml` or `configs/categories.yaml`; in that case, rerun the affected stages with `--force`. Group members who only use the bundle do not need to download the raw data or the embedding model. They still need df-analyze set up (see Setup) to run the df-analyze stage.
+
 ## Development
 
 ```bash
@@ -240,6 +261,8 @@ fraud-detect-gnn/
 ├── LICENSE
 ├── download_dataset.sh  # fetches CFPB archive files 2–4 into data/raw/
 ├── run.py               # runs the pipeline stages in order
+├── pack_artifacts.py    # bundles stage outputs into a .tgz to share (not via git)
+├── unpack_artifacts.py  # restores a bundle so run.py skips finished stages
 ├── pyproject.toml / uv.lock / .python-version
 ├── configs/
 │   ├── default.yaml     # paths, sampling, dedup, split, PCA, df-analyze settings
@@ -251,6 +274,7 @@ fraud-detect-gnn/
 │   ├── features/        # embeddings, PCA, tabular features
 │   ├── models/          # df-analyze (Model A); GNN later
 │   ├── external.py      # runs df-analyze scripts in their own environment
+│   ├── artifacts.py     # packing and unpacking output bundles
 │   └── runlog.py        # seeds and run metadata
 ├── scripts/             # NN_<stage>.py: run a single stage
 ├── tests/

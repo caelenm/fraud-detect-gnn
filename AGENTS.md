@@ -33,6 +33,7 @@ This is a **public** repository. Everything pushed is visible to anyone.
 - `.env` files, API keys, tokens, or credentials
 - Notebook outputs (clear outputs before committing)
 - Any file larger than about 1 MB without asking first
+- Output bundles from `pack_artifacts.py` (`fraud_artifacts_*.tgz`). They contain narratives and are shared outside git (see "Sharing outputs with the group" in the README).
 
 If `.gitignore` does not already cover one of these, add the pattern in the same PR.
 
@@ -49,7 +50,13 @@ There are two separate environments. Do not try to merge them.
 - Run project code with `uv run ...`. Add dependencies with `uv add`, never with plain `pip install`. Commit `uv.lock`.
 - Keep the project compatible with Python 3.11–3.13 so it runs on every group member's laptop; run the tests on each version before changing the supported range.
 - Call df-analyze through a subprocess using its own environment (`uv run --directory "$DF_ANALYZE_DIR" --python '>=3.13.11,<3.14' python df-analyze.py ...`; `fraud_detect.external.run_df_analyze_script` does this). Never import df-analyze into the project environment.
-- The machine is a Linux laptop with an NVIDIA GPU. Always check `torch.cuda.is_available()` and fall back to CPU; never hard-code `cuda`.
+- **The project must run on Linux, macOS, and Windows**, because group members use all three. **On Windows, it runs inside WSL2** (e.g. Debian or Ubuntu), with the repo cloned into the WSL filesystem (`~/...`, not `/mnt/c/...`, which is much slower). Native Windows is not a target. The pipeline, `pack_artifacts.py`, and `unpack_artifacts.py` must work on each platform. In practice:
+  - Use `pathlib`, and open text files with an explicit `encoding="utf-8"`.
+  - Pass subprocess arguments as a list, and never use `shell=True`.
+  - Do not depend on GNU-only command-line flags: macOS ships BSD versions of `sed`, `tar`, and similar tools. Inside Python code, use the standard library (`tarfile`, `zipfile`, `shutil`) instead of shelling out.
+  - Never hard-code `cuda`. WSL2 and Linux laptops may have an NVIDIA GPU; Macs never do.
+  - Say in the PR which platforms a change was tested on.
+- The main development machine is a Linux laptop (or Windows with WSL2) with an NVIDIA GPU. Always check `torch.cuda.is_available()` and fall back to CPU; never hard-code `cuda`.
 - Hardware is limited. Ask before starting any job you expect to run longer than about 1 hour. For df-analyze on 30k rows, do not enable wrapper feature selection unless asked.
 
 ## Leakage checklist (include in every PR that touches data, features, or models)
