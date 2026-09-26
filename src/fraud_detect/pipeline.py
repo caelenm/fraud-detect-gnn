@@ -220,6 +220,7 @@ def run_embed(ctx: Context) -> None:
             args,
             ctx.run_dir / "df_embed.log",
             ctx.config["df_analyze"].get("commit"),
+            python=ctx.config["df_analyze"].get("python"),
         )
     except ExternalToolError as e:
         raise StageError(str(e)) from e
@@ -308,6 +309,7 @@ def run_df_analyze(ctx: Context) -> None:
             args,
             outdir / "df_analyze.log",
             ctx.config["df_analyze"].get("commit"),
+            python=ctx.config["df_analyze"].get("python"),
         )
     except ExternalToolError as e:
         raise StageError(str(e)) from e

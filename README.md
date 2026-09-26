@@ -151,16 +151,17 @@ git clone https://github.com/caelenm/fraud-detect-gnn.git
 cd fraud-detect-gnn
 uv sync
 
-# 2. df-analyze, next to this repository, at the tested commit, in its own environment
-uv python install '>=3.13.11'  # df-analyze's minimum; needed if uv's Python downloads are off
+# 2. df-analyze, next to this repository, at the tested commit, on Python 3.13
+#    (not 3.14: df-analyze's locked catboost has no Python 3.14 wheels)
+uv python install '>=3.13.11,<3.14'
 git clone https://github.com/stfxecutables/df-analyze.git ../df-analyze
 git -C ../df-analyze checkout 199e5638620693c267dac715784f1fd0e33fa796
-uv sync --locked --directory ../df-analyze
-uv run --directory ../df-analyze python -c "import pytorch_lightning"   # sanity check
-uv run --directory ../df-analyze python df-embed.py --download --modality nlp   # one-time model download
+uv sync --locked --python '>=3.13.11,<3.14' --directory ../df-analyze
+uv run --python '>=3.13.11,<3.14' --directory ../df-analyze python -c "import pytorch_lightning"   # sanity check
+uv run --python '>=3.13.11,<3.14' --directory ../df-analyze python df-embed.py --download --modality nlp   # one-time model download
 ```
 
-The pinned commit is recorded as `df_analyze.commit` in `configs/default.yaml`, and the stages that call df-analyze stop if the clone is at a different commit. Older df-analyze checkouts (e.g. the old `master` branch) lack dependencies that `df-embed.py` imports, such as `pytorch_lightning`. df-analyze needs Python 3.13.11 or newer. If your system Python is older, `uv python install '>=3.13.11'` installs a uv-managed copy (uv does this automatically unless Python downloads are set to `manual`).
+The pinned commit is recorded as `df_analyze.commit` in `configs/default.yaml`, and the stages that call df-analyze stop if the clone is at a different commit. Older df-analyze checkouts (e.g. the old `master` branch) lack dependencies that `df-embed.py` imports, such as `pytorch_lightning`. df-analyze must run on **Python 3.13 (3.13.11 or newer), not 3.14**: its locked `catboost==1.2.8` publishes Python 3.13 wheels only, so on 3.14 uv tries to compile catboost from source and the build fails. Always pass `--python '>=3.13.11,<3.14'` as above; the pipeline does the same when it calls df-analyze (`df_analyze.python` in `configs/default.yaml`). If a df-analyze `.venv` was already created on 3.14, delete it (`rm -rf ../df-analyze/.venv`) and rerun the `uv sync` line.
 
 If df-analyze is somewhere other than `../df-analyze`, set `DF_ANALYZE_DIR=/path/to/df-analyze` or `df_analyze.dir` in `configs/default.yaml`.
 

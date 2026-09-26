@@ -43,11 +43,11 @@ There are two separate environments. Do not try to merge them.
 | Environment | Location | Python | Used for |
 |---|---|---|---|
 | Project | this repo, managed by `uv` | 3.13 pinned in `.python-version`; `requires-python >=3.11` | data prep, PCA, graph construction, GNN, SHAP, evaluation |
-| df-analyze | separate clone (path in `DF_ANALYZE_DIR`, default `../df-analyze`) | managed by df-analyze's own `uv sync` | `df-embed.py` and `df-analyze.py` only |
+| df-analyze | separate clone at the commit in `df_analyze.commit` (path in `DF_ANALYZE_DIR`, default `../df-analyze`) | **3.13 only** (`>=3.13.11,<3.14`; its locked catboost has no 3.14 wheels), via df-analyze's own `uv sync --locked` | `df-embed.py` and `df-analyze.py` only |
 
 - Run project code with `uv run ...`. Add dependencies with `uv add`, never with plain `pip install`. Commit `uv.lock`.
 - Keep the project compatible with Python 3.11–3.13 so it runs on every group member's laptop; run the tests on each version before changing the supported range.
-- Call df-analyze through a subprocess using its own environment (`uv run --directory "$DF_ANALYZE_DIR" python df-analyze.py ...`). Never import df-analyze into the project environment.
+- Call df-analyze through a subprocess using its own environment (`uv run --directory "$DF_ANALYZE_DIR" --python '>=3.13.11,<3.14' python df-analyze.py ...`; `fraud_detect.external.run_df_analyze_script` does this). Never import df-analyze into the project environment.
 - The machine is a Linux laptop with an NVIDIA GPU. Always check `torch.cuda.is_available()` and fall back to CPU; never hard-code `cuda`.
 - Hardware is limited. Ask before starting any job you expect to run longer than about 1 hour. For df-analyze on 30k rows, do not enable wrapper feature selection unless asked.
 

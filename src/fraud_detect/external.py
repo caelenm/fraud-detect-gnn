@@ -59,11 +59,20 @@ def run_df_analyze_script(
     args: list[str],
     log_path: Path,
     expected_commit: str | None = None,
+    python: str | None = None,
 ) -> list[str]:
-    """Run `uv run --directory dfa_dir python <script> <args>`, tee output to a
-    log file, and raise if it fails. Returns the command that was run."""
+    """Run `uv run --directory dfa_dir [--python SPEC] python <script> <args>`,
+    tee output to a log file, and raise if it fails. Returns the command run.
+
+    `python` pins the interpreter for df-analyze's environment (e.g.
+    ">=3.13.11,<3.14"); without it uv may pick a newer Python for which
+    df-analyze's locked dependencies have no prebuilt wheels.
+    """
     check_df_analyze_dir(dfa_dir, script, expected_commit)
-    cmd = ["uv", "run", "--directory", str(dfa_dir), "python", script, *args]
+    cmd = ["uv", "run", "--directory", str(dfa_dir)]
+    if python:
+        cmd += ["--python", python]
+    cmd += ["python", script, *args]
     env = dict(os.environ)
     # Our own virtual environment must not leak into df-analyze's.
     env.pop("VIRTUAL_ENV", None)
