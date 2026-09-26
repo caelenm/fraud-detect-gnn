@@ -7,13 +7,44 @@ run as subprocesses with `uv run --directory <df-analyze clone>`.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
 
+# Older uv releases cannot download Python 3.13.11+, which df-analyze requires.
+MIN_UV_VERSION = (0, 9, 16)
+UV_UPGRADE_HELP = (
+    "Upgrade with `uv self update`. If uv came from a system package manager "
+    "(e.g. dnf) that has no newer version, install a user copy with\n"
+    "  uv tool install 'uv>=0.9.16'\n"
+    "then make sure ~/.local/bin comes first on PATH (`uv tool update-shell`, "
+    "then open a new shell) and check `uv --version`."
+)
+
 
 class ExternalToolError(RuntimeError):
     """Raised when df-analyze is missing or one of its scripts fails."""
+
+
+def parse_uv_version(text: str) -> tuple[int, int, int] | None:
+    """Parse the output of `uv --version`, e.g. 'uv 0.9.7' -> (0, 9, 7)."""
+    match = re.search(r"\buv (\d+)\.(\d+)\.(\d+)", text)
+    if match is None:
+        return None
+    major, minor, patch = (int(g) for g in match.groups())
+    return major, minor, patch
+
+
+def uv_version() -> tuple[int, int, int] | None:
+    """Version of the `uv` on PATH, or None if it cannot be determined."""
+    try:
+        out = subprocess.run(
+            ["uv", "--version"], capture_output=True, text=True, check=True
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return parse_uv_version(out.stdout)
 
 
 def df_analyze_commit(dfa_dir: Path) -> str | None:
@@ -40,6 +71,15 @@ def check_df_analyze_dir(
         )
     if shutil.which("uv") is None:
         raise ExternalToolError("`uv` is not on PATH; it is needed to run df-analyze.")
+    version = uv_version()
+    if version is not None and version < MIN_UV_VERSION:
+        found = ".".join(map(str, version))
+        needed = ".".join(map(str, MIN_UV_VERSION))
+        raise ExternalToolError(
+            f"uv {found} ({shutil.which('uv')}) is too old: df-analyze needs "
+            f"Python 3.13.11+, which uv can only download from {needed}.\n"
+            + UV_UPGRADE_HELP
+        )
     if expected_commit:
         actual = df_analyze_commit(dfa_dir)
         if actual != expected_commit:

@@ -13,6 +13,14 @@ from fraud_detect.external import (
 )
 
 
+@pytest.fixture(autouse=True)
+def recent_uv(monkeypatch):
+    """Tests must not depend on the uv installed on the machine running them."""
+    import fraud_detect.external as ext
+
+    monkeypatch.setattr(ext, "uv_version", lambda: ext.MIN_UV_VERSION)
+
+
 def fake_clone(tmp_path):
     """An empty git repo containing a placeholder script (no data)."""
     (tmp_path / "df-embed.py").write_text("# placeholder\n")
@@ -69,3 +77,22 @@ def test_uv_command_pins_python(tmp_path, monkeypatch):
     cmd = seen["cmd"]
     assert cmd[cmd.index("--python") + 1] == ">=3.13.11,<3.14"
     assert cmd.index("--python") < cmd.index("df-embed.py")
+
+
+def test_parse_uv_version():
+    from fraud_detect.external import parse_uv_version
+
+    assert parse_uv_version("uv 0.9.7") == (0, 9, 7)
+    assert parse_uv_version("uv 0.12.19 (x86_64-unknown-linux-gnu)") == (0, 12, 19)
+    assert parse_uv_version("something else") is None
+
+
+def test_old_uv_stops_with_upgrade_help(tmp_path, monkeypatch):
+    import fraud_detect.external as ext
+
+    fake_clone(tmp_path)
+    monkeypatch.setattr(ext, "uv_version", lambda: (0, 9, 7))
+    with pytest.raises(ExternalToolError, match="uv tool install"):
+        check_df_analyze_dir(tmp_path, "df-embed.py", None)
+    monkeypatch.setattr(ext, "uv_version", lambda: (0, 9, 16))
+    check_df_analyze_dir(tmp_path, "df-embed.py", None)

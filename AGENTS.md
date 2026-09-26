@@ -45,7 +45,7 @@ There are two separate environments. Do not try to merge them.
 | Project | this repo, managed by `uv` | 3.13 pinned in `.python-version`; `requires-python >=3.11` | data prep, PCA, graph construction, GNN, SHAP, evaluation |
 | df-analyze | separate clone at the commit in `df_analyze.commit` (path in `DF_ANALYZE_DIR`, default `../df-analyze`) | **3.13 only** (`>=3.13.11,<3.14`; its locked catboost has no 3.14 wheels), via df-analyze's own `uv sync --locked` | `df-embed.py` and `df-analyze.py` only |
 
-- uv 0.9.16 or newer is required (older releases cannot download Python 3.13.11 for df-analyze).
+- uv 0.9.16 or newer is required (older releases cannot download Python 3.13.11 for df-analyze); `fraud_detect.external` enforces this before calling df-analyze.
 - Run project code with `uv run ...`. Add dependencies with `uv add`, never with plain `pip install`. Commit `uv.lock`.
 - Keep the project compatible with Python 3.11–3.13 so it runs on every group member's laptop; run the tests on each version before changing the supported range.
 - Call df-analyze through a subprocess using its own environment (`uv run --directory "$DF_ANALYZE_DIR" --python '>=3.13.11,<3.14' python df-analyze.py ...`; `fraud_detect.external.run_df_analyze_script` does this). Never import df-analyze into the project environment.
@@ -101,7 +101,7 @@ Ask before implementing anything that commits to one of these:
 
 Also ask before changing the label definition, the metrics, the embedding model, or the number of PCA components.
 
-Decided (ask before changing): region is **state only**; the sample is **30,000 complaints at the natural fraud rate**; the label is a **reviewed allow-list**; PCA is **fit on training complaints only**; Model A uses df-analyze classifiers **`lgbm` and `lr`** with df-analyze's default tuning metric (**accuracy**).
+Decided (ask before changing): region is **state only**; the sample is **30,000 complaints at the natural fraud rate**; the label is a **reviewed allow-list** (`configs/categories.yaml`, confirmed; ambiguous credit-report categories and lost/stolen instruments are negative, money-transfer "Unauthorized transactions or other transaction problem" is positive); target products include the 2023 renames "Credit card" and "Prepaid card" but not "Debt or credit management"; PCA is **fit on training complaints only**; Model A uses df-analyze classifiers **`lgbm` and `lr`** with df-analyze's default tuning metric (**accuracy**).
 
 ## Code conventions
 

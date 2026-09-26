@@ -1,52 +1,93 @@
-# Label rule and product filter. MUST be reviewed against the real data.
+# Label rule and product filter, reviewed against the real category report
+# (outputs/reports/category_values.csv from archives 2-4, May 2018 - Aug 2023).
 #
-# 1. Run `uv run run.py --only load`.
-# 2. Open outputs/reports/category_values.csv. It lists every
-#    (product, issue, sub_issue) combination with its count, and flags
-#    `keyword_candidate` rows whose Issue/Sub-issue mentions fraud, scams,
-#    identity theft, unauthorized activity, etc.
-# 3. Edit the lists below so that every keyword candidate inside the target
-#    products is either `positive` or `reviewed_negative`, then set
-#    `confirmed: true`. The label stage refuses to run until then, and also
-#    fails if any entry below matches no complaints (e.g. a typo).
+# How this file is checked: the `label` stage refuses to run unless
+# `confirmed: true`, every entry below matches at least one complaint, no
+# complaint matches both lists, and every keyword candidate (Issue/Sub-issue
+# mentioning fraud, scams, identity theft, unauthorized activity, stolen, ...)
+# inside the target products is listed as `positive` or `reviewed_negative`.
 #
 # Entry format: {product, issue, sub_issue}. Strings must match the data
-# exactly. "*" (the default for product and sub_issue) matches anything;
-# `sub_issue: null` matches only complaints with no sub-issue.
+# exactly (including CFPB's own spelling). "*" (the default for product and
+# sub_issue) matches anything; `sub_issue: null` matches only a missing one.
 #
-# The entries below are PROVISIONAL candidates written from the published CFPB
-# category taxonomy, not from the downloaded files.
+# To change the label definition, edit this file and rerun from `label`
+# (`uv run run.py --from label --force`). Changing it is a design decision:
+# see AGENTS.md.
 
-confirmed: false
+confirmed: true
 
+# "Credit card" and "Prepaid card" are the 2023 renames of
+# "Credit card or prepaid card"; they are the same product. "Debt or credit
+# management" (a new 2023 product) is deliberately excluded.
 target_products:
   - Credit card or prepaid card
+  - Credit card
+  - Prepaid card
   - Checking or savings account
   - Money transfer, virtual currency, or money service
   - Debt collection
 
 # Complaints matching any of these are labelled 1 (fraud/scam-related).
 positive:
-  - issue: Fraud or scam
-  - issue: Unauthorized transactions or other transaction problem
+  # Debt collection
+  - product: Debt collection
+    issue: Attempts to collect debt not owed
+    sub_issue: Debt was result of identity theft
+
+  # Money transfer
+  - product: Money transfer, virtual currency, or money service
+    issue: Fraud or scam
+  # Bundles "other transaction problems" with unauthorized transactions;
+  # kept positive because the README's label names unauthorized transactions.
+  - product: Money transfer, virtual currency, or money service
+    issue: Unauthorized transactions or other transaction problem
+
+  # Credit card or prepaid card (and its 2023 renames)
   - product: Credit card or prepaid card
     issue: Problem with a purchase shown on your statement
     sub_issue: Card was charged for something you did not purchase with the card
   - product: Credit card or prepaid card
     issue: Getting a credit card
+    sub_issue: Card opened as result of identity theft or fraud
+  - product: Credit card or prepaid card
+    issue: Problem with a purchase or transfer
+    sub_issue: Charged for a purchase or transfer you did not make with the card
+  - product: Credit card
+    issue: Problem with a purchase shown on your statement
+    sub_issue: Card was charged for something you did not purchase with the card
+  - product: Credit card
+    issue: Getting a credit card
     sub_issue: Card opened without my consent or knowledge
-  - product: Checking or savings account
-    issue: Opening an account
-    sub_issue: Account opened without my consent or knowledge
+  - product: Prepaid card
+    issue: Problem with a purchase or transfer
+    sub_issue: Charged for a purchase or transfer you did not make with the card
+
+  # Checking or savings account
   - product: Checking or savings account
     issue: Problem with a lender or other company charging your account
     sub_issue: Transaction was not authorized
-  - product: Debt collection
-    issue: Attempts to collect debt not owed
-    sub_issue: Debt was result of identity theft
+  - product: Checking or savings account
+    issue: Opening an account
+    sub_issue: Account opened as a result of fraud
+  - product: Checking or savings account
+    issue: Opening an account
+    sub_issue: Account opened without my consent or knowledge
 
-# Keyword candidates judged NOT to be fraud events. Listing them records that
-# they were reviewed; they are labelled 0.
+# Keyword candidates judged NOT to be fraud events (labelled 0). Listing them
+# records that they were reviewed.
 reviewed_negative:
-  - issue: Identity theft protection or other monitoring services
+  # Complaints about monitoring products or alerts themselves.
+  - issue: Credit monitoring or identity theft protection services
   - issue: Problem with fraud alerts or security freezes
+  # Credit-report accuracy: can be identity theft, but also mixed files or
+  # forgotten legitimate inquiries. Too ambiguous to count as fraud.
+  - issue: Incorrect information on your report
+    sub_issue: Information belongs to someone else
+  - issue: Improper use of your report
+    sub_issue: Credit inquiries on your report that you don't recognize
+  # Mostly about replacing or refunding a lost instrument.
+  - product: Money transfer, virtual currency, or money service
+    issue: Lost or stolen check
+  - product: Money transfer, virtual currency, or money service
+    issue: Lost or stolen money order
