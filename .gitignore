@@ -2,6 +2,9 @@
 /data/
 /outputs/
 
+# A df-analyze clone belongs next to this repo (../df-analyze), never inside it
+/df-analyze/
+
 # Data and model artifacts
 *.zip
 *.parquet
