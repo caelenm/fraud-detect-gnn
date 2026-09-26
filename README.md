@@ -4,7 +4,7 @@
 
 Course project for CS555: Data Mining and Machine Learning, St. Francis Xavier University (StFX).
 
-> **Status:** early development. The pipeline described below is the plan; commands and results will be filled in as each stage lands.
+> **Status:** early development. Stages 1–9 (data loading through the df-analyze baseline) are implemented and tested on synthetic data; they have not yet been run on the real archive. The graph, GNN, evaluation, and explanation stages are still planned. No results yet.
 
 ---
 
@@ -35,7 +35,7 @@ On August 14, 2026 the CFPB stopped publishing complaint narratives in the live 
 - **Consistent categories.** The CFPB revised its product and issue categories around 2017. Earlier files mix old and new category names, which would complicate the label rule. Narratives were also not published before 2015, so the earliest years have no text.
 - **Less templated content.** Complaint volume surged after 2023, and the CFPB has attributed part of that surge to duplicate and AI-generated complaints and to credit-repair-firm filings. Excluding that period reduces templated, near-identical narratives.
 
-Our 20,000–30,000 complaint sample needs only a small fraction of this range.
+Our 30,000-complaint sample needs only a small fraction of this range.
 
 **Data is not included in this repository.** Run `./download_dataset.sh` to fetch the three archive files into `data/raw/` (see [Setup](#setup)).
 
@@ -45,7 +45,7 @@ Our 20,000–30,000 complaint sample needs only a small fraction of this range.
 | Product / Sub-product | Categorical | Feature and graph node |
 | Issue / Sub-issue | Categorical | **Label only, never a feature** |
 | Company | Categorical | Graph node |
-| State, ZIP code (first 3 digits) | Categorical | Graph node or feature |
+| State | Categorical | Feature and region graph node (ZIP code is not used) |
 | Date received | Date | Month/year features, sampling |
 | Submitted via | Categorical | Feature |
 | Tags (Older American, Servicemember) | Categorical | Feature |
@@ -54,21 +54,37 @@ Our 20,000–30,000 complaint sample needs only a small fraction of this range.
 
 ### Label
 
-A complaint is **positive (1)** if its Issue or Sub-issue mentions fraud, scam, identity theft, or unauthorized transactions, and **negative (0)** otherwise. Issue and Sub-issue are removed from all feature sets to prevent label leakage. A random sample of labels is hand-checked to estimate how noisy this rule is.
+A complaint is **positive (1)** if its Issue or Sub-issue describes fraud, a scam, identity theft, or unauthorized transactions, and **negative (0)** otherwise. Issue and Sub-issue are removed from all feature sets to prevent label leakage. A random sample of labels is hand-checked to estimate how noisy this rule is.
+
+The rule is an **explicit, reviewed allow-list** of (Product, Issue, Sub-issue) values in [`configs/categories.yaml`](configs/categories.yaml), not a keyword match. Keyword matching would mislabel categories such as "Identity theft protection or other monitoring services" or "Problem with fraud alerts or security freezes", which contain the keywords but are not fraud events. The `load` stage writes every category combination with its count and flags keyword candidates. The `label` stage refuses to run until the file is marked `confirmed: true`, every entry matches at least one complaint, and every keyword candidate in the target products has been classified as positive or reviewed-negative.
 
 ### Sample
 
-About 20,000 to 30,000 complaints with narratives from fraud-prone products (credit cards, bank accounts, money transfers, debt collection), stratified by label. This size keeps df-analyze runs tractable on a single machine. Near-duplicate narratives are removed before splitting so that copies of the same text cannot appear in both train and test.
+30,000 complaints with narratives from fraud-prone products (credit cards, bank accounts, money transfers, debt collection; exact product names are in `configs/categories.yaml`), drawn by stratified random sampling so that the natural fraud rate is preserved. This size keeps df-analyze runs tractable on a single machine.
+
+Near-duplicate narratives are removed before sampling and splitting, so that copies of the same text cannot appear in both train and test. Narratives are normalised (lower-cased, CFPB `XXXX` redactions collapsed, punctuation removed) and compared with MinHash LSH on word 5-gram shingles. Pairs with estimated Jaccard similarity ≥ 0.85 are grouped, and each group keeps its earliest complaint. To keep this cheap, deduplication runs on a stratified pool 1.5× the sample size, and the final sample is drawn from the deduplicated pool.
 
 ## Approach
 
 ### Shared features
 
-Narratives are embedded with df-analyze's `df-embed.py` (multilingual E5-large, 1024 dimensions), then reduced to about 30 PCA components. Both models receive the same text components and the same tabular features.
+Narratives are embedded with df-analyze's `df-embed.py` (multilingual E5-large, 1024 dimensions), then reduced to 30 PCA components. PCA is fit on the training complaints only and then applied to all complaints. Both models receive the same text components and the same tabular features:
+
+| Group | Features |
+|---|---|
+| Text | `text_pc01` … `text_pc30` |
+| Product | Product, Sub-product |
+| Region | State |
+| Company | Number of training complaints, timely-response rate, and the rate of each company-response type. All are computed from **training complaints only**; companies with no training complaints get a count of 0 and the overall training rates. |
+| Complaint metadata | Submission channel, Older American / Servicemember tags, year and month received |
+
+The company name itself is not a Model A feature; in the GNN it becomes the company node. A complaint's own company response and timely-response flag are not used as per-complaint features, because they are outcomes recorded after the complaint was filed. No feature is derived from labels.
 
 ### Model A: df-analyze
 
-Classifiers: LightGBM, random forest, logistic regression, kNN, and MLP, with df-analyze's built-in feature selection and Bayesian hyperparameter tuning. The best model on the internal validation is the tabular baseline. df-analyze exports its train/test split (`X_train.csv`, `X_test.csv`), which the GNN reuses so that both models are scored on exactly the same held-out complaints.
+We pass our own train and test tables to df-analyze (`--df-train` / `--df-tests`), so both models use exactly the same held-out complaints. Classifiers are LightGBM and logistic regression, plus df-analyze's dummy baseline, which it adds automatically. df-analyze runs its filter and embedded feature selection (wrapper selection is off) and tunes hyperparameters with Optuna, using its default tuning metric (accuracy) and 100 trials. Both are configurable in `configs/default.yaml`.
+
+df-analyze drops identifiers and re-encodes features in its exported `X_train.csv` / `X_test.csv`. After every run, the pipeline therefore checks that the export matches our saved split row for row: row counts, labels, and each text component (which df-analyze clips and rescales, so the check allows for that). The run fails if they do not match.
 
 ### Model B: heterogeneous GNN
 
@@ -93,12 +109,12 @@ We use GraphSAGE layers with a separate weight set per edge type (PyG's heteroge
 
 **Training:** class-weighted binary cross-entropy, early stopping on a validation split carved from the training set, and several random seeds with mean ± standard deviation reported.
 
-### Train/test split (open decision)
+### Train/test split
 
-- **Option A: random stratified split** (df-analyze's default, 40% test). This is the simplest option and guarantees identical test sets for both models.
-- **Option B: company-holdout split.** Whole companies are held out for testing. This is a stricter test of generalisation to unseen companies, but it depends on df-analyze accepting a predefined split.
+- **Option A: random stratified split (implemented).** 60% train / 40% test, stratified by label, with a fixed seed. We make the split ourselves, save the Complaint IDs (`data/processed/train_ids.csv`, `test_ids.csv`), and pass the two tables to df-analyze. The test set is frozen: nothing is tuned, selected, or early-stopped on it.
+- **Option B: company-holdout split (open decision).** Whole companies are held out for testing. This is a stricter test of generalisation to unseen companies. Because df-analyze accepts a predefined split, it is possible for both models.
 
-The current plan is to use Option A for the main comparison and to run Option B for the GNN and the graph-free control if time permits.
+The main comparison uses Option A. Option B may be run later if time permits.
 
 ## Evaluation
 
@@ -120,37 +136,81 @@ All metrics are computed on the same held-out test complaints:
 
 ## Setup
 
-Two separate Python environments are needed, because df-analyze manages its own pinned dependencies.
+Two separate Python environments are needed, because df-analyze manages its own pinned dependencies. `uv` installs the right Python version for each automatically.
 
-**Requirements:** Linux, [uv](https://docs.astral.sh/uv/), Git, and an NVIDIA GPU (optional; used for the GNN).
+**Requirements:** Linux (macOS should work but is untested), [uv](https://docs.astral.sh/uv/), Git, `wget` or `curl`, and `unzip`. An NVIDIA GPU is optional (used for the GNN later).
+
+| Environment | Python | Used for |
+|---|---|---|
+| This project | 3.13 (pinned in `.python-version`; 3.11+ supported and tested) | everything except embedding and df-analyze |
+| df-analyze (separate clone) | df-analyze's own (3.13) | `df-embed.py` and `df-analyze.py`, called as subprocesses |
 
 ```bash
-# 1. This project (Python 3.14)
+# 1. This project
 git clone https://github.com/caelenm/fraud-detect-gnn.git
 cd fraud-detect-gnn
 uv sync
 
-# 2. df-analyze, in its own directory and environment
+# 2. df-analyze, next to this repository, in its own environment
 git clone https://github.com/stfxecutables/df-analyze.git ../df-analyze
 cd ../df-analyze
 uv sync
 uv run python df-embed.py --download --modality nlp   # one-time model download
+cd ../fraud-detect-gnn
 ```
 
-Then, from the root of this repository, download the dataset:
+If df-analyze is somewhere other than `../df-analyze`, set `DF_ANALYZE_DIR=/path/to/df-analyze` or `df_analyze.dir` in `configs/default.yaml`.
+
+Download the dataset (three archive files; safe to rerun, since completed files are skipped and interrupted downloads resume):
 
 ```bash
 ./download_dataset.sh              # downloads and extracts into data/raw/
 ./download_dataset.sh --no-extract # download the zip files only
 ```
 
-The script needs `wget` or `curl`, plus `unzip`. It is safe to rerun: completed files are skipped and interrupted downloads resume.
+## Running the pipeline
 
-Pipeline commands will be documented here as each stage is implemented.
+`run.py` runs the pipeline stages in order. Stages whose outputs already exist are skipped. Once a stage runs, every later stage in the same invocation reruns too, because its inputs changed. After changing the config, rerun the affected stages with `--force`.
 
-**Note:** `df-embed.py` runs on CPU only, so embedding tens of thousands of narratives on a laptop can take a while. Long narratives are truncated to the embedding model's maximum input length.
+```bash
+uv run run.py --list              # show the stages
+uv run run.py --only load         # stage 1, then review the category report
+uv run run.py                     # everything else, once categories are confirmed
+uv run run.py --to split          # stop after a given stage
+uv run run.py --from pca --force  # rerun from a stage onwards
+```
 
-## Repository layout (planned)
+Each stage can also be run on its own with `uv run scripts/NN_<stage>.py`.
+
+| # | Stage | What it does | Main outputs |
+|---|---|---|---|
+| 1 | `load` | Reads archives 2–4, keeps complaints with a narrative received May 2018–Aug 2023, and reports every Product/Issue/Sub-issue combination | `data/interim/complaints.parquet`, `outputs/reports/category_values.csv` |
+| 2 | `label` | Checks the reviewed allow-list in `configs/categories.yaml`, keeps the target products, adds the label, and drops Issue/Sub-issue | `data/interim/labeled.parquet` |
+| 3 | `sample` | Removes near-duplicate narratives, then draws a 30k stratified sample | `data/interim/sample.parquet` |
+| 4 | `split` | 60/40 stratified split; saves Complaint IDs | `data/processed/train_ids.csv`, `test_ids.csv` |
+| 5 | `embed` | Runs df-analyze's `df-embed.py` on the narratives (CPU; slow) | `data/processed/embeddings.parquet` |
+| 6 | `pca` | 30 PCA components, fit on training complaints | `data/processed/text_pca.parquet` |
+| 7 | `features` | Tabular and company features (training statistics only) | `data/processed/tabular_features.parquet` |
+| 8 | `df_analyze_input` | Writes the df-analyze train/test tables (no identifiers) | `data/processed/df_analyze/{train,test}.parquet` |
+| 9 | `df_analyze` | Runs df-analyze (Model A) and checks its exported split against ours | `outputs/df_analyze/<timestamp>/`, `outputs/reports/df_analyze_split_check.json` |
+
+**Before the `label` stage:** open `outputs/reports/category_values.csv`, edit `configs/categories.yaml` so that every keyword candidate in the target products is listed as `positive` or `reviewed_negative`, and set `confirmed: true`. The `label` stage explains exactly what is missing if the file is not ready.
+
+Every invocation writes its config, seed, git commit, and package versions to `outputs/runs/<timestamp>/`.
+
+**Runtime notes:** `df-embed.py` runs on CPU, so embedding 30,000 narratives on a laptop can take hours. Long narratives are truncated to the model's 512-token limit. df-analyze's runtime grows with the number of classifiers and `htune_trials`.
+
+## Development
+
+```bash
+uv run ruff check .
+uv run ruff format --check .
+uv run pytest
+```
+
+Tests use only small synthetic rows, all defined in [`tests/synthetic.py`](tests/synthetic.py). Tests that need files write them to pytest's temporary directory. No real or synthetic data files are committed.
+
+## Repository layout
 
 ```
 fraud-detect-gnn/
@@ -158,23 +218,27 @@ fraud-detect-gnn/
 ├── AGENTS.md            # rules for AI coding agents working in this repo
 ├── CLAUDE.md            # points Claude Code at AGENTS.md
 ├── LICENSE
-├── .gitignore
 ├── download_dataset.sh  # fetches CFPB archive files 2–4 into data/raw/
-├── pyproject.toml
-├── configs/             # sampling, graph, and training configs
+├── run.py               # runs the pipeline stages in order
+├── pyproject.toml / uv.lock / .python-version
+├── configs/
+│   ├── default.yaml     # paths, sampling, dedup, split, PCA, df-analyze settings
+│   └── categories.yaml  # reviewed label rule and product filter
 ├── src/fraud_detect/
+│   ├── pipeline.py      # stage definitions (add new stages here)
+│   ├── cli.py           # command line shared by run.py and scripts/
 │   ├── data/            # loading, labelling, deduplication, sampling
-│   ├── features/        # embedding, PCA, tabular features
-│   ├── graph/           # heterogeneous graph construction
-│   ├── models/          # GNN and graph-free control
-│   ├── explain/         # SHAP, GNNExplainer, permutation, ablation
-│   └── eval/            # metrics and comparison tables
-├── scripts/             # numbered pipeline entry points
+│   ├── features/        # embeddings, PCA, tabular features
+│   ├── models/          # df-analyze (Model A); GNN later
+│   ├── external.py      # runs df-analyze scripts in their own environment
+│   └── runlog.py        # seeds and run metadata
+├── scripts/             # NN_<stage>.py: run a single stage
 ├── tests/
-├── notebooks/           # exploration only
 ├── data/                # local only, git-ignored
 └── outputs/             # local only, git-ignored
 ```
+
+Planned: `graph/`, GNN models, `eval/`, and `explain/` modules as their stages land.
 
 ## Limitations
 
@@ -183,7 +247,8 @@ fraud-detect-gnn/
 - **Not a representative sample.** Narratives are published only when consumers opt in, and complaints reflect negative experiences by design.
 - **Results cover May 2018 to August 2023 only.** Complaint patterns before and after this window (including the post-2023 surge) may differ, so results may not generalize to them.
 - **Templated complaints still exist inside the window.** Credit-repair services and identical disputes filed against several companies predate 2024. Deduplication reduces but does not eliminate this.
-- **Text components are fit on the full sample.** PCA on the embeddings is unsupervised and does not use labels, but it is fit before df-analyze splits the data. The same components are used by both models, so the comparison is fair, but absolute scores may be slightly optimistic.
+- **df-analyze preprocesses train and test together.** Given separate train and test files, df-analyze concatenates them before normalising continuous features and merging rare categorical levels (fewer than 20 rows). This uses no labels, but test rows influence the scaling and level merging. PCA and company statistics, which we compute ourselves, use training complaints only.
+- **Company statistics include each training complaint's own outcome.** A training complaint's company response contributes to its own company's rates, while a test complaint's does not. This is the same aggregate the GNN's company node will carry, and it is not label information, but the effect is largest for companies with few complaints.
 - **Results depend on the sampled subset** and on graph-construction choices (edge types, similarity threshold, region granularity).
 
 ## References
