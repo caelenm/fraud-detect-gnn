@@ -42,13 +42,14 @@ There are two separate environments. Do not try to merge them.
 
 | Environment | Location | Python | Used for |
 |---|---|---|---|
-| Project | this repo, managed by `uv` | 3.14 | data prep, PCA, graph construction, GNN, SHAP, evaluation |
+| Project | this repo, managed by `uv` | 3.13 pinned in `.python-version`; `requires-python >=3.11` | data prep, PCA, graph construction, GNN, SHAP, evaluation |
 | df-analyze | separate clone (path in `DF_ANALYZE_DIR`, default `../df-analyze`) | managed by df-analyze's own `uv sync` | `df-embed.py` and `df-analyze.py` only |
 
-- Run project code with `uv run ...`. Add dependencies with `uv add`, never with plain `pip install`.
+- Run project code with `uv run ...`. Add dependencies with `uv add`, never with plain `pip install`. Commit `uv.lock`.
+- Keep the project compatible with Python 3.11–3.13 so it runs on every group member's laptop; run the tests on each version before changing the supported range.
 - Call df-analyze through a subprocess using its own environment (`uv run --directory "$DF_ANALYZE_DIR" python df-analyze.py ...`). Never import df-analyze into the project environment.
 - The machine is a Linux laptop with an NVIDIA GPU. Always check `torch.cuda.is_available()` and fall back to CPU; never hard-code `cuda`.
-- Hardware is limited. Ask before starting any job you expect to run longer than about 1 hour. For df-analyze on 20k–30k rows, do not enable wrapper feature selection unless asked.
+- Hardware is limited. Ask before starting any job you expect to run longer than about 1 hour. For df-analyze on 30k rows, do not enable wrapper feature selection unless asked.
 
 ## Leakage checklist (include in every PR that touches data, features, or models)
 
@@ -61,39 +62,49 @@ These are hard invariants. If a change would violate one, stop and ask.
 5. **Near-duplicate narratives are removed before splitting**, so that the same or nearly the same text cannot appear in both train and test.
 6. **Similarity edges from test complaints point only to training complaints.**
 7. **GNN evaluation is inductive.** Test complaint nodes and their edges are excluded from the training graph and added only at evaluation time.
-8. **PCA on text embeddings is unsupervised and shared by both models.** Do not refit it per model.
+8. **PCA on text embeddings is unsupervised, fit on training complaints only, and shared by both models.** Do not refit it per model.
 
 ## Pipeline stages
 
-Implement stages as separate, rerunnable scripts under `scripts/`, with logic in `src/fraud_detect/`. Each stage reads from and writes to `data/` or `outputs/` and must not depend on in-memory state from a previous stage.
+`run.py` is the single entry point and runs the stages in order; `uv run run.py --list` shows them. Stages are defined in `src/fraud_detect/pipeline.py` (`STAGES`), and each also has a thin wrapper `scripts/NN_<stage>.py`. Each stage reads from and writes to `data/` or `outputs/` and must not depend on in-memory state from a previous stage. **Add every new stage to `STAGES` (and a matching script) so `run.py` stays the throughline.**
 
-0. **Download:** `./download_dataset.sh` (already implemented).
-1. **Load and label:** read the three archive files from `data/raw/`, keep rows with a non-empty narrative, apply the label rule, and drop Issue/Sub-issue from features. Before relying on the label rule, report the actual Issue and Sub-issue values and counts in this date range.
-2. **Deduplicate and sample:** remove near-duplicate narratives, filter to the target products, and draw a stratified sample of 20k–30k complaints.
-3. **Embed:** write the parquet with `text` and `label` columns that `df-embed.py` expects, run it in the df-analyze environment, then reduce to about 30 PCA components.
-4. **Model A:** build the df-analyze input table and run df-analyze. Save its exported split.
-5. **Split mapping:** map df-analyze's exported `X_train.csv` / `X_test.csv` rows back to Complaint IDs and save `train_ids` / `test_ids`. df-analyze drops identifier columns and re-encodes features, so **verify row alignment explicitly and add a test for it before any GNN work depends on it.** If alignment cannot be verified, stop and ask.
-6. **Graph:** build a PyG `HeteroData` graph with `complaint`, `company`, `product`, and `region` nodes, reverse edges, and optional complaint kNN edges built with approximate nearest-neighbour search and a cap on edges per node.
-7. **Model B:** train heterogeneous GraphSAGE with neighbour sampling, class-weighted BCE, and early stopping on validation. Train the graph-free control with the same code path and edges removed. Use at least 5 seeds.
-8. **Evaluate:** compute PR-AUC (headline), F1, recall, and AUROC on the frozen test IDs, reported as mean ± standard deviation across seeds.
-9. **Explain:** SHAP on the best df-analyze model; GNNExplainer, group permutation importance, and edge-type ablations for the GNN; a feature-group comparison table across both models.
+Implemented (tested on synthetic data only so far):
+
+0. **Download:** `./download_dataset.sh`.
+1. **`load`:** read the three archive files from `data/raw/`, keep rows with a non-empty narrative received May 2018–Aug 2023, and report every Product/Issue/Sub-issue combination with counts (`outputs/reports/category_values.csv`).
+2. **`label`:** apply the reviewed allow-list in `configs/categories.yaml` (see the label rule in the README), keep the target products, and drop Issue/Sub-issue. Refuses to run until the file is confirmed and consistent with the data.
+3. **`sample`:** remove near-duplicate narratives (MinHash LSH), then draw a stratified 30k sample at the natural fraud rate.
+4. **`split`:** stratified 60/40 train/test split; save `train_ids.csv` / `test_ids.csv`. We own the split and pass it to df-analyze.
+5. **`embed`:** write the `text`/`label` parquet that `df-embed.py` expects and run it in the df-analyze environment.
+6. **`pca`:** 30 components, fit on training complaints only.
+7. **`features`:** tabular and company features (company statistics from training complaints only).
+8. **`df_analyze_input`:** train/test tables without identifiers, in the order of the saved IDs.
+9. **`df_analyze`:** run df-analyze with `--df-train` / `--df-tests`, then **verify** that its exported `X_train`/`X_test`/`y_*` match our saved split row for row. If verification fails, stop and ask.
+
+Still to do (tracked as GitHub issues):
+
+10. **Graph:** build a PyG `HeteroData` graph with `complaint`, `company`, `product`, and `region` (state) nodes, reverse edges, and optional complaint kNN edges built with approximate nearest-neighbour search and a cap on edges per node.
+11. **Model B:** train heterogeneous GraphSAGE with neighbour sampling, class-weighted BCE, and early stopping on validation. Train the graph-free control with the same code path and edges removed. Use at least 5 seeds.
+12. **Evaluate:** compute PR-AUC (headline), F1, recall, and AUROC on the frozen test IDs, reported as mean ± standard deviation across seeds.
+13. **Explain:** SHAP on the best df-analyze model; GNNExplainer, group permutation importance, and edge-type ablations for the GNN; a feature-group comparison table across both models.
 
 ## Open decisions: do not decide these unilaterally
 
 Ask before implementing anything that commits to one of these:
 
-- Train/test split strategy: random stratified (current default) vs. company-holdout
+- Train/test split strategy: random stratified (implemented, the main comparison) vs. company-holdout
 - Whether complaint–complaint similarity edges are included, and the value of k
-- Region granularity (ZIP-3, state, or both)
-- Final sample size and product filter (the date range is already fixed at May 2018 to August 2023)
+- The product filter (`configs/categories.yaml`); the date range is already fixed at May 2018 to August 2023
 - The target variable itself: binary fraud (current plan) vs. company-response relief vs. grouped multiclass. Switching targets changes the leakage rules, so ask first.
 - Adding R-GCN or any architecture beyond heterogeneous GraphSAGE and the graph-free control
 
 Also ask before changing the label definition, the metrics, the embedding model, or the number of PCA components.
 
+Decided (ask before changing): region is **state only**; the sample is **30,000 complaints at the natural fraud rate**; the label is a **reviewed allow-list**; PCA is **fit on training complaints only**; Model A uses df-analyze classifiers **`lgbm` and `lr`** with df-analyze's default tuning metric (**accuracy**).
+
 ## Code conventions
 
-- Python 3.14 with type hints on all public functions.
+- Python 3.11+ syntax (the project pins 3.13) with type hints on all public functions.
 - Use `pathlib` for paths. No hard-coded absolute paths; configuration goes in `configs/` (YAML) or CLI arguments.
 - Set and log random seeds for `random`, `numpy`, and `torch`. Log package versions and config for every run in the run's output directory.
 - Lint and format with `ruff`; test with `pytest`.
@@ -102,7 +113,7 @@ Also ask before changing the label definition, the metrics, the embedding model,
 
 ## Required tests
 
-Tests use small synthetic data only. Maintain tests that assert:
+Tests use small synthetic data only. **All synthetic rows live in `tests/synthetic.py`** (clearly marked, obviously fake values) and are built in memory; tests that need files write them to pytest's `tmp_path`. Never commit data files of any kind, real or synthetic, and never write synthetic data into `data/` or `outputs/`. Maintain tests that assert:
 
 - The label rule produces the expected labels on hand-written examples.
 - No Issue/Sub-issue column, or column derived from them, exists in any feature output.

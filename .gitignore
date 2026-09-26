@@ -1,6 +1,6 @@
 # Data and outputs stay local (see AGENTS.md)
-data/
-outputs/
+/data/
+/outputs/
 
 # Data and model artifacts
 *.zip

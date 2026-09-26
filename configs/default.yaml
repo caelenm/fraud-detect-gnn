@@ -1,0 +1,48 @@
+# Pipeline configuration. Relative paths are resolved against the repo root.
+# After changing a value, rerun the affected stages with --force.
+
+seed: 555
+
+paths:
+  raw_dir: data/raw
+  interim_dir: data/interim
+  processed_dir: data/processed
+  outputs_dir: outputs
+  categories_file: configs/categories.yaml  # reviewed label rule and product filter
+
+load:
+  # Extracted by ./download_dataset.sh into data/raw/<name>/
+  archives:
+    - CCDB_Export_2_May_2018_through_April_2021
+    - CCDB_Export_3_May_2021_through_October_2022
+    - CCDB_Export_4_November_2022_through_August_2023
+  date_min: "2018-05-01"  # fixed design decision (see README)
+  date_max: "2023-08-31"
+  chunksize: 200000
+
+dedup:
+  shingle_words: 5          # word n-gram size for MinHash
+  jaccard_threshold: 0.85   # pairs at or above this are near-duplicates
+  num_perm: 128
+
+sample:
+  n_complaints: 30000       # final sample, natural fraud rate
+  # Near-duplicates are removed from a stratified pool of
+  # n_complaints * pool_factor complaints before the final sample is drawn.
+  pool_factor: 1.5
+
+split:
+  test_size: 0.4            # stratified by label; the test set is frozen
+
+embed:
+  batch_size: 16            # df-embed.py default is 2 (slow)
+
+pca:
+  n_components: 30
+
+df_analyze:
+  dir: null                 # null: $DF_ANALYZE_DIR, else ../df-analyze
+  classifiers: [lgbm, lr]
+  htune_trials: 100
+  htune_cls_metric: acc     # df-analyze default (accuracy)
+  extra_args: []            # passed through to df-analyze.py verbatim
