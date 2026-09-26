@@ -46,6 +46,9 @@ df_analyze:
   # df-analyze stop if the clone is at a different commit; set to null to
   # skip the check (e.g. when deliberately testing a newer df-analyze).
   commit: 199e5638620693c267dac715784f1fd0e33fa796
+  # Python for df-analyze's environment. Its locked catboost 1.2.8 ships
+  # wheels for 3.13 only, so an unpinned uv may pick 3.14 and fail to build.
+  python: ">=3.13.11,<3.14"
   classifiers: [lgbm, lr]
   htune_trials: 100
   htune_cls_metric: acc     # df-analyze default (accuracy)

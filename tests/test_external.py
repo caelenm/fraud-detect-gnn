@@ -42,3 +42,30 @@ def test_check_can_be_disabled(tmp_path):
 def test_missing_script_stops(tmp_path):
     with pytest.raises(ExternalToolError, match="not found"):
         check_df_analyze_dir(tmp_path, "df-embed.py", None)
+
+
+def test_uv_command_pins_python(tmp_path, monkeypatch):
+    """The subprocess command passes --python so uv cannot pick 3.14."""
+    import fraud_detect.external as ext
+
+    fake_clone(tmp_path)
+    seen = {}
+
+    class FakeProc:
+        stdout = iter(["done\n"])
+
+        def wait(self):
+            return 0
+
+    def fake_popen(cmd, **kwargs):
+        seen["cmd"] = cmd
+        return FakeProc()
+
+    monkeypatch.setattr(ext.subprocess, "Popen", fake_popen)
+    ext.run_df_analyze_script(
+        tmp_path, "df-embed.py", ["--x"], tmp_path / "log.txt",
+        python=">=3.13.11,<3.14",
+    )  # fmt: skip
+    cmd = seen["cmd"]
+    assert cmd[cmd.index("--python") + 1] == ">=3.13.11,<3.14"
+    assert cmd.index("--python") < cmd.index("df-embed.py")
