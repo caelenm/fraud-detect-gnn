@@ -3,6 +3,12 @@
 
 seed: 555
 
+gpu:
+  # Stop if df-analyze's environment cannot see a CUDA GPU when a GPU step runs
+  # (the embedding runner, and df-analyze with catboost/gandalf). Set to false
+  # to allow CPU fallback on machines without an NVIDIA GPU.
+  require: true
+
 paths:
   raw_dir: data/raw
   interim_dir: data/interim
@@ -35,10 +41,22 @@ split:
   test_size: 0.4            # stratified by label; the test set is frozen
 
 embed:
+  # "gpu": scripts/dfa/embed_on_device.py, df-embed's own code run on the GPU
+  #        (CPU if no GPU and gpu.require is false). "df-embed": df-embed.py (CPU only).
+  runner: gpu
   batch_size: 16            # df-embed.py default is 2 (slow)
+  # Rows also embedded with df-embed's unmodified CPU path and compared (GPU only).
+  verify_rows: 64
 
 pca:
   n_components: 30
+
+features:
+  # Categorical levels with fewer training complaints than this (and levels
+  # seen only in test) are merged into one level, using training counts only.
+  # 20 matches df-analyze's own threshold, so df-analyze (which counts over
+  # train+test together) has nothing left to merge.
+  min_level_count: 20
 
 df_analyze:
   dir: null                 # null: $DF_ANALYZE_DIR, else ../df-analyze
@@ -49,7 +67,9 @@ df_analyze:
   # Python for df-analyze's environment. Its locked catboost 1.2.8 ships
   # wheels for 3.13 only, so an unpinned uv may pick 3.14 and fail to build.
   python: ">=3.13.11,<3.14"
-  classifiers: [lgbm, lr]
+  # dummy is added by df-analyze automatically. catboost and gandalf train on
+  # the GPU when df-analyze sees CUDA; the others run on the CPU.
+  classifiers: [lgbm, lr, catboost, gandalf, rf, knn, mlp]
   htune_trials: 100
   htune_cls_metric: acc     # df-analyze default (accuracy)
   extra_args: []            # passed through to df-analyze.py verbatim

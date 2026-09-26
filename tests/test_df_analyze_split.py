@@ -35,7 +35,7 @@ def our_tables():
     emb = pd.DataFrame(rng.normal(size=(len(df), 12))).add_prefix("embed")
     emb.insert(0, "complaint_id", df["complaint_id"].to_numpy())
     pcs, _ = fit_pca(emb, train_ids, n_components=5, seed=0)
-    features, _ = build_tabular_features(df, train_ids)
+    features, _, _ = build_tabular_features(df, train_ids)
     train, test = build_tables(features, pcs, df, train_ids, test_ids)
     pca_cols = [c for c in train.columns if c.startswith("text_pc")]
     return train, test, pca_cols
