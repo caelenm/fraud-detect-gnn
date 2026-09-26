@@ -196,7 +196,10 @@ uv run run.py --only load         # stage 1, then review the category report
 uv run run.py                     # everything else, once categories are confirmed
 uv run run.py --to split          # stop after a given stage
 uv run run.py --from pca --force  # rerun from a stage onwards
+uv run run.py --from df_analyze --force --set df_analyze.htune_trials=10  # pilot run
 ```
+
+`--set section.key=value` overrides one config value for a single invocation (repeatable; the key must already exist in the config). The overridden config is what gets saved in the run log.
 
 Each stage can also be run on its own with `uv run scripts/NN_<stage>.py`.
 
@@ -211,6 +214,7 @@ Each stage can also be run on its own with `uv run scripts/NN_<stage>.py`.
 | 7 | `features` | Tabular and company features (training statistics only) | `data/processed/tabular_features.parquet` |
 | 8 | `df_analyze_input` | Writes the df-analyze train/test tables (no identifiers) | `data/processed/df_analyze/{train,test}.parquet` |
 | 9 | `df_analyze` | Runs df-analyze (Model A) and checks its exported split against ours | `outputs/df_analyze/<timestamp>/`, `outputs/reports/df_analyze_split_check.json` |
+| 10 | `df_analyze_report` | Test-set metrics for every tuned df-analyze model, computed from its saved probabilities (PR-AUC, AUROC, fraud-class F1/precision/recall, accuracy, balanced accuracy); picks Model A by internal-CV tuning score only | `outputs/reports/model_a_report.md`, `model_a_metrics.csv`, `model_a.json` |
 
 **The label rule is already reviewed** (`configs/categories.yaml`, `confirmed: true`). If the data or the rule changes, rerun `load`, check `outputs/reports/category_values.csv`, and make sure every keyword candidate in the target products is listed as `positive` or `reviewed_negative`. The `label` stage explains exactly what is missing if the file is not consistent with the data.
 

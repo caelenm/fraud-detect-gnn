@@ -82,13 +82,14 @@ Implemented (tested on synthetic data only so far):
 7. **`features`:** tabular and company features. Company statistics come from training complaints only and are leave-one-out for training complaints; categorical levels with <20 training complaints (or unseen in training) are merged using training counts only.
 8. **`df_analyze_input`:** train/test tables without identifiers, in the order of the saved IDs.
 9. **`df_analyze`:** run df-analyze with `--df-train` / `--df-tests`, then **verify** that its exported `X_train`/`X_test`/`y_*` match our saved split row for row. If verification fails, stop and ask.
+10. **`df_analyze_report`:** compute test metrics (PR-AUC headline, AUROC, fraud-class F1/precision/recall) for every tuned combination from df-analyze's saved test probabilities, and choose Model A by internal-CV tuning score only (invariant 9); the dummy is never Model A.
 
 Still to do (tracked as GitHub issues):
 
-10. **Graph:** build a PyG `HeteroData` graph with `complaint`, `company`, `product`, and `region` (state) nodes, reverse edges, and optional complaint kNN edges built with approximate nearest-neighbour search and a cap on edges per node.
-11. **Model B:** train heterogeneous GraphSAGE with neighbour sampling, class-weighted BCE, and early stopping on validation. Train the graph-free control with the same code path and edges removed. Use at least 5 seeds.
-12. **Evaluate:** compute PR-AUC (headline), F1, recall, and AUROC on the frozen test IDs, reported as mean ± standard deviation across seeds.
-13. **Explain:** SHAP on the best df-analyze model; GNNExplainer, group permutation importance, and edge-type ablations for the GNN; a feature-group comparison table across both models.
+11. **Graph:** build a PyG `HeteroData` graph with `complaint`, `company`, `product`, and `region` (state) nodes, reverse edges, and optional complaint kNN edges built with approximate nearest-neighbour search and a cap on edges per node.
+12. **Model B:** train heterogeneous GraphSAGE with neighbour sampling, class-weighted BCE, and early stopping on validation. Train the graph-free control with the same code path and edges removed. Use at least 5 seeds.
+13. **Evaluate:** compute PR-AUC (headline), F1, recall, and AUROC on the frozen test IDs, reported as mean ± standard deviation across seeds.
+14. **Explain:** SHAP on the best df-analyze model; GNNExplainer, group permutation importance, and edge-type ablations for the GNN; a feature-group comparison table across both models.
 
 ## Open decisions: do not decide these unilaterally
 
