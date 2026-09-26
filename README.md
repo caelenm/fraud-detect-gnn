@@ -151,13 +151,16 @@ git clone https://github.com/caelenm/fraud-detect-gnn.git
 cd fraud-detect-gnn
 uv sync
 
-# 2. df-analyze, next to this repository, in its own environment
+# 2. df-analyze, next to this repository, at the tested commit, in its own environment
+uv python install '>=3.13.11'  # df-analyze's minimum; needed if uv's Python downloads are off
 git clone https://github.com/stfxecutables/df-analyze.git ../df-analyze
-cd ../df-analyze
-uv sync
-uv run python df-embed.py --download --modality nlp   # one-time model download
-cd ../fraud-detect-gnn
+git -C ../df-analyze checkout 199e5638620693c267dac715784f1fd0e33fa796
+uv sync --locked --directory ../df-analyze
+uv run --directory ../df-analyze python -c "import pytorch_lightning"   # sanity check
+uv run --directory ../df-analyze python df-embed.py --download --modality nlp   # one-time model download
 ```
+
+The pinned commit is recorded as `df_analyze.commit` in `configs/default.yaml`, and the stages that call df-analyze stop if the clone is at a different commit. Older df-analyze checkouts (e.g. the old `master` branch) lack dependencies that `df-embed.py` imports, such as `pytorch_lightning`. df-analyze needs Python 3.13.11 or newer. If your system Python is older, `uv python install '>=3.13.11'` installs a uv-managed copy (uv does this automatically unless Python downloads are set to `manual`).
 
 If df-analyze is somewhere other than `../df-analyze`, set `DF_ANALYZE_DIR=/path/to/df-analyze` or `df_analyze.dir` in `configs/default.yaml`.
 

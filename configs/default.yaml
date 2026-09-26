@@ -42,6 +42,10 @@ pca:
 
 df_analyze:
   dir: null                 # null: $DF_ANALYZE_DIR, else ../df-analyze
+  # df-analyze commit this pipeline is tested against. Stages that call
+  # df-analyze stop if the clone is at a different commit; set to null to
+  # skip the check (e.g. when deliberately testing a newer df-analyze).
+  commit: 199e5638620693c267dac715784f1fd0e33fa796
   classifiers: [lgbm, lr]
   htune_trials: 100
   htune_cls_metric: acc     # df-analyze default (accuracy)
