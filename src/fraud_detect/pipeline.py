@@ -191,7 +191,7 @@ def run_split(ctx: Context) -> None:
 
 
 # --------------------------------------------------------------------------
-# Stage 5: embed narratives with df-embed.py
+# Stage 5: embed narratives with df-embed's code (on the GPU by default)
 # --------------------------------------------------------------------------
 # df-analyze models that train on the GPU when CUDA is available.
 GPU_CLASSIFIERS = frozenset({"catboost", "gandalf"})
@@ -406,7 +406,7 @@ STAGES: list[Stage] = [
           lambda p: [p.sample]),
     Stage("split", "Stratified train/test split; save Complaint IDs", run_split,
           lambda p: [p.split, p.train_ids, p.test_ids]),
-    Stage("embed", "Embed narratives with df-analyze's df-embed.py", run_embed,
+    Stage("embed", "Embed narratives with df-embed's code (GPU by default)", run_embed,
           lambda p: [p.embeddings]),
     Stage("pca", "PCA on embeddings, fit on training complaints", run_pca,
           lambda p: [p.text_pca]),
