@@ -58,9 +58,16 @@ A complaint is **positive (1)** if its Issue or Sub-issue describes fraud, a sca
 
 The rule is an **explicit, reviewed allow-list** of (Product, Issue, Sub-issue) values in [`configs/categories.yaml`](configs/categories.yaml), not a keyword match. Keyword matching would mislabel categories such as "Identity theft protection or other monitoring services" or "Problem with fraud alerts or security freezes", which contain the keywords but are not fraud events. The `load` stage writes every category combination with its count and flags keyword candidates. The `label` stage refuses to run until the file is marked `confirmed: true`, every entry matches at least one complaint, and every keyword candidate in the target products has been classified as positive or reviewed-negative.
 
+The reviewed rule (checked against the category report from archives 2–4):
+
+- **Positive:** debt collection "Debt was result of identity theft"; money transfer "Fraud or scam" and "Unauthorized transactions or other transaction problem"; card charges the consumer did not make, and cards opened through identity theft, fraud, or without consent; checking/savings unauthorized transactions, and accounts opened through fraud or without consent.
+- **Reviewed negative:** complaints about credit monitoring / identity theft protection services and about fraud alerts or security freezes; "Information belongs to someone else" and "Credit inquiries on your report that you don't recognize" (these could be identity theft, but also mixed-up credit files or forgotten legitimate inquiries, so they are too ambiguous); lost or stolen checks and money orders.
+
+Before deduplication, 59,663 of the 355,039 target-product complaints with narratives (16.8%) are positive. Debt collection "Debt was result of identity theft" alone accounts for 22,562 of them (38%).
+
 ### Sample
 
-30,000 complaints with narratives from fraud-prone products (credit cards, bank accounts, money transfers, debt collection; exact product names are in `configs/categories.yaml`), drawn by stratified random sampling so that the natural fraud rate is preserved. This size keeps df-analyze runs tractable on a single machine.
+30,000 complaints with narratives from fraud-prone products: credit cards and prepaid cards (including their 2023 renames "Credit card" and "Prepaid card"), checking and savings accounts, money transfers, and debt collection. The exact product names are in `configs/categories.yaml`. The sample is drawn by stratified random sampling so that the natural fraud rate is preserved. This size keeps df-analyze runs tractable on a single machine.
 
 Near-duplicate narratives are removed before sampling and splitting, so that copies of the same text cannot appear in both train and test. Narratives are normalised (lower-cased, CFPB `XXXX` redactions collapsed, punctuation removed) and compared with MinHash LSH on word 5-gram shingles. Pairs with estimated Jaccard similarity ≥ 0.85 are grouped, and each group keeps its earliest complaint. To keep this cheap, deduplication runs on a stratified pool 1.5× the sample size, and the final sample is drawn from the deduplicated pool.
 
@@ -198,7 +205,7 @@ Each stage can also be run on its own with `uv run scripts/NN_<stage>.py`.
 | 8 | `df_analyze_input` | Writes the df-analyze train/test tables (no identifiers) | `data/processed/df_analyze/{train,test}.parquet` |
 | 9 | `df_analyze` | Runs df-analyze (Model A) and checks its exported split against ours | `outputs/df_analyze/<timestamp>/`, `outputs/reports/df_analyze_split_check.json` |
 
-**Before the `label` stage:** open `outputs/reports/category_values.csv`, edit `configs/categories.yaml` so that every keyword candidate in the target products is listed as `positive` or `reviewed_negative`, and set `confirmed: true`. The `label` stage explains exactly what is missing if the file is not ready.
+**The label rule is already reviewed** (`configs/categories.yaml`, `confirmed: true`). If the data or the rule changes, rerun `load`, check `outputs/reports/category_values.csv`, and make sure every keyword candidate in the target products is listed as `positive` or `reviewed_negative`. The `label` stage explains exactly what is missing if the file is not consistent with the data.
 
 Every invocation writes its config, seed, git commit, and package versions to `outputs/runs/<timestamp>/`.
 

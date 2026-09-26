@@ -101,7 +101,7 @@ Ask before implementing anything that commits to one of these:
 
 Also ask before changing the label definition, the metrics, the embedding model, or the number of PCA components.
 
-Decided (ask before changing): region is **state only**; the sample is **30,000 complaints at the natural fraud rate**; the label is a **reviewed allow-list**; PCA is **fit on training complaints only**; Model A uses df-analyze classifiers **`lgbm` and `lr`** with df-analyze's default tuning metric (**accuracy**).
+Decided (ask before changing): region is **state only**; the sample is **30,000 complaints at the natural fraud rate**; the label is a **reviewed allow-list** (`configs/categories.yaml`, confirmed; ambiguous credit-report categories and lost/stolen instruments are negative, money-transfer "Unauthorized transactions or other transaction problem" is positive); target products include the 2023 renames "Credit card" and "Prepaid card" but not "Debt or credit management"; PCA is **fit on training complaints only**; Model A uses df-analyze classifiers **`lgbm` and `lr`** with df-analyze's default tuning metric (**accuracy**).
 
 ## Code conventions
 
