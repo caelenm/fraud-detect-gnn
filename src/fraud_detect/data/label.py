@@ -127,8 +127,10 @@ def validate_categories(df: pd.DataFrame, cfg: CategoryConfig) -> None:
     if missing_products:
         problems.append(f"target_products not found in the data: {missing_products}")
 
-    for kind, rules in (("positive", cfg.positive), ("reviewed_negative",
-                                                     cfg.reviewed_negative)):
+    for kind, rules in (
+        ("positive", cfg.positive),
+        ("reviewed_negative", cfg.reviewed_negative),
+    ):
         for rule in rules:
             if not rule.matches(df).any():
                 problems.append(f"{kind} entry matches no complaints: {rule}")

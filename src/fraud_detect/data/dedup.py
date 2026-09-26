@@ -107,9 +107,11 @@ def remove_near_duplicates(
     dup_groups = sizes[sizes > 1].index
     mixed = 0
     if C.LABEL in ordered.columns and len(dup_groups):
-        n_labels = ordered[ordered["_group"].isin(dup_groups)].groupby("_group")[
-            C.LABEL
-        ].nunique()
+        n_labels = (
+            ordered[ordered["_group"].isin(dup_groups)]
+            .groupby("_group")[C.LABEL]
+            .nunique()
+        )
         mixed = int((n_labels > 1).sum())
     kept = ordered.drop_duplicates("_group", keep="first").drop(columns="_group")
     return DedupResult(

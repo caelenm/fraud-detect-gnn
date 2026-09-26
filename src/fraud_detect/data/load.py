@@ -39,7 +39,9 @@ def find_raw_files(raw_dir: Path, archive_names: list[str]) -> dict[str, list[Pa
             )
         csvs = sorted(archive_dir.rglob("*.csv"))
         if not csvs:
-            listing = sorted(str(p.relative_to(archive_dir)) for p in archive_dir.rglob("*"))
+            listing = sorted(
+                str(p.relative_to(archive_dir)) for p in archive_dir.rglob("*")
+            )
             raise RawDataError(
                 f"No .csv files in {archive_dir}. Found: {listing[:20]}\n"
                 "The loader expects CSV exports. Stop and report the file format."
@@ -160,4 +162,3 @@ def combine_archives(frames: list[pd.DataFrame]) -> tuple[pd.DataFrame, int]:
             f"(e.g. IDs {ids}). Stop and report this."
         )
     return df.sort_values(C.COMPLAINT_ID, ignore_index=True), n_exact
-

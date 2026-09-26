@@ -214,7 +214,13 @@ def run_embed(ctx: Context) -> None:
         "--batch-size", str(ctx.config["embed"]["batch_size"]),
     ]  # fmt: skip
     try:
-        run_df_analyze_script(dfa, "df-embed.py", args, ctx.run_dir / "df_embed.log")
+        run_df_analyze_script(
+            dfa,
+            "df-embed.py",
+            args,
+            ctx.run_dir / "df_embed.log",
+            ctx.config["df_analyze"].get("commit"),
+        )
     except ExternalToolError as e:
         raise StageError(str(e)) from e
     embedded = pd.read_parquet(output_path)
@@ -297,7 +303,11 @@ def run_df_analyze(ctx: Context) -> None:
     )
     try:
         run_df_analyze_script(
-            df_analyze_dir(ctx.config), "df-analyze.py", args, outdir / "df_analyze.log"
+            df_analyze_dir(ctx.config),
+            "df-analyze.py",
+            args,
+            outdir / "df_analyze.log",
+            ctx.config["df_analyze"].get("commit"),
         )
     except ExternalToolError as e:
         raise StageError(str(e)) from e
