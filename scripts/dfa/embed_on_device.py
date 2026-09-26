@@ -63,6 +63,62 @@ class OnDevice(torch.nn.Module):
         return SimpleNamespace(last_hidden_state=out.last_hidden_state.float().cpu())
 
 
+def embed(
+    data: Path,
+    model: torch.nn.Module,
+    tokenizer,
+    device: torch.device,
+    batch_size: int,
+    verify_rows: int,
+) -> tuple:
+    """Embed every row of `data` with df-embed's code, running `model` (loaded
+    on the CPU) on `device`. If `verify_rows` > 0, the first rows are first
+    embedded with the unwrapped model on the CPU for comparison.
+
+    Returns (embeddings, reference or None, report)."""
+    from df_analyze.embedding.datasets import NLPDataset
+    from df_analyze.embedding.embed import get_nlp_embeddings
+
+    # df-analyze's dataset object caches the first frame it loads and ignores
+    # `limit` on later calls, so every pass gets its own dataset object.
+    def dataset() -> NLPDataset:
+        return NLPDataset(datapath=data, name=None)
+
+    n_rows = len(dataset().X())
+    report: dict = {"device_used": str(device), "n_rows": n_rows}
+    reference = None
+    n_verify = min(verify_rows, n_rows)
+    if n_verify > 0:
+        print(f"Embedding {n_verify} rows on CPU with df-embed's code for comparison")
+        reference = get_nlp_embeddings(
+            ds=dataset(), tokenizer=tokenizer, model=model,
+            batch_size=batch_size, load_limit=n_verify,
+        )  # fmt: skip
+        if len(reference) != n_verify:
+            raise RuntimeError(
+                f"CPU comparison embedded {len(reference)} rows, expected {n_verify}"
+            )
+
+    print(f"Embedding {n_rows} rows on {device}")
+    start = time.perf_counter()
+    embedded = get_nlp_embeddings(
+        ds=dataset(), tokenizer=tokenizer, model=OnDevice(model.to(device), device),
+        batch_size=batch_size,
+    )  # fmt: skip
+    report["seconds"] = round(time.perf_counter() - start, 1)
+    if len(embedded) != n_rows:
+        raise RuntimeError(f"Embedded {len(embedded)} rows, expected {n_rows}")
+
+    if reference is not None:
+        cols = [c for c in reference.columns if c.startswith("embed")]
+        ref = torch.tensor(reference[cols].to_numpy())
+        got = torch.tensor(embedded[cols].iloc[:n_verify].to_numpy())
+        report["verify_rows"] = n_verify
+        report["verify_max_abs_diff"] = float((ref - got).abs().max())
+        report["verify_passed"] = bool(torch.allclose(got, ref, atol=ATOL, rtol=RTOL))
+    return embedded, reference, report
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--data", type=Path)
@@ -89,43 +145,20 @@ def main() -> int:
     torch.backends.cuda.matmul.allow_tf32 = False
     torch.backends.cudnn.allow_tf32 = False
 
-    from df_analyze.embedding.datasets import NLPDataset
     from df_analyze.embedding.download import load_nlp_intfloat_ml_model_offline
-    from df_analyze.embedding.embed import get_nlp_embeddings
 
     model, tokenizer = load_nlp_intfloat_ml_model_offline()
     model.eval()
-    ds = NLPDataset(datapath=args.data, name=None)
-    n_rows = len(ds.X())
-
-    report: dict = {**info, "device_used": str(device), "n_rows": n_rows}
-    reference = None
-    n_verify = min(args.verify_rows, n_rows) if use_cuda else 0
-    if n_verify > 0:
-        print(f"Embedding {n_verify} rows on CPU with df-embed's code for comparison")
-        reference = get_nlp_embeddings(
-            ds=ds, tokenizer=tokenizer, model=model,
-            batch_size=args.batch_size, load_limit=n_verify,
-        )  # fmt: skip
-
-    start = time.perf_counter()
-    runner = OnDevice(model.to(device), device) if use_cuda else model
-    embedded = get_nlp_embeddings(
-        ds=ds, tokenizer=tokenizer, model=runner, batch_size=args.batch_size
-    )
-    report["seconds"] = round(time.perf_counter() - start, 1)
-
-    if reference is not None:
-        cols = [c for c in reference.columns if c.startswith("embed")]
-        ref = torch.tensor(reference[cols].to_numpy())
-        got = torch.tensor(embedded[cols].iloc[:n_verify].to_numpy())
-        report["verify_rows"] = n_verify
-        report["verify_max_abs_diff"] = float((ref - got).abs().max())
-        report["verify_passed"] = bool(torch.allclose(got, ref, atol=ATOL, rtol=RTOL))
-        if not report["verify_passed"]:
-            args.report.write_text(json.dumps(report, indent=2))
-            print("GPU embeddings differ from df-embed's CPU embeddings:", report)
-            return 4
+    # The CPU comparison only makes sense when the main pass is on the GPU.
+    embedded, _, result = embed(
+        args.data, model, tokenizer, device, args.batch_size,
+        verify_rows=args.verify_rows if use_cuda else 0,
+    )  # fmt: skip
+    report = {**info, **result}
+    if report.get("verify_passed") is False:
+        args.report.write_text(json.dumps(report, indent=2))
+        print("GPU embeddings differ from df-embed's CPU embeddings:", report)
+        return 4
 
     embedded.to_parquet(args.out)
     args.report.write_text(json.dumps(report, indent=2))

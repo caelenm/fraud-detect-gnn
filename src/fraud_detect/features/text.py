@@ -1,4 +1,4 @@
-"""Narrative embeddings (via df-analyze's df-embed.py) and PCA reduction."""
+"""Narrative embeddings (df-analyze's df-embed code) and PCA reduction."""
 
 from __future__ import annotations
 
