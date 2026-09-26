@@ -1,0 +1,52 @@
+# Label rule and product filter. MUST be reviewed against the real data.
+#
+# 1. Run `uv run run.py --only load`.
+# 2. Open outputs/reports/category_values.csv. It lists every
+#    (product, issue, sub_issue) combination with its count, and flags
+#    `keyword_candidate` rows whose Issue/Sub-issue mentions fraud, scams,
+#    identity theft, unauthorized activity, etc.
+# 3. Edit the lists below so that every keyword candidate inside the target
+#    products is either `positive` or `reviewed_negative`, then set
+#    `confirmed: true`. The label stage refuses to run until then, and also
+#    fails if any entry below matches no complaints (e.g. a typo).
+#
+# Entry format: {product, issue, sub_issue}. Strings must match the data
+# exactly. "*" (the default for product and sub_issue) matches anything;
+# `sub_issue: null` matches only complaints with no sub-issue.
+#
+# The entries below are PROVISIONAL candidates written from the published CFPB
+# category taxonomy, not from the downloaded files.
+
+confirmed: false
+
+target_products:
+  - Credit card or prepaid card
+  - Checking or savings account
+  - Money transfer, virtual currency, or money service
+  - Debt collection
+
+# Complaints matching any of these are labelled 1 (fraud/scam-related).
+positive:
+  - issue: Fraud or scam
+  - issue: Unauthorized transactions or other transaction problem
+  - product: Credit card or prepaid card
+    issue: Problem with a purchase shown on your statement
+    sub_issue: Card was charged for something you did not purchase with the card
+  - product: Credit card or prepaid card
+    issue: Getting a credit card
+    sub_issue: Card opened without my consent or knowledge
+  - product: Checking or savings account
+    issue: Opening an account
+    sub_issue: Account opened without my consent or knowledge
+  - product: Checking or savings account
+    issue: Problem with a lender or other company charging your account
+    sub_issue: Transaction was not authorized
+  - product: Debt collection
+    issue: Attempts to collect debt not owed
+    sub_issue: Debt was result of identity theft
+
+# Keyword candidates judged NOT to be fraud events. Listing them records that
+# they were reviewed; they are labelled 0.
+reviewed_negative:
+  - issue: Identity theft protection or other monitoring services
+  - issue: Problem with fraud alerts or security freezes
