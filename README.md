@@ -75,23 +75,30 @@ Near-duplicate narratives are removed before sampling and splitting, so that cop
 
 ### Shared features
 
-Narratives are embedded with df-analyze's `df-embed.py` (multilingual E5-large, 1024 dimensions), then reduced to 30 PCA components. PCA is fit on the training complaints only and then applied to all complaints. Both models receive the same text components and the same tabular features:
+Narratives are embedded with df-analyze's embedding code (multilingual E5-large, 1024 dimensions), then reduced to 30 PCA components. `df-embed.py` itself only runs on the CPU. By default the pipeline therefore runs df-embed's own loader, dataset and embedding function unchanged inside df-analyze's environment (`scripts/dfa/embed_on_device.py`), with the model on the GPU. On every run it re-embeds the first 64 narratives with the unmodified CPU code path and stops if the two disagree beyond float32 tolerance (1e-3). PCA is fit on the training complaints only and then applied to all complaints. Both models receive the same text components and the same tabular features:
 
 | Group | Features |
 |---|---|
 | Text | `text_pc01` … `text_pc30` |
 | Product | Product, Sub-product |
 | Region | State |
-| Company | Number of training complaints, timely-response rate, and the rate of each company-response type. All are computed from **training complaints only**; companies with no training complaints get a count of 0 and the overall training rates. |
+| Company | Number of training complaints, timely-response rate, and the rate of each company-response type, all from **training complaints only**. For a training complaint they are **leave-one-out** (the company's *other* training complaints), so no complaint sees its own company response. A test complaint uses all the company's training complaints. With no such complaints, the count is 0 and the rates are the overall training rates. |
 | Complaint metadata | Submission channel, Older American / Servicemember tags, year and month received |
+
+Categorical levels (product, sub-product, state, channel) with fewer than 20 **training** complaints, and levels that never occur in training, are merged into one `__rare_or_unseen__` level. Every remaining level therefore has at least 20 training rows, and df-analyze's own rare-level merging (which counts train and test together) has nothing left to merge. The merged levels are listed in `outputs/reports/rare_levels_merged.json`.
 
 The company name itself is not a Model A feature; in the GNN it becomes the company node. A complaint's own company response and timely-response flag are not used as per-complaint features, because they are outcomes recorded after the complaint was filed. No feature is derived from labels.
 
 ### Model A: df-analyze
 
-We pass our own train and test tables to df-analyze (`--df-train` / `--df-tests`), so both models use exactly the same held-out complaints. Classifiers are LightGBM and logistic regression, plus df-analyze's dummy baseline, which it adds automatically. df-analyze runs its filter and embedded feature selection (wrapper selection is off) and tunes hyperparameters with Optuna, using its default tuning metric (accuracy) and 100 trials. Both are configurable in `configs/default.yaml`.
+We pass our own train and test tables to df-analyze (`--df-train` / `--df-tests`), so both models use exactly the same held-out complaints. Classifiers are LightGBM, logistic regression, CatBoost, GANDALF, random forest, kNN and an MLP, plus df-analyze's dummy baseline, which it adds automatically. CatBoost and GANDALF train on the GPU when df-analyze's environment can see CUDA; the others run on the CPU (df-analyze pins its MLP to the CPU). df-analyze runs its filter and embedded feature selection (wrapper selection is off) and tunes hyperparameters with Optuna, using its default tuning metric (accuracy) and 100 trials. Both are configurable in `configs/default.yaml`.
 
 df-analyze drops identifiers and re-encodes features in its exported `X_train.csv` / `X_test.csv`. After every run, the pipeline therefore checks that the export matches our saved split row for row: row counts, labels, and each text component (which df-analyze clips and rescales, so the check allows for that). The run fails if they do not match.
+
+**Reading df-analyze's results without touching the test set.** Hyperparameters are tuned with internal cross-validation on the training table only. The tuned score for each model is `tuning/test00/tuned_models_00.csv`, and it is the only score to use for choosing the best Model A. In df-analyze's results tables:
+- `holdout` rows: models fit on train, scored on our test set. This is the Model A test result.
+- `trainset` rows: scored on the training data itself.
+- `5-fold` rows: df-analyze refits the tuned models on folds **of the test set**. These are not a valid test result and must not be compared with the GNN.
 
 ### Model B: heterogeneous GNN
 
@@ -199,7 +206,7 @@ Each stage can also be run on its own with `uv run scripts/NN_<stage>.py`.
 | 2 | `label` | Checks the reviewed allow-list in `configs/categories.yaml`, keeps the target products, adds the label, and drops Issue/Sub-issue | `data/interim/labeled.parquet` |
 | 3 | `sample` | Removes near-duplicate narratives, then draws a 30k stratified sample | `data/interim/sample.parquet` |
 | 4 | `split` | 60/40 stratified split; saves Complaint IDs | `data/processed/train_ids.csv`, `test_ids.csv` |
-| 5 | `embed` | Runs df-analyze's `df-embed.py` on the narratives (CPU; slow) | `data/processed/embeddings.parquet` |
+| 5 | `embed` | Embeds the narratives with df-embed's code on the GPU (`embed.runner: gpu`), checked against its CPU path; `embed.runner: df-embed` runs `df-embed.py` itself (CPU only) | `data/processed/embeddings.parquet` |
 | 6 | `pca` | 30 PCA components, fit on training complaints | `data/processed/text_pca.parquet` |
 | 7 | `features` | Tabular and company features (training statistics only) | `data/processed/tabular_features.parquet` |
 | 8 | `df_analyze_input` | Writes the df-analyze train/test tables (no identifiers) | `data/processed/df_analyze/{train,test}.parquet` |
@@ -209,7 +216,9 @@ Each stage can also be run on its own with `uv run scripts/NN_<stage>.py`.
 
 Every invocation writes its config, seed, git commit, and package versions to `outputs/runs/<timestamp>/`.
 
-**Runtime notes:** `df-embed.py` runs on CPU, so embedding 30,000 narratives on a laptop can take hours. Long narratives are truncated to the model's 512-token limit. df-analyze's runtime grows with the number of classifiers and `htune_trials`.
+**GPU:** with `gpu.require: true` (the default), the `embed` and `df_analyze` stages first check that df-analyze's environment can see a CUDA GPU. They stop with troubleshooting steps if it can't, and record the GPU in `outputs/runs/<timestamp>/cuda_info_*.json`. Set `gpu.require: false` on machines without an NVIDIA GPU; embedding then runs on the CPU, which takes hours for 30,000 narratives.
+
+**Runtime notes:** long narratives are truncated to the model's 512-token limit. df-analyze's runtime grows with the number of classifiers and `htune_trials` (each Optuna trial for GANDALF and the MLP trains a neural network), so consider a pilot run with fewer trials first.
 
 ## Development
 
@@ -258,8 +267,8 @@ Planned: `graph/`, GNN models, `eval/`, and `explain/` modules as their stages l
 - **Not a representative sample.** Narratives are published only when consumers opt in, and complaints reflect negative experiences by design.
 - **Results cover May 2018 to August 2023 only.** Complaint patterns before and after this window (including the post-2023 surge) may differ, so results may not generalize to them.
 - **Templated complaints still exist inside the window.** Credit-repair services and identical disputes filed against several companies predate 2024. Deduplication reduces but does not eliminate this.
-- **df-analyze preprocesses train and test together.** Given separate train and test files, df-analyze concatenates them before normalising continuous features and merging rare categorical levels (fewer than 20 rows). This uses no labels, but test rows influence the scaling and level merging. PCA and company statistics, which we compute ourselves, use training complaints only.
-- **Company statistics include each training complaint's own outcome.** A training complaint's company response contributes to its own company's rates, while a test complaint's does not. This is the same aggregate the GNN's company node will carry, and it is not label information, but the effect is largest for companies with few complaints.
+- **df-analyze scales continuous features over train and test together.** Given separate train and test files, df-analyze concatenates them before its robust clip-and-rescale of continuous features. This uses no labels, but test rows influence the clip points and scaling. (Its rare-level merging, which also counts over both, is neutralised by our train-only merging; see Shared features.) PCA and company statistics, which we compute ourselves, use training complaints only.
+- **Company features are leave-one-out for training complaints, but a GNN company node cannot be.** Model A's per-complaint company features exclude the complaint's own outcome. A company node in the planned GNN carries one aggregate over all of the company's training complaints, including each one's own response. This matters most for companies with few complaints, and should be kept in mind when comparing the models.
 - **Results depend on the sampled subset** and on graph-construction choices (edge types, similarity threshold, region granularity).
 
 ## References

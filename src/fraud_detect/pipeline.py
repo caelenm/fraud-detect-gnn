@@ -18,7 +18,7 @@ from typing import Any
 import pandas as pd
 
 from fraud_detect import columns as C
-from fraud_detect.config import Paths, df_analyze_dir, load_yaml
+from fraud_detect.config import REPO_ROOT, Paths, df_analyze_dir, load_yaml
 from fraud_detect.data import dedup, label, load, sample
 from fraud_detect.external import ExternalToolError, run_df_analyze_script
 from fraud_detect.features import tabular, text
@@ -193,37 +193,97 @@ def run_split(ctx: Context) -> None:
 # --------------------------------------------------------------------------
 # Stage 5: embed narratives with df-embed.py
 # --------------------------------------------------------------------------
+# df-analyze models that train on the GPU when CUDA is available.
+GPU_CLASSIFIERS = frozenset({"catboost", "gandalf"})
+GPU_EMBED_RUNNER = REPO_ROOT / "scripts" / "dfa" / "embed_on_device.py"
+CUDA_HELP = """df-analyze's environment cannot see a CUDA GPU. Check that:
+  - `nvidia-smi` works in this shell (inside a toolbox/container the NVIDIA
+    driver's user-space libraries must be visible there too), and
+  - this prints True:
+      uv run --python '{python}' --directory {dfa} \\
+        python -c "import torch; print(torch.cuda.is_available())"
+To run on the CPU instead, set `gpu.require: false` in the config."""
+
+
+def _run_dfa(ctx: Context, script: str, args: list[str], log_path: Path) -> None:
+    """Run a script in df-analyze's environment; turn failures into StageError."""
+    cfg = ctx.config["df_analyze"]
+    try:
+        run_df_analyze_script(
+            df_analyze_dir(ctx.config),
+            script,
+            args,
+            log_path,
+            cfg.get("commit"),
+            python=cfg.get("python"),
+        )
+    except ExternalToolError as e:
+        raise StageError(str(e)) from e
+
+
+def check_cuda(ctx: Context, key: str, purpose: str) -> bool:
+    """Ask df-analyze's environment whether it can use a CUDA GPU, log the answer
+    to the run directory as cuda_info_<key>.json, and stop if a GPU is required
+    but missing."""
+    report = ctx.run_dir / f"cuda_info_{key}.json"
+    args = ["--cuda-info", "--report", str(report.resolve())]
+    _run_dfa(ctx, str(GPU_EMBED_RUNNER), args, ctx.run_dir / f"cuda_info_{key}.log")
+    info = json.loads(report.read_text(encoding="utf-8"))
+    if info["cuda_available"]:
+        print(f"GPU for {purpose}: {info['device_name']} (torch {info['torch']})")
+        return True
+    message = CUDA_HELP.format(
+        python=ctx.config["df_analyze"].get("python"), dfa=df_analyze_dir(ctx.config)
+    )
+    if ctx.config["gpu"]["require"]:
+        raise StageError(message)
+    print(f"WARNING: {purpose} will run on the CPU.\n{message}")
+    return False
+
+
 def run_embed(ctx: Context) -> None:
     _require(ctx.paths.sample)
     dfa = df_analyze_dir(ctx.config)
+    python = ctx.config["df_analyze"].get("python")
     if not (dfa / text.DF_EMBED_MODEL_DIR).is_dir():
         raise StageError(
             f"The df-embed NLP model is not downloaded in {dfa}. Run once:\n"
-            f"  uv run --directory {dfa} python df-embed.py --download --modality nlp"
+            f"  uv run --python '{python}' --directory {dfa} "
+            "python df-embed.py --download --modality nlp"
         )
+    cfg = ctx.config["embed"]
     df = pd.read_parquet(ctx.paths.sample)
     ctx.paths.embed_dir.mkdir(parents=True, exist_ok=True)
     input_path = ctx.paths.embed_dir / "embed_input.parquet"
     output_path = ctx.paths.embed_dir / "embed_output.parquet"
     text.df_embed_input(df).to_parquet(input_path, index=False)
     output_path.unlink(missing_ok=True)
-    args = [
-        "--modality", "nlp",
+    io_args = [
         "--data", str(input_path.resolve()),
         "--out", str(output_path.resolve()),
-        "--batch-size", str(ctx.config["embed"]["batch_size"]),
+        "--batch-size", str(cfg["batch_size"]),
     ]  # fmt: skip
-    try:
-        run_df_analyze_script(
-            dfa,
-            "df-embed.py",
-            args,
-            ctx.run_dir / "df_embed.log",
-            ctx.config["df_analyze"].get("commit"),
-            python=ctx.config["df_analyze"].get("python"),
+    if cfg["runner"] == "gpu":
+        # df-embed's own code, run on the GPU when available (see the script).
+        use_gpu = check_cuda(ctx, "embed", "embedding")
+        report = ctx.run_dir / "embed_report.json"
+        args = [
+            *io_args,
+            "--device", "cuda" if use_gpu else "cpu",
+            "--verify-rows", str(cfg["verify_rows"]),
+            "--report", str(report.resolve()),
+        ]  # fmt: skip
+        _run_dfa(ctx, str(GPU_EMBED_RUNNER), args, ctx.run_dir / "embed.log")
+        write_json(
+            ctx.paths.reports_dir / "embed_report.json", json.loads(report.read_text())
         )
-    except ExternalToolError as e:
-        raise StageError(str(e)) from e
+    elif cfg["runner"] == "df-embed":
+        args = ["--modality", "nlp", *io_args]
+        _run_dfa(ctx, "df-embed.py", args, ctx.run_dir / "df_embed.log")
+    else:
+        raise StageError(
+            f"Unknown embed.runner {cfg['runner']!r}; use 'gpu' or 'df-embed'"
+        )
     embedded = pd.read_parquet(output_path)
     table = text.attach_ids_to_embeddings(embedded, df[C.COMPLAINT_ID], df[C.LABEL])
     table.to_parquet(ctx.paths.embeddings, index=False)
@@ -254,7 +314,16 @@ def run_pca(ctx: Context) -> None:
 def run_features(ctx: Context) -> None:
     _require(ctx.paths.sample, ctx.paths.train_ids)
     df = pd.read_parquet(ctx.paths.sample)
-    features, groups = tabular.build_tabular_features(df, _read_ids(ctx.paths.train_ids))
+    features, groups, merged = tabular.build_tabular_features(
+        df,
+        _read_ids(ctx.paths.train_ids),
+        min_level_count=int(ctx.config["features"]["min_level_count"]),
+    )
+    write_json(ctx.paths.reports_dir / "rare_levels_merged.json", merged)
+    for col, levels in merged.items():
+        print(
+            f"{col}: merged {len(levels)} rare or unseen levels into {tabular.RARE_LEVEL}"
+        )
     features.to_parquet(ctx.paths.tabular_features, index=False)
     write_json(ctx.paths.tabular_feature_groups, groups)
     print(f"Built {features.shape[1] - 1} tabular features")
@@ -299,20 +368,16 @@ def run_df_analyze(ctx: Context) -> None:
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     outdir = p.df_analyze_output_dir / stamp
     outdir.mkdir(parents=True, exist_ok=False)
+    gpu_models = GPU_CLASSIFIERS.intersection(ctx.config["df_analyze"]["classifiers"])
+    if gpu_models:
+        # CatBoost and GANDALF switch to the GPU when df-analyze sees CUDA.
+        check_cuda(
+            ctx, "df_analyze", "df-analyze (" + ", ".join(sorted(gpu_models)) + ")"
+        )
     args = df_analyze.df_analyze_args(
         ctx.config["df_analyze"], train_path, test_path, outdir, ctx.seed
     )
-    try:
-        run_df_analyze_script(
-            df_analyze_dir(ctx.config),
-            "df-analyze.py",
-            args,
-            outdir / "df_analyze.log",
-            ctx.config["df_analyze"].get("commit"),
-            python=ctx.config["df_analyze"].get("python"),
-        )
-    except ExternalToolError as e:
-        raise StageError(str(e)) from e
+    _run_dfa(ctx, "df-analyze.py", args, outdir / "df_analyze.log")
     verify_df_analyze_split(ctx, outdir)
     (p.df_analyze_output_dir / "latest.txt").write_text(stamp + "\n", encoding="utf-8")
 

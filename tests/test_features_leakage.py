@@ -33,7 +33,7 @@ def fake_embeddings(df, width=16, seed=0):
 def test_features_have_no_issue_or_label_columns():
     df, train_ids, test_ids = sample_and_split()
     df = df.assign(**{C.ISSUE: "Fraud or scam", C.SUB_ISSUE: "Synthetic"})
-    features, groups = build_tabular_features(df, train_ids)
+    features, groups, _ = build_tabular_features(df, train_ids)
     pcs, _ = fit_pca(fake_embeddings(df), train_ids, n_components=4, seed=0)
     train, test = build_tables(features, pcs, df, train_ids, test_ids)
     for table in (features, train, test):
@@ -71,7 +71,7 @@ def test_unseen_company_gets_training_fallback():
     df = df.copy()
     first_test = df[C.COMPLAINT_ID].isin(test_ids).idxmax()
     df.loc[first_test, C.COMPANY] = "SYNTHETIC-COMPANY-ONLY-IN-TEST"
-    features, _ = build_tabular_features(df, train_ids)
+    features, _, _ = build_tabular_features(df, train_ids)
     row = features.loc[first_test]
     assert row["company_n_train_complaints"] == 0
     train = df[df[C.COMPLAINT_ID].isin(train_ids)]
@@ -95,7 +95,7 @@ def test_no_feature_perfectly_predicts_label():
     """Leakage smoke test: on random synthetic data no single feature column
     should separate the classes perfectly."""
     df, train_ids, test_ids = sample_and_split(n=400)
-    features, _ = build_tabular_features(df, train_ids)
+    features, _, _ = build_tabular_features(df, train_ids)
     pcs, _ = fit_pca(fake_embeddings(df), train_ids, n_components=4, seed=0)
     train, _ = build_tables(features, pcs, df, train_ids, test_ids)
     y = train["target"]
@@ -119,3 +119,86 @@ def test_embeddings_join_checks_order():
     shuffled = embedded.iloc[::-1].reset_index(drop=True)
     with pytest.raises(ValueError, match="labels do not match"):
         attach_ids_to_embeddings(shuffled, df[C.COMPLAINT_ID], df[C.LABEL])
+
+
+def _company_features_by_id(df, train_ids):
+    from fraud_detect.features.tabular import company_features
+
+    out = company_features(df.reset_index(drop=True), train_ids)
+    return out.set_index(df[C.COMPLAINT_ID].to_numpy())
+
+
+def test_training_row_never_sees_its_own_outcome():
+    """Leave-one-out: changing a training complaint's own response and
+    timeliness does not change that complaint's company features."""
+    df, train_ids, _ = sample_and_split()
+    target = int(train_ids.iloc[0])
+    before = _company_features_by_id(df, train_ids).loc[target]
+    changed = df.copy()
+    row = changed[C.COMPLAINT_ID] == target
+    changed.loc[row, C.COMPANY_RESPONSE] = "Closed with monetary relief"
+    changed.loc[row, C.TIMELY_RESPONSE] = "No"
+    after = _company_features_by_id(changed, train_ids).loc[target]
+    pd.testing.assert_series_equal(before, after)
+
+
+def test_train_and_test_rows_use_the_same_definition():
+    """A test complaint's company features equal what a training complaint of the
+    same company gets when that training complaint's outcome is left out."""
+    df, train_ids, test_ids = sample_and_split()
+    feats = _company_features_by_id(df, train_ids)
+    stats = company_statistics(df, train_ids)
+    test_id = int(test_ids.iloc[0])
+    company = df.set_index(C.COMPLAINT_ID).loc[test_id, C.COMPANY]
+    expected = stats.loc[company]
+    pd.testing.assert_series_equal(
+        feats.loc[test_id], expected.rename(test_id), check_dtype=False
+    )
+    n_train_same = df[df[C.COMPLAINT_ID].isin(train_ids) & (df[C.COMPANY] == company)]
+    train_id = int(n_train_same[C.COMPLAINT_ID].iloc[0])
+    assert feats.loc[train_id, "company_n_train_complaints"] == len(n_train_same) - 1
+
+
+def test_singleton_training_company_gets_fallback():
+    df, train_ids, _ = sample_and_split()
+    df = df.copy()
+    lone = int(train_ids.iloc[0])
+    df.loc[df[C.COMPLAINT_ID] == lone, C.COMPANY] = "SYNTHETIC-COMPANY-ONLY-ONE"
+    row = _company_features_by_id(df, train_ids).loc[lone]
+    assert row["company_n_train_complaints"] == 0
+    train = df[df[C.COMPLAINT_ID].isin(train_ids)]
+    assert row["company_timely_rate"] == pytest.approx(
+        (train[C.TIMELY_RESPONSE] == "Yes").mean()
+    )
+
+
+def test_company_features_of_train_rows_ignore_test_rows():
+    df, train_ids, test_ids = sample_and_split()
+    before = _company_features_by_id(df, train_ids).loc[train_ids.to_numpy()]
+    changed = df.copy()
+    is_test = changed[C.COMPLAINT_ID].isin(test_ids)
+    changed.loc[is_test, C.COMPANY_RESPONSE] = "Closed with monetary relief"
+    changed.loc[is_test, C.COMPANY] = "SYNTHETIC-COMPANY-A"
+    after = _company_features_by_id(changed, train_ids).loc[train_ids.to_numpy()]
+    pd.testing.assert_frame_equal(before, after)
+
+
+def test_rare_levels_use_training_counts_only():
+    from fraud_detect.features.tabular import RARE_LEVEL, collapse_rare_levels
+
+    ids = pd.Series(range(10))
+    frame = pd.DataFrame(
+        {
+            C.COMPLAINT_ID: range(10),
+            "state": ["ZZ"] * 5 + ["YY"] + [None] + ["YY", "YY", "XX"],
+        }
+    )
+    train_ids = ids[:7]  # ZZ x5, YY x1, None x1; test: YY, YY, XX
+    out, merged = collapse_rare_levels(frame, train_ids, ("state",), min_count=3)
+    assert out["state"].isna().tolist() == [False] * 6 + [True] + [False] * 3
+    present = out["state"].drop(index=6).tolist()
+    assert present == ["ZZ"] * 5 + [RARE_LEVEL] + [RARE_LEVEL] * 3
+    assert merged == {"state": ["XX", "YY"]}
+    # Test rows cannot rescue a level: YY has 3 rows overall but 1 in training.
+    kept = out.loc[out[C.COMPLAINT_ID].isin(train_ids), "state"]
+    assert kept.value_counts().drop(RARE_LEVEL, errors="ignore").min() >= 3

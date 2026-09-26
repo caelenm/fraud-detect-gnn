@@ -58,12 +58,13 @@ These are hard invariants. If a change would violate one, stop and ask.
 
 1. **Issue and Sub-issue never appear in any feature matrix, node feature, or edge.** They are used only to build the label.
 2. **No feature anywhere is derived from labels.** This includes company-level fraud rates and any other target encoding, even when computed on training data only.
-3. **Company-level statistics** (complaint counts, response-type rates, timely-response rate) **are computed from training complaints only.**
+3. **Company-level statistics** (complaint counts, response-type rates, timely-response rate) **are computed from training complaints only**, and per-complaint company features are leave-one-out for training complaints (a complaint never sees its own outcome).
 4. **The test set is frozen.** Both models are evaluated on exactly the same test Complaint IDs. Never tune hyperparameters, choose thresholds, select features, early-stop, or pick graph settings using the test set. Use a validation split carved from training data.
 5. **Near-duplicate narratives are removed before splitting**, so that the same or nearly the same text cannot appear in both train and test.
 6. **Similarity edges from test complaints point only to training complaints.**
 7. **GNN evaluation is inductive.** Test complaint nodes and their edges are excluded from the training graph and added only at evaluation time.
 8. **PCA on text embeddings is unsupervised, fit on training complaints only, and shared by both models.** Do not refit it per model.
+9. **Choose the best df-analyze model by its internal-CV tuning score** (`tuned_models_*.csv`), never by holdout results. df-analyze's `5-fold` results table refits models on test-set folds and must never be reported as a test result.
 
 ## Pipeline stages
 
@@ -76,9 +77,9 @@ Implemented (tested on synthetic data only so far):
 2. **`label`:** apply the reviewed allow-list in `configs/categories.yaml` (see the label rule in the README), keep the target products, and drop Issue/Sub-issue. Refuses to run until the file is confirmed and consistent with the data.
 3. **`sample`:** remove near-duplicate narratives (MinHash LSH), then draw a stratified 30k sample at the natural fraud rate.
 4. **`split`:** stratified 60/40 train/test split; save `train_ids.csv` / `test_ids.csv`. We own the split and pass it to df-analyze.
-5. **`embed`:** write the `text`/`label` parquet that `df-embed.py` expects and run it in the df-analyze environment.
+5. **`embed`:** write the `text`/`label` parquet that `df-embed.py` expects and embed it in the df-analyze environment: by default with `scripts/dfa/embed_on_device.py` (df-embed's code on the GPU, verified against its CPU path), or `df-embed.py` itself (`embed.runner: df-embed`).
 6. **`pca`:** 30 components, fit on training complaints only.
-7. **`features`:** tabular and company features (company statistics from training complaints only).
+7. **`features`:** tabular and company features. Company statistics come from training complaints only and are leave-one-out for training complaints; categorical levels with <20 training complaints (or unseen in training) are merged using training counts only.
 8. **`df_analyze_input`:** train/test tables without identifiers, in the order of the saved IDs.
 9. **`df_analyze`:** run df-analyze with `--df-train` / `--df-tests`, then **verify** that its exported `X_train`/`X_test`/`y_*` match our saved split row for row. If verification fails, stop and ask.
 
@@ -101,7 +102,7 @@ Ask before implementing anything that commits to one of these:
 
 Also ask before changing the label definition, the metrics, the embedding model, or the number of PCA components.
 
-Decided (ask before changing): region is **state only**; the sample is **30,000 complaints at the natural fraud rate**; the label is a **reviewed allow-list** (`configs/categories.yaml`, confirmed; ambiguous credit-report categories and lost/stolen instruments are negative, money-transfer "Unauthorized transactions or other transaction problem" is positive); target products include the 2023 renames "Credit card" and "Prepaid card" but not "Debt or credit management"; PCA is **fit on training complaints only**; Model A uses df-analyze classifiers **`lgbm` and `lr`** with df-analyze's default tuning metric (**accuracy**).
+Decided (ask before changing): region is **state only**; the sample is **30,000 complaints at the natural fraud rate**; the label is a **reviewed allow-list** (`configs/categories.yaml`, confirmed; ambiguous credit-report categories and lost/stolen instruments are negative, money-transfer "Unauthorized transactions or other transaction problem" is positive); target products include the 2023 renames "Credit card" and "Prepaid card" but not "Debt or credit management"; PCA is **fit on training complaints only**; Model A uses df-analyze classifiers **`lgbm`, `lr`, `catboost`, `gandalf`, `rf`, `knn`, `mlp`** (plus the automatic dummy) with df-analyze's default tuning metric (**accuracy**); CatBoost and GANDALF run on the GPU; embeddings are computed on the GPU with df-embed's own code (`scripts/dfa/embed_on_device.py`), checked against its CPU path.
 
 ## Code conventions
 
