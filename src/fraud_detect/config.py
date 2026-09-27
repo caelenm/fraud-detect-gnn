@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,6 +26,26 @@ def load_config(path: Path = DEFAULT_CONFIG) -> dict[str, Any]:
     """Load the pipeline config. Relative paths inside it are resolved against the
     repository root, not the current working directory."""
     return load_yaml(path)
+
+
+def apply_overrides(config: dict[str, Any], pairs: list[str]) -> dict[str, Any]:
+    """Apply `section.key=value` overrides (values parsed as YAML) to a copy of
+    `config`. Keys must already exist, so a typo cannot silently add a setting."""
+    out = copy.deepcopy(config)
+    for pair in pairs:
+        key, sep, raw = pair.partition("=")
+        if not sep or not key:
+            raise ValueError(f"Override {pair!r} must look like section.key=value")
+        *parents, leaf = key.split(".")
+        node = out
+        for part in parents:
+            if not isinstance(node.get(part), dict):
+                raise ValueError(f"Unknown config section {part!r} in {pair!r}")
+            node = node[part]
+        if leaf not in node:
+            raise ValueError(f"Unknown config key {key!r}")
+        node[leaf] = yaml.safe_load(raw)
+    return out
 
 
 @dataclass(frozen=True)

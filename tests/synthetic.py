@@ -157,3 +157,46 @@ def raw_csv_rows() -> list[dict[str, str]]:
         base | {"Complaint ID": "3", "Date received": "2017-01-01"},  # before range
         base | {"Complaint ID": "4", "Consumer complaint narrative": "  another  "},
     ]
+
+
+# (config name, df-analyze estimator class) for fake df-analyze results.
+FAKE_DFA_MODELS = [("dummy", "DummyClassifier"), ("lgbm", "LightGBMClassifier"),
+                   ("catboost", "CatBoostClassifier")]  # fmt: skip
+
+
+def fake_df_analyze_results(
+    y_test: np.ndarray, cv_scores: dict[tuple[str, str], float], seed: int = 0
+) -> tuple[list[dict], pd.DataFrame]:
+    """Invented df-analyze outputs: `prediction_results` entries and a
+    `tuned_models` table, one per (model, selection) key in `cv_scores`.
+    Probabilities are random noise plus a model-specific signal; they describe
+    no real model."""
+    rng = np.random.default_rng(seed)
+    classes = dict(FAKE_DFA_MODELS)
+    entries, tuned = [], []
+    for i, ((model, selection), score) in enumerate(cv_scores.items()):
+        signal = 0.0 if model == "dummy" else 0.15 * (i + 1)
+        p1 = np.clip(rng.uniform(0, 0.6, len(y_test)) + signal * y_test, 0, 1)
+        entries.append(
+            {
+                "model_cls": classes[model],
+                "selection": selection,
+                "embed_select_model": "linear" if selection == "embed" else None,
+                "metric": "Accuracy",
+                "score": score,
+                "probs_test": np.column_stack([1 - p1, p1]).tolist(),
+                "preds_test": (p1 > 0.5).astype(int).tolist(),
+            }
+        )
+        tuned.append(
+            {
+                "selection": selection,
+                "embed_selector": "linear" if selection == "embed" else "none",
+                "model": model,
+                "params": "{}",
+                "metric": "acc",
+                "score": score,
+                "test_idx": 0,
+            }
+        )
+    return entries, pd.DataFrame(tuned)

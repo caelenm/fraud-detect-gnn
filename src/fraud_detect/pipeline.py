@@ -22,7 +22,7 @@ from fraud_detect.config import REPO_ROOT, Paths, df_analyze_dir, load_yaml
 from fraud_detect.data import dedup, label, load, sample
 from fraud_detect.external import ExternalToolError, run_df_analyze_script
 from fraud_detect.features import tabular, text
-from fraud_detect.models import df_analyze
+from fraud_detect.models import df_analyze, df_analyze_report
 from fraud_detect.runlog import write_json
 
 
@@ -397,6 +397,53 @@ def verify_df_analyze_split(ctx: Context, outdir: Path) -> None:
     print("Verified: df-analyze's exported train/test rows match our saved split.")
 
 
+# --------------------------------------------------------------------------
+# Stage 10: Model A metrics report (test metrics; Model A chosen by CV score)
+# --------------------------------------------------------------------------
+MODEL_A_REPORT = "model_a_report.md"
+MODEL_A_METRICS = "model_a_metrics.csv"
+MODEL_A_SUMMARY = "model_a.json"
+
+
+def run_df_analyze_report(ctx: Context) -> None:
+    p = ctx.paths
+    latest = p.df_analyze_output_dir / "latest.txt"
+    test_path = p.df_analyze_input_dir / "test.parquet"
+    _require(latest, p.df_analyze_input_dir / "train.parquet", test_path)
+    stamp = latest.read_text(encoding="utf-8").strip()
+    outdir = p.df_analyze_output_dir / stamp
+    if not (outdir / "split_check.json").is_file():
+        raise StageError(
+            f"df-analyze run {outdir} has no split_check.json, so its test set was "
+            "never verified against ours. Rerun the df_analyze stage."
+        )
+    train = pd.read_parquet(p.df_analyze_input_dir / "train.parquet")
+    y_test = pd.read_parquet(test_path)[df_analyze.TARGET].to_numpy()
+    try:
+        predictions, tuned, options = df_analyze_report.load_run(outdir)
+        table = df_analyze_report.metrics_table(predictions, tuned, y_test)
+        model_a = df_analyze_report.choose_model_a(table)
+    except df_analyze_report.ReportError as e:
+        raise StageError(str(e)) from e
+    info = {
+        "run": stamp,
+        "htune_trials": options.get("htune_trials"),
+        "seed": options.get("seed"),
+        "n_train": len(train),
+        "n_test": len(y_test),
+        "test_positive_rate": float(y_test.mean()),
+    }
+    report = df_analyze_report.build_report(table, model_a, info)
+    model_a_dict = {k: v.item() if hasattr(v, "item") else v for k, v in model_a.items()}
+    summary = {**info, "model_a": model_a_dict}
+    for directory in (outdir, p.reports_dir):
+        table.to_csv(directory / MODEL_A_METRICS, index=False)
+        (directory / MODEL_A_REPORT).write_text(report, encoding="utf-8")
+        write_json(directory / MODEL_A_SUMMARY, summary)
+    print(report)
+    print(f"Saved the report to {p.reports_dir / MODEL_A_REPORT}")
+
+
 STAGES: list[Stage] = [
     Stage("load", "Read archives 2-4, keep narratives, report categories", run_load,
           lambda p: [p.complaints, p.reports_dir / "category_values.csv"]),
@@ -418,6 +465,10 @@ STAGES: list[Stage] = [
                      p.df_analyze_input_dir / "test.parquet", p.feature_groups]),
     Stage("df_analyze", "Run df-analyze (Model A) and verify its split", run_df_analyze,
           lambda p: [p.reports_dir / "df_analyze_split_check.json"]),
+    Stage("df_analyze_report", "Model A test metrics (PR-AUC); pick by CV score",
+          run_df_analyze_report,
+          lambda p: [p.reports_dir / MODEL_A_REPORT, p.reports_dir / MODEL_A_METRICS,
+                     p.reports_dir / MODEL_A_SUMMARY]),
 ]  # fmt: skip
 
 STAGE_NAMES = [s.name for s in STAGES]

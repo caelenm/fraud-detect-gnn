@@ -6,7 +6,13 @@ import argparse
 import sys
 from pathlib import Path
 
-from fraud_detect.config import DEFAULT_CONFIG, REPO_ROOT, get_paths, load_config
+from fraud_detect.config import (
+    DEFAULT_CONFIG,
+    REPO_ROOT,
+    apply_overrides,
+    get_paths,
+    load_config,
+)
 from fraud_detect.pipeline import STAGE_NAMES, STAGES, Context, StageError, get_stage
 from fraud_detect.runlog import new_run_dir, set_seeds, write_run_info
 
@@ -24,6 +30,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--force",
         action="store_true",
         help="rerun stages even if their outputs already exist",
+    )
+    parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="override a config value for this run, e.g. "
+        "--set df_analyze.htune_trials=10 (repeatable; recorded in the run log)",
     )
     parser.add_argument("--list", action="store_true", help="list stages and exit")
     return parser
@@ -53,7 +68,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 2
 
-    config = load_config(args.config)
+    try:
+        config = apply_overrides(load_config(args.config), args.overrides)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
     paths = get_paths(config)
     for d in (paths.interim_dir, paths.processed_dir, paths.reports_dir):
         d.mkdir(parents=True, exist_ok=True)
