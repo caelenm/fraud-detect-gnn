@@ -91,7 +91,7 @@ The company name itself is not a Model A feature; in the GNN it becomes the comp
 
 ### Model A: df-analyze
 
-We pass our own train and test tables to df-analyze (`--df-train` / `--df-tests`), so both models use exactly the same held-out complaints. Classifiers are LightGBM, logistic regression, CatBoost, GANDALF, random forest, kNN and an MLP, plus df-analyze's dummy baseline, which it adds automatically. CatBoost and GANDALF train on the GPU when df-analyze's environment can see CUDA; the others run on the CPU (df-analyze pins its MLP to the CPU). df-analyze runs its filter and embedded feature selection (wrapper selection is off) and tunes hyperparameters with Optuna, using its default tuning metric (accuracy) and 100 trials. Both are configurable in `configs/default.yaml`.
+We pass our own train and test tables to df-analyze (`--df-train` / `--df-tests`), so both models use exactly the same held-out complaints. Classifiers are LightGBM, logistic regression, CatBoost, GANDALF, random forest and kNN, plus df-analyze's dummy baseline, which it adds automatically. CatBoost and GANDALF train on the GPU when df-analyze's environment can see CUDA; the others run on the CPU. df-analyze's MLP is left out for now. df-analyze pins it to the CPU, where it uses up its 60-minute tuning limit on each of the 4 feature sets and adds about 4 hours per run. GANDALF is still included as a neural network. df-analyze runs its filter and embedded feature selection (wrapper selection is off) and tunes hyperparameters with Optuna, using its default tuning metric (accuracy) and 100 trials. Both are configurable in `configs/default.yaml`.
 
 df-analyze drops identifiers and re-encodes features in its exported `X_train.csv` / `X_test.csv`. After every run, the pipeline therefore checks that the export matches our saved split row for row: row counts, labels, and each text component (which df-analyze clips and rescales, so the check allows for that). The run fails if they do not match.
 
@@ -218,7 +218,7 @@ Every invocation writes its config, seed, git commit, and package versions to `o
 
 **GPU:** with `gpu.require: true` (the default), the `embed` and `df_analyze` stages first check that df-analyze's environment can see a CUDA GPU. They stop with troubleshooting steps if it can't, and record the GPU in `outputs/runs/<timestamp>/cuda_info_*.json`. Set `gpu.require: false` on machines without an NVIDIA GPU; embedding then runs on the CPU, which takes hours for 30,000 narratives.
 
-**Runtime notes:** long narratives are truncated to the model's 512-token limit. df-analyze's runtime grows with the number of classifiers and `htune_trials` (each Optuna trial for GANDALF and the MLP trains a neural network), so consider a pilot run with fewer trials first.
+**Runtime notes:** long narratives are truncated to the model's 512-token limit. df-analyze's runtime grows with the number of classifiers and `htune_trials` (each Optuna trial for GANDALF trains a neural network), so consider a pilot run with fewer trials first. Each model is tuned separately on each of df-analyze's 4 feature sets, and df-analyze stops each tuning run at a fixed time limit (15–60 minutes depending on the model). A full run on an RTX 4060 laptop therefore takes roughly 12–16 hours. Because of these time limits, the number of trials actually completed, and so the results, can depend on how fast the machine is.
 
 ## Development
 
