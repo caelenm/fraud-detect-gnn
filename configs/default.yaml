@@ -69,7 +69,9 @@ df_analyze:
   python: ">=3.13.11,<3.14"
   # dummy is added by df-analyze automatically. catboost and gandalf train on
   # the GPU when df-analyze sees CUDA; the others run on the CPU.
-  classifiers: [lgbm, lr, catboost, gandalf, rf, knn, mlp]
+  # mlp is left out for now: df-analyze pins it to the CPU, where it uses up its
+  # 60-minute tuning limit on each of the 4 feature sets (~4 h per run).
+  classifiers: [lgbm, lr, catboost, gandalf, rf, knn]
   htune_trials: 100
   htune_cls_metric: acc     # df-analyze default (accuracy)
   extra_args: []            # passed through to df-analyze.py verbatim
