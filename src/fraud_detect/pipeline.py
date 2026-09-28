@@ -15,7 +15,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
+import pyarrow.parquet as pq
 
 from fraud_detect import columns as C
 from fraud_detect.config import REPO_ROOT, Paths, df_analyze_dir, load_yaml
@@ -23,7 +25,8 @@ from fraud_detect.data import dedup, label, load, sample
 from fraud_detect.external import ExternalToolError, run_df_analyze_script
 from fraud_detect.features import tabular, text
 from fraud_detect.models import df_analyze, df_analyze_report, selection
-from fraud_detect.runlog import write_json
+from fraud_detect.report import web
+from fraud_detect.runlog import git_commit, write_json
 
 
 class StageError(RuntimeError):
@@ -506,6 +509,112 @@ def run_df_analyze_report(ctx: Context) -> None:
     print(f"Saved the report to {p.reports_dir / MODEL_A_REPORT}")
 
 
+# --------------------------------------------------------------------------
+# Stage 12: static HTML report (parameters, results, confidence cards)
+# --------------------------------------------------------------------------
+def web_report_path(p: Paths) -> Path:
+    return p.outputs_dir / "report" / "index.html"
+
+
+def run_web_report(ctx: Context) -> None:
+    p = ctx.paths
+    summary_path = p.reports_dir / MODEL_A_SUMMARY
+    test_path = p.df_analyze_input_dir / "test.parquet"
+    train_path = p.df_analyze_input_dir / "train.parquet"
+    _require(summary_path, p.reports_dir / MODEL_A_METRICS, p.test_ids, p.sample,
+             test_path, train_path, p.embeddings)  # fmt: skip
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    stamp, outdir = _latest_verified_run(p)
+    if summary["run"] != stamp:
+        raise StageError(
+            f"{summary_path} describes df-analyze run {summary['run']}, but the latest "
+            f"run is {stamp}. Rerun `uv run run.py --from select_model`."
+        )
+    cfg = ctx.config["web_report"]
+    try:
+        predictions, _, _ = df_analyze_report.load_run(outdir)
+        entry = web.find_entry(
+            predictions, summary["model_a"], df_analyze_report.MODEL_NAMES
+        )
+        params = web.parse_params(entry["params"])
+    except (df_analyze_report.ReportError, web.WebReportError) as e:
+        raise StageError(str(e)) from e
+
+    # Test rows are in the order of our saved test IDs (verified by stage 9).
+    test_ids = _read_ids(p.test_ids)
+    y_test = pd.read_parquet(test_path)[df_analyze.TARGET].to_numpy()
+    cols = [C.COMPLAINT_ID, C.DATE_RECEIVED, C.PRODUCT, C.STATE, C.NARRATIVE, C.LABEL]
+    meta = (
+        pd.read_parquet(p.sample, columns=cols)
+        .set_index(C.COMPLAINT_ID)
+        .loc[test_ids.to_numpy()]
+        .reset_index()
+    )
+    if not np.array_equal(meta[C.LABEL].to_numpy(), y_test):
+        raise StageError("Test labels in sample.parquet and test.parquet disagree")
+    probs = np.asarray(entry["probs_test"], dtype=float)
+    try:
+        samples = web.confidence_table(
+            probs[:, 1],
+            np.asarray(entry["preds_test"]),
+            y_test,
+            meta.drop(columns=C.LABEL),
+        )
+    except web.WebReportError as e:
+        raise StageError(str(e)) from e
+
+    metrics = pd.read_csv(p.reports_dir / MODEL_A_METRICS)
+    budget_path = p.reports_dir / TUNING_BUDGET
+    budget = pd.read_csv(budget_path) if budget_path.is_file() else None
+    train = pd.read_parquet(train_path)
+    pca_cols = [c for c in train.columns if c.startswith(text.PCA_PREFIX)]
+    n_tabular = train.shape[1] - 1 - len(pca_cols)  # minus target and text
+    embed_dim = len(pq.read_schema(p.embeddings).names) - 1  # minus Complaint ID
+    dfa = ctx.config["df_analyze"]
+    feature_sets = sorted(
+        {web.feature_set_label(web.feature_set_key(s, e))
+         for s, e in zip(metrics["selection"], metrics["embed_selector"], strict=True)}
+    )  # fmt: skip
+    run_config = [
+        ("Seed", str(summary["seed"])),
+        ("Complaints", f"{summary['n_train']:,} train · {summary['n_test']:,} test"),
+        ("Fraud rate", f"{train[df_analyze.TARGET].mean():.1%} train · "
+                       f"{summary['test_positive_rate']:.1%} test"),
+        ("Text features", f"{len(pca_cols)} PCA components of {embed_dim}-dim "
+                          "narrative embeddings"),
+        ("Tabular features", f"{n_tabular} (product, region, company, metadata)"),
+        ("Classifiers", ", ".join(web.model_label(m) for m in dfa["classifiers"])
+                        + ", plus dummy baseline"),
+        ("Tuning", f"up to {dfa['htune_trials']} trials per model · "
+                   f"metric {dfa['htune_cls_metric']}"),
+        ("Feature sets", ", ".join(feature_sets)),
+        ("Model choice", f"{summary['cv_folds']}-fold shared CV on train, PR-AUC"),
+        ("df-analyze commit", str(dfa.get("commit") or "not pinned")[:12]),
+    ]  # fmt: skip
+    commit = git_commit(REPO_ROOT)
+    inputs = web.ReportInputs(
+        summary=summary,
+        metrics=metrics,
+        params=params,
+        n_features=len(entry["selected_cols"]),
+        samples=samples,
+        header={
+            "build": stamp,
+            "generated": datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC"),
+            "git_commit": commit[:10] if commit else "unknown",
+            "run": stamp,
+        },
+        run_config=run_config,
+        budget=budget,
+        n_samples=int(cfg["n_samples"]),
+        excerpt_chars=int(cfg["excerpt_chars"]),
+    )
+    out = web_report_path(p)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(web.render(inputs), encoding="utf-8")
+    print(f"Saved the web report to {out}")
+
+
 STAGES: list[Stage] = [
     Stage("load", "Read archives 2-4, keep narratives, report categories", run_load,
           lambda p: [p.complaints, p.reports_dir / "category_values.csv"]),
@@ -534,6 +643,8 @@ STAGES: list[Stage] = [
           run_df_analyze_report,
           lambda p: [p.reports_dir / MODEL_A_REPORT, p.reports_dir / MODEL_A_METRICS,
                      p.reports_dir / MODEL_A_SUMMARY]),
+    Stage("web_report", "HTML report: parameters, results, confidence cards",
+          run_web_report, lambda p: [web_report_path(p)]),
 ]  # fmt: skip
 
 STAGE_NAMES = [s.name for s in STAGES]

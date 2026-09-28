@@ -225,6 +225,9 @@ Each stage can also be run on its own with `uv run scripts/NN_<stage>.py`.
 | 9 | `df_analyze` | Runs df-analyze (Model A) and checks its exported split against ours | `outputs/df_analyze/<timestamp>/`, `outputs/reports/df_analyze_split_check.json` |
 | 10 | `select_model` | Refits every tuned df-analyze combination on the same 5 folds of the training set and scores it from probabilities (PR-AUC, AUROC, balanced accuracy, Brier); records each model's tuning budget | `outputs/reports/model_selection_cv.csv`, `tuning_budget.csv` |
 | 11 | `df_analyze_report` | Test-set metrics for every tuned df-analyze model, computed from its saved probabilities (PR-AUC, AUROC, fraud-class F1/precision/recall, accuracy, balanced accuracy); picks Model A by shared-CV PR-AUC only | `outputs/reports/model_a_report.md`, `model_a_metrics.csv`, `model_a.json` |
+| 12 | `web_report` | One self-contained HTML page: Model A's configuration, tuned hyperparameters, test metrics and confusion matrix; every tuned model; the tuning budget; the run configuration; and two scrollable cards of Model A's most and least confident test predictions. Placeholders are reserved for Model B and inter-model agreement | `outputs/report/index.html` |
+
+**Viewing the web report.** It needs no server. On Windows with WSL, run `explorer.exe outputs/report/index.html` from the repo folder, or open `\\wsl.localhost\<distro>\home\<user>\...\fraud-detect-gnn\outputs\report\index.html` in a browser. On Linux or macOS, open the file directly. The page contains complaint narratives: share it only with the group, the same way as the bundle, and never commit or post it. Confidence is the probability the model's output gives the class it predicted, so it runs from 0.5 to 1.0. Very small and very large probabilities are shown in scientific notation (e.g. `1 − 6.4e-07`) so they stay distinguishable.
 
 **The label rule is already reviewed** (`configs/categories.yaml`, `confirmed: true`). If the data or the rule changes, rerun `load`, check `outputs/reports/category_values.csv`, and make sure every keyword candidate in the target products is listed as `positive` or `reviewed_negative`. The `label` stage explains exactly what is missing if the file is not consistent with the data.
 
@@ -232,7 +235,7 @@ Every invocation writes its config, seed, git commit, and package versions to `o
 
 **GPU:** with `gpu.require: true` (the default), the `embed` and `df_analyze` stages first check that df-analyze's environment can see a CUDA GPU. They stop with troubleshooting steps if it can't, and record the GPU in `outputs/runs/<timestamp>/cuda_info_*.json`. Set `gpu.require: false` on machines without an NVIDIA GPU; embedding then runs on the CPU, which takes hours for 30,000 narratives.
 
-**Runtime notes:** long narratives are truncated to the model's 512-token limit. df-analyze's runtime grows with the number of classifiers and `htune_trials` (each Optuna trial for GANDALF trains a neural network), so consider a pilot run with fewer trials first. Each model is tuned separately on each of df-analyze's 4 feature sets, and df-analyze stops each tuning run at a fixed time limit (15–60 minutes depending on the model). A full run on an RTX 4060 laptop therefore takes roughly 12–16 hours, plus under an hour for `select_model`. Because of these time limits, the number of trials actually completed, and so the results, can depend on how fast the machine is.
+**Runtime notes:** long narratives are truncated to the model's 512-token limit. df-analyze's runtime grows with the number of classifiers and `htune_trials` (each Optuna trial for GANDALF trains a neural network), so consider a pilot run with fewer trials first. Each model is tuned separately on each of df-analyze's 4 feature sets, and df-analyze stops each tuning run at a fixed time limit (15–60 minutes depending on the model). In practice most runs stop earlier, after 15 trials without improvement (once 50 have run). The full run of 2026-09-28 on an RTX 4060 laptop (WSL2) took 4 h 07 min for df-analyze plus 17 min for `select_model`. The worst case, with every model hitting its time limit, is about 12–16 hours. Because of these time limits, the number of trials actually completed, and so the results, can depend on how fast the machine is.
 
 ### Sharing outputs with the group
 
@@ -286,7 +289,8 @@ fraud-detect-gnn/
 │   ├── cli.py           # command line shared by run.py and scripts/
 │   ├── data/            # loading, labelling, deduplication, sampling
 │   ├── features/        # embeddings, PCA, tabular features
-│   ├── models/          # df-analyze (Model A); GNN later
+│   ├── models/          # df-analyze (Model A), fair model selection; GNN later
+│   ├── report/          # static HTML report (web.py, report.css)
 │   ├── external.py      # runs df-analyze scripts in their own environment
 │   ├── artifacts.py     # packing and unpacking output bundles
 │   └── runlog.py        # seeds and run metadata

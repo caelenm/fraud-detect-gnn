@@ -90,3 +90,8 @@ select_model:
   # the training set and scored from its probabilities; Model A is the one
   # with the highest mean PR-AUC (the headline metric). The test set is not used.
   n_folds: 5
+
+web_report:
+  # outputs/report/index.html. Contains narratives: never commit or post it.
+  n_samples: 25        # complaints per confidence card (most / least confident)
+  excerpt_chars: 600   # narrative characters shown per complaint

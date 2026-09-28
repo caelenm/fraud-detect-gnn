@@ -202,6 +202,19 @@ def fake_df_analyze_results(
     return entries, pd.DataFrame(tuned)
 
 
+def fake_test_meta(n: int) -> pd.DataFrame:
+    """Invented test-complaint details for the web report, in test order."""
+    return pd.DataFrame(
+        {
+            C.COMPLAINT_ID: [f"SYN-{i:04d}" for i in range(n)],
+            C.DATE_RECEIVED: pd.date_range("2020-01-01", periods=n, freq="D"),
+            C.PRODUCT: ["Debt collection"] * n,
+            C.STATE: [FAKE_STATES[i % len(FAKE_STATES)] for i in range(n)],
+            C.NARRATIVE: [fake_narrative(i) for i in range(n)],
+        }
+    )
+
+
 def fake_shared_cv(
     pr_auc: dict[tuple[str, str], float], std: float = 0.01
 ) -> pd.DataFrame:

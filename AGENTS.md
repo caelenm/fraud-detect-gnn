@@ -92,13 +92,14 @@ Implemented (tested on synthetic data only so far):
 9. **`df_analyze`:** run df-analyze with `--df-train` / `--df-tests`, then **verify** that its exported `X_train`/`X_test`/`y_*` match our saved split row for row. If verification fails, stop and ask.
 10. **`select_model`:** in df-analyze's environment (`scripts/dfa/cv_select.py`), refit every tuned combination with df-analyze's `refit_tuned` on the same stratified folds of the training set, and score the held-out folds from probabilities (PR-AUC, AUROC, balanced accuracy, Brier). Also parse each model's tuning budget (trials completed, time-limit stops) from df-analyze's log. Stops if any model cannot be scored.
 11. **`df_analyze_report`:** compute test metrics (PR-AUC headline, AUROC, fraud-class F1/precision/recall) for every tuned combination from df-analyze's saved test probabilities, and choose Model A by shared-CV PR-AUC only (invariant 9). The dummy is never Model A.
+12. **`web_report`:** write `outputs/report/index.html`, a self-contained static page (no scripts, no external requests) built by `src/fraud_detect/report/web.py`. Its confidence cards show only **test** complaints. Confidence is the probability the model's output gives its predicted class. Every value inserted into the page must be HTML-escaped. The page contains narratives, so it lives under `outputs/` and is never committed. When Model B exists, fill its reserved sections, which include inter-model agreement, rather than making a second page.
 
 Still to do (tracked as GitHub issues):
 
-12. **Graph:** build a PyG `HeteroData` graph with `complaint`, `company`, `product`, and `region` (state) nodes, reverse edges, and optional complaint kNN edges built with approximate nearest-neighbour search and a cap on edges per node.
-13. **Model B:** train heterogeneous GraphSAGE with neighbour sampling, class-weighted BCE, and early stopping on validation. Train the graph-free control with the same code path and edges removed. Use at least 5 seeds.
-14. **Evaluate:** compute PR-AUC (headline), F1, recall, and AUROC on the frozen test IDs, reported as mean ± standard deviation across seeds.
-15. **Explain:** SHAP on the best df-analyze model; GNNExplainer, group permutation importance, and edge-type ablations for the GNN; a feature-group comparison table across both models.
+13. **Graph:** build a PyG `HeteroData` graph with `complaint`, `company`, `product`, and `region` (state) nodes, reverse edges, and optional complaint kNN edges built with approximate nearest-neighbour search and a cap on edges per node.
+14. **Model B:** train heterogeneous GraphSAGE with neighbour sampling, class-weighted BCE, and early stopping on validation. Train the graph-free control with the same code path and edges removed. Use at least 5 seeds.
+15. **Evaluate:** compute PR-AUC (headline), F1, recall, and AUROC on the frozen test IDs, reported as mean ± standard deviation across seeds.
+16. **Explain:** SHAP on the best df-analyze model; GNNExplainer, group permutation importance, and edge-type ablations for the GNN; a feature-group comparison table across both models.
 
 ## Open decisions: do not decide these unilaterally
 
