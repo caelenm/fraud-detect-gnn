@@ -22,7 +22,7 @@ from fraud_detect.config import REPO_ROOT, Paths, df_analyze_dir, load_yaml
 from fraud_detect.data import dedup, label, load, sample
 from fraud_detect.external import ExternalToolError, run_df_analyze_script
 from fraud_detect.features import tabular, text
-from fraud_detect.models import df_analyze, df_analyze_report
+from fraud_detect.models import df_analyze, df_analyze_report, selection
 from fraud_detect.runlog import write_json
 
 
@@ -397,8 +397,67 @@ def verify_df_analyze_split(ctx: Context, outdir: Path) -> None:
     print("Verified: df-analyze's exported train/test rows match our saved split.")
 
 
+def _latest_verified_run(p: Paths) -> tuple[str, Path]:
+    """The latest df-analyze run, which must have passed split verification."""
+    latest = p.df_analyze_output_dir / "latest.txt"
+    _require(latest)
+    stamp = latest.read_text(encoding="utf-8").strip()
+    outdir = p.df_analyze_output_dir / stamp
+    if not (outdir / "split_check.json").is_file():
+        raise StageError(
+            f"df-analyze run {outdir} has no split_check.json, so its test set was "
+            "never verified against ours. Rerun the df_analyze stage."
+        )
+    return stamp, outdir
+
+
 # --------------------------------------------------------------------------
-# Stage 10: Model A metrics report (test metrics; Model A chosen by CV score)
+# Stage 10: score every tuned model with one shared CV on the training set
+# --------------------------------------------------------------------------
+CV_SELECT_RUNNER = REPO_ROOT / "scripts" / "dfa" / "cv_select.py"
+SHARED_CV = "model_selection_cv.csv"
+TUNING_BUDGET = "tuning_budget.csv"
+
+
+def run_select_model(ctx: Context) -> None:
+    """df-analyze's tuning scores are not comparable across models, so refit
+    every tuned combination on the same folds of the training set and score it
+    from its probabilities (see scripts/dfa/cv_select.py). The test set is not
+    read. The report stage chooses Model A from this table."""
+    p = ctx.paths
+    stamp, outdir = _latest_verified_run(p)
+    export_dir = df_analyze.find_export_dir(outdir)
+    cfg = ctx.config["select_model"]
+    cv_path = outdir / SHARED_CV
+    cv_path.unlink(missing_ok=True)
+    args = [
+        "--export-dir", str(export_dir.resolve()),
+        "--out", str(cv_path.resolve()),
+        "--folds", str(cfg["n_folds"]),
+        "--seed", str(ctx.seed),
+    ]  # fmt: skip
+    _run_dfa(ctx, str(CV_SELECT_RUNNER), args, outdir / "model_selection.log")
+    cv = pd.read_csv(cv_path, keep_default_na=False, na_values=[""])
+    log = (outdir / "df_analyze.log").read_text(encoding="utf-8", errors="replace")
+    budget = selection.parse_tuning_budget(log)
+    budget.to_csv(outdir / TUNING_BUDGET, index=False)
+    for name, frame in ((SHARED_CV, cv), (TUNING_BUDGET, budget)):
+        frame.to_csv(p.reports_dir / name, index=False)
+    errors = cv[cv["error"].fillna("").astype(str) != ""]
+    if not errors.empty:
+        raise StageError(
+            "These tuned models could not be cross-validated, so the models cannot "
+            f"be compared fairly:\n{errors[['model_cls', 'selection', 'error']]}\n"
+            f"See {outdir / 'model_selection.log'}; fix and rerun "
+            "`uv run run.py --from select_model`."
+        )
+    shown = cv[["model_cls", "selection", "embed_selector", "pr_auc_mean", "pr_auc_std"]]
+    print(shown.sort_values("pr_auc_mean", ascending=False).to_string(index=False))
+    print(f"Saved shared-CV scores for run {stamp} to {p.reports_dir / SHARED_CV}")
+
+
+# --------------------------------------------------------------------------
+# Stage 11: Model A metrics report (Model A chosen by shared-CV PR-AUC)
 # --------------------------------------------------------------------------
 MODEL_A_REPORT = "model_a_report.md"
 MODEL_A_METRICS = "model_a_metrics.csv"
@@ -407,21 +466,22 @@ MODEL_A_SUMMARY = "model_a.json"
 
 def run_df_analyze_report(ctx: Context) -> None:
     p = ctx.paths
-    latest = p.df_analyze_output_dir / "latest.txt"
     test_path = p.df_analyze_input_dir / "test.parquet"
-    _require(latest, p.df_analyze_input_dir / "train.parquet", test_path)
-    stamp = latest.read_text(encoding="utf-8").strip()
-    outdir = p.df_analyze_output_dir / stamp
-    if not (outdir / "split_check.json").is_file():
+    _require(p.df_analyze_input_dir / "train.parquet", test_path)
+    stamp, outdir = _latest_verified_run(p)
+    if not (outdir / SHARED_CV).is_file():
         raise StageError(
-            f"df-analyze run {outdir} has no split_check.json, so its test set was "
-            "never verified against ours. Rerun the df_analyze stage."
+            f"df-analyze run {outdir} has no {SHARED_CV}. Run the select_model stage "
+            "first so every model is scored with the same cross-validation."
         )
     train = pd.read_parquet(p.df_analyze_input_dir / "train.parquet")
     y_test = pd.read_parquet(test_path)[df_analyze.TARGET].to_numpy()
+    shared_cv = pd.read_csv(outdir / SHARED_CV, keep_default_na=False, na_values=[""])
+    budget_path = outdir / TUNING_BUDGET
+    budget = pd.read_csv(budget_path) if budget_path.is_file() else None
     try:
         predictions, tuned, options = df_analyze_report.load_run(outdir)
-        table = df_analyze_report.metrics_table(predictions, tuned, y_test)
+        table = df_analyze_report.metrics_table(predictions, tuned, y_test, shared_cv)
         model_a = df_analyze_report.choose_model_a(table)
     except df_analyze_report.ReportError as e:
         raise StageError(str(e)) from e
@@ -432,8 +492,10 @@ def run_df_analyze_report(ctx: Context) -> None:
         "n_train": len(train),
         "n_test": len(y_test),
         "test_positive_rate": float(y_test.mean()),
+        "cv_folds": int(ctx.config["select_model"]["n_folds"]),
+        "selection_rule": "highest mean shared-CV PR-AUC on the training set",
     }
-    report = df_analyze_report.build_report(table, model_a, info)
+    report = df_analyze_report.build_report(table, model_a, info, budget)
     model_a_dict = {k: v.item() if hasattr(v, "item") else v for k, v in model_a.items()}
     summary = {**info, "model_a": model_a_dict}
     for directory in (outdir, p.reports_dir):
@@ -465,7 +527,10 @@ STAGES: list[Stage] = [
                      p.df_analyze_input_dir / "test.parquet", p.feature_groups]),
     Stage("df_analyze", "Run df-analyze (Model A) and verify its split", run_df_analyze,
           lambda p: [p.reports_dir / "df_analyze_split_check.json"]),
-    Stage("df_analyze_report", "Model A test metrics (PR-AUC); pick by CV score",
+    Stage("select_model", "Score every tuned model with one shared CV (train only)",
+          run_select_model,
+          lambda p: [p.reports_dir / SHARED_CV, p.reports_dir / TUNING_BUDGET]),
+    Stage("df_analyze_report", "Model A test metrics (PR-AUC); pick by shared CV",
           run_df_analyze_report,
           lambda p: [p.reports_dir / MODEL_A_REPORT, p.reports_dir / MODEL_A_METRICS,
                      p.reports_dir / MODEL_A_SUMMARY]),
