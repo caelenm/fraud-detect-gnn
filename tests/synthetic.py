@@ -200,3 +200,26 @@ def fake_df_analyze_results(
             }
         )
     return entries, pd.DataFrame(tuned)
+
+
+def fake_shared_cv(
+    pr_auc: dict[tuple[str, str], float], std: float = 0.01
+) -> pd.DataFrame:
+    """Invented output of scripts/dfa/cv_select.py, one row per (model,
+    selection) key: cross-validated scores that describe no real model."""
+    classes = dict(FAKE_DFA_MODELS)
+    return pd.DataFrame(
+        [
+            {
+                "model_cls": classes[model],
+                "selection": selection,
+                "embed_selector": "linear" if selection == "embed" else "",
+                "pr_auc_mean": score,
+                "pr_auc_std": std,
+                "auroc_mean": 0.5 + score / 2,
+                "bal_acc_mean": 0.5,
+                "error": "",
+            }
+            for (model, selection), score in pr_auc.items()
+        ]
+    )

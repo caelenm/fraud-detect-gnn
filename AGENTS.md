@@ -71,7 +71,8 @@ These are hard invariants. If a change would violate one, stop and ask.
 6. **Similarity edges from test complaints point only to training complaints.**
 7. **GNN evaluation is inductive.** Test complaint nodes and their edges are excluded from the training graph and added only at evaluation time.
 8. **PCA on text embeddings is unsupervised, fit on training complaints only, and shared by both models.** Do not refit it per model.
-9. **Choose the best df-analyze model by its internal-CV tuning score** (`tuned_models_*.csv`), never by holdout results. df-analyze's `5-fold` results table refits models on test-set folds and must never be reported as a test result.
+9. **Choose the best df-analyze model by the shared cross-validation on the training set** (`select_model` stage, `model_selection_cv.csv`: every tuned combination refit on the same folds and scored by PR-AUC from probabilities), never by holdout results. **Never by df-analyze's own tuning score** (`tuned_models_*.csv`): it is not comparable across models. df-analyze swaps AUROC for balanced accuracy on hard predictions for most models, and scores GANDALF on one validation split through a separate code path. df-analyze's `5-fold` results table refits models on test-set folds and must never be reported as a test result.
+10. **Every model in a comparison is scored with the same procedure and metric.** If a model cannot be scored that way, stop; do not compare it on a different basis. Before trusting a score produced by an external tool, check in its source code how that score is computed.
 
 ## Pipeline stages
 
@@ -89,14 +90,15 @@ Implemented (tested on synthetic data only so far):
 7. **`features`:** tabular and company features. Company statistics come from training complaints only and are leave-one-out for training complaints; categorical levels with <20 training complaints (or unseen in training) are merged using training counts only.
 8. **`df_analyze_input`:** train/test tables without identifiers, in the order of the saved IDs.
 9. **`df_analyze`:** run df-analyze with `--df-train` / `--df-tests`, then **verify** that its exported `X_train`/`X_test`/`y_*` match our saved split row for row. If verification fails, stop and ask.
-10. **`df_analyze_report`:** compute test metrics (PR-AUC headline, AUROC, fraud-class F1/precision/recall) for every tuned combination from df-analyze's saved test probabilities, and choose Model A by internal-CV tuning score only (invariant 9); the dummy is never Model A.
+10. **`select_model`:** in df-analyze's environment (`scripts/dfa/cv_select.py`), refit every tuned combination with df-analyze's `refit_tuned` on the same stratified folds of the training set, and score the held-out folds from probabilities (PR-AUC, AUROC, balanced accuracy, Brier). Also parse each model's tuning budget (trials completed, time-limit stops) from df-analyze's log. Stops if any model cannot be scored.
+11. **`df_analyze_report`:** compute test metrics (PR-AUC headline, AUROC, fraud-class F1/precision/recall) for every tuned combination from df-analyze's saved test probabilities, and choose Model A by shared-CV PR-AUC only (invariant 9). The dummy is never Model A.
 
 Still to do (tracked as GitHub issues):
 
-11. **Graph:** build a PyG `HeteroData` graph with `complaint`, `company`, `product`, and `region` (state) nodes, reverse edges, and optional complaint kNN edges built with approximate nearest-neighbour search and a cap on edges per node.
-12. **Model B:** train heterogeneous GraphSAGE with neighbour sampling, class-weighted BCE, and early stopping on validation. Train the graph-free control with the same code path and edges removed. Use at least 5 seeds.
-13. **Evaluate:** compute PR-AUC (headline), F1, recall, and AUROC on the frozen test IDs, reported as mean ± standard deviation across seeds.
-14. **Explain:** SHAP on the best df-analyze model; GNNExplainer, group permutation importance, and edge-type ablations for the GNN; a feature-group comparison table across both models.
+12. **Graph:** build a PyG `HeteroData` graph with `complaint`, `company`, `product`, and `region` (state) nodes, reverse edges, and optional complaint kNN edges built with approximate nearest-neighbour search and a cap on edges per node.
+13. **Model B:** train heterogeneous GraphSAGE with neighbour sampling, class-weighted BCE, and early stopping on validation. Train the graph-free control with the same code path and edges removed. Use at least 5 seeds.
+14. **Evaluate:** compute PR-AUC (headline), F1, recall, and AUROC on the frozen test IDs, reported as mean ± standard deviation across seeds.
+15. **Explain:** SHAP on the best df-analyze model; GNNExplainer, group permutation importance, and edge-type ablations for the GNN; a feature-group comparison table across both models.
 
 ## Open decisions: do not decide these unilaterally
 
@@ -110,7 +112,7 @@ Ask before implementing anything that commits to one of these:
 
 Also ask before changing the label definition, the metrics, the embedding model, or the number of PCA components.
 
-Decided (ask before changing): region is **state only**; the sample is **30,000 complaints at the natural fraud rate**; the label is a **reviewed allow-list** (`configs/categories.yaml`, confirmed; ambiguous credit-report categories and lost/stolen instruments are negative, money-transfer "Unauthorized transactions or other transaction problem" is positive); target products include the 2023 renames "Credit card" and "Prepaid card" but not "Debt or credit management"; PCA is **fit on training complaints only**; Model A uses df-analyze classifiers **`lgbm`, `lr`, `catboost`, `gandalf`, `rf`, `knn`** (plus the automatic dummy; `mlp` is dropped for now because it is CPU-only in df-analyze and adds about 4 h per run) tuned on **AUROC** (`htune_cls_metric: auroc`, plus `--filter-pred-classify auroc`; df-analyze's accuracy default suits the ~16% positive rate poorly, and it offers no PR-AUC); CatBoost and GANDALF run on the GPU; embeddings are computed on the GPU with df-embed's own code (`scripts/dfa/embed_on_device.py`), checked against its CPU path.
+Decided (ask before changing): region is **state only**; the sample is **30,000 complaints at the natural fraud rate**; the label is a **reviewed allow-list** (`configs/categories.yaml`, confirmed; ambiguous credit-report categories and lost/stolen instruments are negative, money-transfer "Unauthorized transactions or other transaction problem" is positive); target products include the 2023 renames "Credit card" and "Prepaid card" but not "Debt or credit management"; PCA is **fit on training complaints only**; Model A uses df-analyze classifiers **`lgbm`, `lr`, `catboost`, `gandalf`, `rf`, `knn`** (plus the automatic dummy; `mlp` is dropped for now because it is CPU-only in df-analyze and adds about 4 h per run) tuned on **balanced accuracy** for every model (`htune_cls_metric: bal-acc`; not `acc`, which suits the ~16% positive rate poorly; not `auroc`, which df-analyze applies inconsistently across models), with `--filter-pred-classify auroc` for the prediction-based feature filter; Model A is **chosen by shared 5-fold CV PR-AUC on the training set** (`select_model`), not by df-analyze's tuning score; CatBoost and GANDALF run on the GPU; embeddings are computed on the GPU with df-embed's own code (`scripts/dfa/embed_on_device.py`), checked against its CPU path.
 
 ## Code conventions
 

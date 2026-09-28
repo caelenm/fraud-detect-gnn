@@ -1,4 +1,4 @@
-"""Model A metrics report: metrics, selection by CV score only, and checks.
+"""Model A metrics report: metrics, selection by shared-CV PR-AUC only, and checks.
 
 df-analyze outputs are faked with invented probabilities (tests/synthetic.py)
 and, where files are needed, written to pytest's tmp_path.
@@ -11,7 +11,7 @@ import json
 import numpy as np
 import pandas as pd
 import pytest
-from synthetic import fake_df_analyze_results
+from synthetic import fake_df_analyze_results, fake_shared_cv
 
 from fraud_detect.config import apply_overrides
 from fraud_detect.models.df_analyze_report import (
@@ -42,40 +42,55 @@ def test_binary_metrics_by_hand():
     assert m["auroc"] == pytest.approx(5 / 6)
 
 
-def test_model_a_is_chosen_by_cv_score_not_test_metrics():
-    # catboost has the higher CV score; the fake data gives lgbm (listed later)
-    # a stronger test signal.
-    cv = {("dummy", "none"): 0.80, ("catboost", "none"): 0.86, ("lgbm", "none"): 0.84}
-    entries, tuned = fake_df_analyze_results(Y_TEST, cv)
-    table = metrics_table(entries, tuned, Y_TEST)
-    assert table["cv_score"].is_monotonic_decreasing
+def test_model_a_is_chosen_by_shared_cv_not_tuning_score_or_test_metrics():
+    # catboost has the best shared-CV PR-AUC. lgbm has the higher df-analyze
+    # tuning score (like GANDALF's incomparable AUROC) and, in the fake data
+    # (listed later), a stronger test signal. Neither may decide.
+    tuning = {("dummy", "none"): 0.80, ("catboost", "none"): 0.70, ("lgbm", "none"): 0.91}
+    shared = {("dummy", "none"): 0.16, ("catboost", "none"): 0.62, ("lgbm", "none"): 0.60}
+    entries, tuned = fake_df_analyze_results(Y_TEST, tuning)
+    table = metrics_table(entries, tuned, Y_TEST, fake_shared_cv(shared))
+    assert table["cv_pr_auc"].is_monotonic_decreasing
     a = choose_model_a(table)
     assert a["model"] == "catboost"
     lgbm = table[table["model"] == "lgbm"].iloc[0]
+    assert lgbm["tuning_score"] > a["tuning_score"]  # higher tuning score, not chosen
     assert lgbm["pr_auc"] > a["pr_auc"]  # better on test, still not chosen
 
 
 def test_dummy_is_never_model_a_and_ties_break_in_fixed_order():
-    cv = {
+    keys = {
         ("dummy", "none"): 0.90,
         ("lgbm", "embed"): 0.85,
         ("lgbm", "none"): 0.85,
         ("catboost", "pred"): 0.85,
     }
-    entries, tuned = fake_df_analyze_results(Y_TEST, cv)
-    table = metrics_table(entries, tuned, Y_TEST)
+    entries, tuned = fake_df_analyze_results(Y_TEST, keys)
+    table = metrics_table(entries, tuned, Y_TEST, fake_shared_cv(keys))
     a = choose_model_a(table)
-    # Tie at 0.85: model name first (catboost < lgbm), then selection order.
+    # Tie at 0.85 (same std): model name first (catboost < lgbm), then selection.
     assert (a["model"], a["selection"]) == ("catboost", "pred")
     ordered = list(zip(table["model"], table["selection"], strict=True))
     assert ordered.index(("lgbm", "none")) < ordered.index(("lgbm", "embed"))
+
+
+def test_every_model_must_have_a_shared_cv_score():
+    keys = {("dummy", "none"): 0.8, ("lgbm", "none"): 0.85, ("catboost", "none"): 0.84}
+    entries, tuned = fake_df_analyze_results(Y_TEST, keys)
+    partial = fake_shared_cv({k: v for k, v in keys.items() if k[0] != "catboost"})
+    with pytest.raises(ReportError, match="no shared cross-validation"):
+        metrics_table(entries, tuned, Y_TEST, partial)
+    failed = fake_shared_cv(keys)
+    failed.loc[1, "error"] = "RuntimeError: CUDA out of memory"
+    with pytest.raises(ReportError, match="could not be cross-validated"):
+        metrics_table(entries, tuned, Y_TEST, failed)
 
 
 def test_dummy_pr_auc_is_close_to_the_positive_rate():
     cv = {("dummy", "none"): 0.8, ("lgbm", "none"): 0.85}
     entries, tuned = fake_df_analyze_results(Y_TEST, cv)
     entries[0]["probs_test"] = [[0.8, 0.2]] * len(Y_TEST)  # constant, like dummy
-    table = metrics_table(entries, tuned, Y_TEST)
+    table = metrics_table(entries, tuned, Y_TEST, fake_shared_cv(cv))
     dummy = table[table["model"] == "dummy"].iloc[0]
     assert dummy["pr_auc"] == pytest.approx(Y_TEST.mean())
     assert dummy["auroc"] == pytest.approx(0.5)
@@ -96,7 +111,7 @@ def test_inconsistent_results_are_rejected(corrupt, message):
     entries, tuned = fake_df_analyze_results(Y_TEST, cv)
     corrupt(entries, tuned)
     with pytest.raises(ReportError, match=message):
-        metrics_table(entries, tuned, Y_TEST)
+        metrics_table(entries, tuned, Y_TEST, fake_shared_cv(cv))
 
 
 def test_label_encoding_must_keep_fraud_as_class_1():
@@ -119,7 +134,7 @@ def test_load_run_and_report_from_files(tmp_path):
     (run / "options.json").write_text(json.dumps({"htune_trials": 10, "seed": 555}))
 
     predictions, tuned_read, options = load_run(tmp_path)
-    table = metrics_table(predictions, tuned_read, Y_TEST)
+    table = metrics_table(predictions, tuned_read, Y_TEST, fake_shared_cv(cv))
     info = {
         "run": "test-run",
         "htune_trials": options["htune_trials"],
@@ -127,11 +142,18 @@ def test_load_run_and_report_from_files(tmp_path):
         "n_train": 75,
         "n_test": len(Y_TEST),
         "test_positive_rate": float(Y_TEST.mean()),
+        "cv_folds": 5,
     }
-    report = build_report(table, choose_model_a(table), info)
+    budget = pd.DataFrame(
+        [{"model": "LightGBM Classifier", "selection": "none", "trials_completed": 10,
+          "trials_requested": 10, "stopped_by": "all trials"}]
+    )  # fmt: skip
+    report = build_report(table, choose_model_a(table), info, budget)
     assert "**lgbm** with feature selection `none`" in report
+    assert "cross-validated PR-AUC on the training set only" in report
     assert "Dummy baseline PR-AUC" in report
     assert "tuning trials per model: 10" in report
+    assert "## Tuning budget" in report
 
 
 def test_config_overrides():

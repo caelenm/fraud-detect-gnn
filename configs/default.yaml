@@ -73,11 +73,20 @@ df_analyze:
   # 60-minute tuning limit on each of the 4 feature sets (~4 h per run).
   classifiers: [lgbm, lr, catboost, gandalf, rf, knn]
   htune_trials: 100
-  # AUROC, not df-analyze's default (accuracy): with ~16% positives, always
-  # predicting "not fraud" already scores 0.84 accuracy. AUROC is the only
-  # threshold-free option and the closest to our headline PR-AUC, which
-  # df-analyze does not offer. It also chooses the best Model A.
-  htune_cls_metric: auroc
-  # Passed through to df-analyze.py verbatim. Prediction-based filter
-  # selection also defaults to accuracy; use AUROC there too.
+  # Balanced accuracy (0.5 cut-off), the same for every model. Not accuracy
+  # (df-analyze's default): with ~16% positives, always predicting "not fraud"
+  # scores 0.84. Not auroc: df-analyze silently tunes most models on balanced
+  # accuracy when asked for AUROC, but GANDALF on real AUROC, so models would
+  # be tuned toward different goals. Model A is NOT chosen by this score; see
+  # select_model below.
+  htune_cls_metric: bal-acc
+  # Passed through to df-analyze.py verbatim. The prediction-based feature
+  # filter computes real AUROC from probabilities (the same features for every
+  # model); df-analyze's default there is accuracy.
   extra_args: ["--filter-pred-classify", "auroc"]
+
+select_model:
+  # Every tuned (model, feature set) is refit on the same stratified folds of
+  # the training set and scored from its probabilities; Model A is the one
+  # with the highest mean PR-AUC (the headline metric). The test set is not used.
+  n_folds: 5
