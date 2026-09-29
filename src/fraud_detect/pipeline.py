@@ -446,7 +446,14 @@ def run_select_model(ctx: Context) -> None:
     budget.to_csv(outdir / TUNING_BUDGET, index=False)
     for name, frame in ((SHARED_CV, cv), (TUNING_BUDGET, budget)):
         frame.to_csv(p.reports_dir / name, index=False)
-    errors = cv[cv["error"].fillna("").astype(str) != ""]
+    failed = cv["error"].fillna("").astype(str) != ""
+    tuned = cv["settings"] == "tuned"
+    errors = cv[failed & tuned]
+    for r in cv[failed & ~tuned].itertuples():
+        print(
+            f"WARNING: {r.model_cls} ({r.selection}) with default settings could not be "
+            f"scored, so its before-tuning score is missing: {r.error}"
+        )
     if not errors.empty:
         raise StageError(
             "These tuned models could not be cross-validated, so the models cannot "
@@ -454,8 +461,12 @@ def run_select_model(ctx: Context) -> None:
             f"See {outdir / 'model_selection.log'}; fix and rerun "
             "`uv run run.py --from select_model`."
         )
-    shown = cv[["model_cls", "selection", "embed_selector", "pr_auc_mean", "pr_auc_std"]]
-    print(shown.sort_values("pr_auc_mean", ascending=False).to_string(index=False))
+    shown = cv.pivot_table(
+        index=["model_cls", "selection", "embed_selector"],
+        columns="settings",
+        values="pr_auc_mean",
+    ).reset_index()
+    print(shown.sort_values("tuned", ascending=False).to_string(index=False))
     print(f"Saved shared-CV scores for run {stamp} to {p.reports_dir / SHARED_CV}")
 
 

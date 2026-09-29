@@ -13,6 +13,10 @@ set, tuned hyperparameters, from prediction_results_00.json), refits it with
 df-analyze's own `refit_tuned` on the SAME stratified folds of the TRAINING
 set, and scores the held-out fold from predicted probabilities. The test set
 is never read.
+
+Each configuration is also scored with df-analyze's DEFAULT hyperparameters
+(no tuning) on the same folds, so the effect of tuning can be reported. Only
+the tuned rows are used to choose Model A.
 """
 
 from __future__ import annotations
@@ -107,6 +111,13 @@ def main() -> int:
     parser.add_argument(
         "--only", nargs="*", default=None, help="model class names (for smoke tests)"
     )
+    parser.add_argument(
+        "--settings",
+        nargs="+",
+        choices=["tuned", "default"],
+        default=["tuned", "default"],
+        help="hyperparameters to score: tuned, and/or df-analyze's defaults",
+    )
     args = parser.parse_args()
 
     X = pd.read_csv(args.export_dir / "X_train_00.csv")
@@ -124,7 +135,8 @@ def main() -> int:
     print(f"CV on {len(X)} training rows, {args.folds} folds, {len(predictions)} configs")
 
     rows = []
-    for entry in predictions:
+    jobs = [(entry, settings) for entry in predictions for settings in args.settings]
+    for entry, settings in jobs:
         name = entry["model_cls"]
         if args.only and name not in args.only:
             continue
@@ -134,10 +146,13 @@ def main() -> int:
             "model_cls": name,
             "selection": entry["selection"],
             "embed_selector": entry.get("embed_select_model") or "",
+            "settings": settings,
         }
         start = time.perf_counter()
         try:
-            params = tuned_params(entry)
+            # "default": df-analyze's own default hyperparameters, i.e. the same
+            # model and feature set with no tuning, as the before-tuning baseline.
+            params = tuned_params(entry) if settings == "tuned" else {}
             cls = find_model_class(name)
             cols = entry["selected_cols"]
             missing = [c for c in cols if c not in X.columns]
@@ -167,7 +182,8 @@ def main() -> int:
             row["error"] = f"{type(e).__name__}: {e}"
         row["seconds"] = round(time.perf_counter() - start, 1)
         print(
-            f"{name:<22} {sel:<14} PR-AUC {row.get('pr_auc_mean', float('nan')):.4f} "
+            f"{name:<22} {sel:<14} {settings:<8} "
+            f"PR-AUC {row.get('pr_auc_mean', float('nan')):.4f} "
             f"({row['seconds']} s){'  ERROR ' + row['error'] if row['error'] else ''}",
             flush=True,
         )

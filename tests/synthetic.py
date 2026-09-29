@@ -216,23 +216,28 @@ def fake_test_meta(n: int) -> pd.DataFrame:
 
 
 def fake_shared_cv(
-    pr_auc: dict[tuple[str, str], float], std: float = 0.01
+    pr_auc: dict[tuple[str, str], float],
+    std: float = 0.01,
+    default_offset: float = -0.05,
 ) -> pd.DataFrame:
-    """Invented output of scripts/dfa/cv_select.py, one row per (model,
-    selection) key: cross-validated scores that describe no real model."""
+    """Invented output of scripts/dfa/cv_select.py: for each (model, selection)
+    key, a tuned row and a default-settings row whose PR-AUC is the tuned one
+    plus `default_offset`. The scores describe no real model."""
     classes = dict(FAKE_DFA_MODELS)
-    return pd.DataFrame(
-        [
-            {
-                "model_cls": classes[model],
-                "selection": selection,
-                "embed_selector": "linear" if selection == "embed" else "",
-                "pr_auc_mean": score,
-                "pr_auc_std": std,
-                "auroc_mean": 0.5 + score / 2,
-                "bal_acc_mean": 0.5,
-                "error": "",
-            }
-            for (model, selection), score in pr_auc.items()
-        ]
-    )
+    rows = []
+    for (model, selection), score in pr_auc.items():
+        for settings, value in (("tuned", score), ("default", score + default_offset)):
+            rows.append(
+                {
+                    "model_cls": classes[model],
+                    "selection": selection,
+                    "embed_selector": "linear" if selection == "embed" else "",
+                    "settings": settings,
+                    "pr_auc_mean": value,
+                    "pr_auc_std": std,
+                    "auroc_mean": 0.5 + value / 2,
+                    "bal_acc_mean": 0.5,
+                    "error": "",
+                }
+            )
+    return pd.DataFrame(rows)

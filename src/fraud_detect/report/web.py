@@ -245,9 +245,19 @@ def _budget_row(budget: pd.DataFrame | None, model: str, fs_key: str) -> pd.Seri
     return None if match.empty else match.iloc[0]
 
 
+# How each budget label is shown. "early stop" is df-analyze's rule for ending the
+# hyperparameter SEARCH (15 tries in a row found no better settings); it says
+# nothing about the model failing to learn, so it is shown as "search settled".
+STOP_LABELS = {
+    "early stop": ("search settled", "good"),
+    "all trials": ("all trials run", "good"),
+    "time limit": ("time limit hit", "warn"),
+}
+
+
 def _stop_badge(stopped_by: str) -> str:
-    kind = {"time limit": "warn", "all trials": "good"}.get(stopped_by, "")
-    return f'<span class="badge {kind}">{escape(stopped_by)}</span>'
+    text, kind = STOP_LABELS.get(stopped_by, (stopped_by, ""))
+    return f'<span class="badge {kind}">{escape(text)}</span>'
 
 
 def _header(inputs: ReportInputs) -> str:
@@ -309,7 +319,7 @@ def _model_a_detail(inputs: ReportInputs) -> str:
     b = _budget_row(inputs.budget, a["model"], fs_key)
     trials = (
         f"{_int(b['trials_completed'])} of {_int(b['trials_requested'])} · "
-        f"stopped by {b['stopped_by']}"
+        f"{STOP_LABELS.get(b['stopped_by'], (b['stopped_by'], ''))[0]}"
         if b is not None
         else "not recorded"
     )
@@ -320,6 +330,7 @@ def _model_a_detail(inputs: ReportInputs) -> str:
             ("Features used", _int(inputs.n_features)),
             ("Selected by", "shared-CV PR-AUC (train only)"),
             ("Tuning trials", trials),
+            ("Tuning effect", _tuning_effect(a)),
         ]
     )
     param_rows = (
@@ -370,6 +381,29 @@ def _model_a_detail(inputs: ReportInputs) -> str:
         '<h3 class="sub spaced">Confusion matrix <span class="badge">test set, '
         "model's own decision rule</span></h3>"
         f"{cm}</div></div></section>"
+    )
+
+
+def _missing(value: Any) -> bool:
+    return value is None or (isinstance(value, float) and np.isnan(value))
+
+
+def _gain(value: Any) -> str:
+    """Signed PR-AUC change from tuning, coloured by direction."""
+    if _missing(value):
+        return '<span class="col-info">—</span>'
+    v = float(value)
+    kind = "good" if v > 0 else "bad" if v < 0 else ""
+    return f'<span class="gain {kind}">{v:+.3f}</span>'
+
+
+def _tuning_effect(a: dict[str, Any]) -> str:
+    default = a.get("cv_pr_auc_default")
+    if _missing(default):
+        return "untuned score not recorded"
+    return (
+        f"CV PR-AUC {float(default):.3f} untuned → {float(a['cv_pr_auc']):.3f} tuned "
+        f"({float(a['cv_pr_auc']) - float(default):+.3f})"
     )
 
 
@@ -469,6 +503,8 @@ def _all_models(inputs: ReportInputs) -> str:
             f"<td>{escape(model_label(key[0]))}</td>"
             f'<td class="l">{escape(feature_set_label(key[1]))}</td>'
             f"<td>{_num(r['cv_pr_auc'])}</td><td>{_num(r['cv_pr_auc_std'])}</td>"
+            f"<td>{_num(r.get('cv_pr_auc_default'))}</td>"
+            f"<td>{_gain(r.get('cv_tuning_gain'))}</td>"
             f'<td class="col-info">{_num(r["tuning_score"])}</td>'
             f"<td>{_num(r['pr_auc'])}</td><td>{_num(r['auroc'])}</td>"
             f"<td>{_num(r['f1'])}</td><td>{_num(r['precision'])}</td>"
@@ -479,14 +515,19 @@ def _all_models(inputs: ReportInputs) -> str:
         "<section><h2>Every tuned model</h2>"
         '<p class="lede">Each classifier was tuned on each of df-analyze\'s feature '
         "sets. Rows are sorted by cross-validated PR-AUC on the training set, the only "
-        "score comparable across models. The highlighted row is Model A.</p>"
+        "score comparable across models. The highlighted row is Model A. "
+        "<b>Untuned</b> is the same model and feature set with df-analyze's default "
+        "hyperparameters on the same folds, so <b>tuning gain</b> is what the "
+        "hyperparameter search added. Tuning optimises balanced accuracy, not PR-AUC, "
+        "so the gain can be negative.</p>"
         '<div class="panel table-scroll"><table><thead>'
         '<tr><th class="l" colspan="2"></th>'
-        '<th class="group" colspan="2">Training set · shared CV</th>'
+        '<th class="group" colspan="4">Training set · shared CV PR-AUC</th>'
         '<th class="group col-info">df-analyze</th>'
         '<th class="group" colspan="6">Test set · for information only</th></tr>'
         '<tr><th class="l">Model</th><th class="l">Feature set</th>'
-        '<th>PR-AUC</th><th>± std</th><th class="col-info">tuning score *</th>'
+        "<th>tuned</th><th>± std</th><th>untuned</th><th>tuning gain</th>"
+        '<th class="col-info">tuning score *</th>'
         "<th>PR-AUC</th><th>AUROC</th><th>F1</th><th>Precision</th><th>Recall</th>"
         "<th>Bal. acc.</th></tr></thead>"
         f"<tbody>{''.join(rows)}</tbody></table></div>"
@@ -512,9 +553,12 @@ def _budget(inputs: ReportInputs) -> str:
     )
     return (
         "<section><h2>Tuning budget</h2>"
-        '<p class="lede">df-analyze stops each tuning run at a per-model time limit or '
-        "after 15 trials without improvement (once 50 have run), so models may finish "
-        "different numbers of trials. Runs stopped by the time limit are flagged.</p>"
+        '<p class="lede">Tuning is a search: df-analyze tries up to 100 hyperparameter '
+        "settings per model and keeps the best. The search ends when all tries have "
+        "run, when the model's time limit is hit, or once 50 tries have run and the "
+        "last 15 found no better settings (<b>search settled</b>). That is the search "
+        "ending, not the model failing to learn; see <b>tuning gain</b> above for what "
+        "tuning added. Runs cut off by the time limit are flagged.</p>"
         '<div class="panel table-scroll"><table><thead><tr>'
         '<th class="l">Model</th><th class="l">Feature set</th><th>Trials</th>'
         '<th>Time used</th><th>Time limit</th><th class="l">Stopped by</th></tr>'

@@ -95,13 +95,15 @@ def report_inputs(n: int = 30, n_samples: int = 5) -> web.ReportInputs:
         "tuning_score": 0.6, "pr_auc": 0.5, "auroc": 0.7, "f1": 0.4, "precision": 0.5,
         "recall": 0.3, "accuracy": 0.8, "balanced_accuracy": 0.6,
         "tp": 1, "fp": 2, "fn": 3, "tn": 4,
+        "cv_pr_auc_default": 0.45, "cv_tuning_gain": 0.05,
     }  # fmt: skip
     metrics = pd.DataFrame(
         [
             {**model_a},
-            {**model_a, "model": "lgbm", "selection": "none", "embed_selector": np.nan},
+            {**model_a, "model": "lgbm", "selection": "none", "embed_selector": np.nan,
+             "cv_pr_auc_default": 0.52, "cv_tuning_gain": -0.02},
         ]
-    )
+    )  # fmt: skip
     budget = pd.DataFrame(
         [{"model": "CatBoost Classifier", "selection": "embed_linear",
           "trials_completed": 10, "trials_requested": 10, "elapsed_s": 60.0,
@@ -137,7 +139,10 @@ def test_render_escapes_narratives_and_fills_every_section():
     assert page.count('class="selected"') == 1  # Model A's row
     assert "CatBoost" in page and "Embedded: linear" in page
     assert "0.123457" in page  # tuned hyperparameter, 6 significant digits
-    assert "10 of 10 · stopped by all trials" in page
+    assert "10 of 10 · all trials run" in page
+    assert "CV PR-AUC 0.450 untuned → 0.500 tuned (+0.050)" in page
+    assert '<span class="gain good">+0.050</span>' in page
+    assert '<span class="gain bad">-0.020</span>' in page
     assert "Contains complaint narratives" in page
     assert "<link" not in page and "<script" not in page  # self-contained, static
     assert re.search(r'style="width:\d+\.\d%"', page)
