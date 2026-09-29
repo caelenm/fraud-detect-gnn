@@ -23,8 +23,10 @@ from __future__ import annotations
 
 import argparse
 import ast
+import faulthandler
 import importlib
 import json
+import os
 import random
 import sys
 import time
@@ -96,6 +98,42 @@ def fold_scores(y_true: np.ndarray, prob_pos: np.ndarray) -> dict[str, float]:
     }
 
 
+def job_key(entry: dict, settings: str) -> tuple[str, str, str, str]:
+    return (
+        str(entry["model_cls"]),
+        str(entry["selection"]),
+        str(entry.get("embed_select_model") or ""),
+        settings,
+    )
+
+
+def row_key(row: dict) -> tuple[str, str, str, str]:
+    return (
+        str(row["model_cls"]),
+        str(row["selection"]),
+        str(row.get("embed_selector") or ""),
+        str(row["settings"]),
+    )
+
+
+def previous_rows(path: Path) -> list[dict]:
+    """Configurations already scored successfully in an earlier, interrupted
+    run (failed ones are retried)."""
+    if not path.is_file():
+        return []
+    frame = pd.read_csv(path, keep_default_na=False, na_values=[""])
+    frame["embed_selector"] = frame["embed_selector"].fillna("")
+    frame["error"] = frame["error"].fillna("")
+    return frame[frame["error"] == ""].to_dict("records")
+
+
+def eta_text(seconds: list[float], remaining: int) -> str:
+    if not seconds:
+        return ""
+    left = sum(seconds) / len(seconds) * remaining
+    return f"(about {left / 60:.0f} min left)"
+
+
 def seed_everything(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
@@ -118,6 +156,18 @@ def main() -> int:
         default=["tuned", "default"],
         help="hyperparameters to score: tuned, and/or df-analyze's defaults",
     )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="keep configurations already scored in --out and skip them",
+    )
+    parser.add_argument(
+        "--config-timeout",
+        type=int,
+        default=0,
+        help="seconds allowed per configuration (all folds) before the script "
+        "dumps stack traces and exits; 0 disables the watchdog",
+    )
     args = parser.parse_args()
 
     X = pd.read_csv(args.export_dir / "X_train_00.csv")
@@ -134,13 +184,28 @@ def main() -> int:
     )
     print(f"CV on {len(X)} training rows, {args.folds} folds, {len(predictions)} configs")
 
-    rows = []
-    jobs = [(entry, settings) for entry in predictions for settings in args.settings]
-    for entry, settings in jobs:
+    # Every tuned fit (which choose Model A) runs before any default-settings
+    # fit, and the table is rewritten after each configuration, so a crash,
+    # hang or shutdown never loses finished scores. --resume keeps them.
+    jobs = [
+        (entry, settings)
+        for settings in args.settings
+        for entry in predictions
+        if not args.only or entry["model_cls"] in args.only
+    ]
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    rows = previous_rows(args.out) if args.resume else []
+    done = {row_key(r) for r in rows}
+    if done:
+        print(f"Resuming: {len(done)} of {len(jobs)} configurations already scored")
+    session_seconds: list[float] = []
+    for i, (entry, settings) in enumerate(jobs, start=1):
         name = entry["model_cls"]
-        if args.only and name not in args.only:
-            continue
         sel = selection_name(entry)
+        if job_key(entry, settings) in done:
+            continue
+        print(f"[{i}/{len(jobs)}] {name} · {sel} · {settings} settings "
+              f"{eta_text(session_seconds, len(jobs) - i + 1)}", flush=True)  # fmt: skip
         # Keys as in prediction_results, so the pipeline can join the tables.
         row: dict = {
             "model_cls": name,
@@ -149,6 +214,10 @@ def main() -> int:
             "settings": settings,
         }
         start = time.perf_counter()
+        if args.config_timeout > 0:
+            # Watchdog: if this configuration hangs, print every thread's stack
+            # (to diagnose it) and exit, instead of blocking the pipeline forever.
+            faulthandler.dump_traceback_later(args.config_timeout, exit=True)
         try:
             # "default": df-analyze's own default hyperparameters, i.e. the same
             # model and feature set with no tuning, as the before-tuning baseline.
@@ -180,6 +249,7 @@ def main() -> int:
         except Exception as e:  # record and continue with the other models
             traceback.print_exc()
             row["error"] = f"{type(e).__name__}: {e}"
+        faulthandler.cancel_dump_traceback_later()
         row["seconds"] = round(time.perf_counter() - start, 1)
         print(
             f"{name:<22} {sel:<14} {settings:<8} "
@@ -188,9 +258,11 @@ def main() -> int:
             flush=True,
         )
         rows.append(row)
+        session_seconds.append(row["seconds"])
+        tmp = args.out.with_name(args.out.name + ".tmp")
+        pd.DataFrame(rows).to_csv(tmp, index=False)
+        os.replace(tmp, args.out)  # atomic: a crash never leaves a half-written table
 
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(rows).to_csv(args.out, index=False)
     print(f"Saved {len(rows)} cross-validated configurations to {args.out}")
     # Per-model errors are recorded in the table; the pipeline decides what to do.
     return 0 if rows else 5

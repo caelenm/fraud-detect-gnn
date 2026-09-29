@@ -27,6 +27,7 @@ from fraud_detect.features import tabular, text
 from fraud_detect.models import df_analyze, df_analyze_report, selection
 from fraud_detect.report import web
 from fraud_detect.runlog import git_commit, write_json
+from fraud_detect.runstate import CHECKPOINT_DIR, UnitStore
 
 
 class StageError(RuntimeError):
@@ -38,10 +39,21 @@ class Context:
     config: dict[str, Any]
     paths: Paths
     run_dir: Path
+    # True when this stage was interrupted earlier and is being continued with
+    # `run.py --resume`: keep the units it already finished.
+    resume: bool = False
 
     @property
     def seed(self) -> int:
         return int(self.config["seed"])
+
+    def unit_store(self, stage: str) -> UnitStore:
+        """Per-unit checkpoints for a long stage (see fraud_detect.runstate).
+        Emptied on a fresh run, kept on --resume."""
+        store = UnitStore(self.paths.outputs_dir / CHECKPOINT_DIR / stage)
+        if not self.resume:
+            store.reset()
+        return store
 
 
 @dataclass(frozen=True)
@@ -126,6 +138,12 @@ def run_label(ctx: Context) -> None:
         raise StageError(f"{ctx.paths.categories_file}\n{e}") from e
     labeled = label.apply_labels(df, categories)
     labeled.to_parquet(ctx.paths.labeled, index=False)
+    excluded = label.excluded_report(df, categories)
+    excluded.to_csv(ctx.paths.reports_dir / "label_excluded.csv", index=False)
+    print(
+        f"Excluded {int(excluded['n_complaints'].sum()):,} complaints in "
+        f"{len(excluded)} ambiguous categories (see label_excluded.csv)"
+    )
     summary = (
         labeled.groupby(C.PRODUCT)[C.LABEL]
         .agg(n_complaints="size", n_positive="sum", positive_rate="mean")
@@ -432,13 +450,21 @@ def run_select_model(ctx: Context) -> None:
     export_dir = df_analyze.find_export_dir(outdir)
     cfg = ctx.config["select_model"]
     cv_path = outdir / SHARED_CV
-    cv_path.unlink(missing_ok=True)
+    # The CV script saves its table after every configuration. On --resume it
+    # keeps the finished ones; on a fresh run it starts over.
+    if not ctx.resume:
+        cv_path.unlink(missing_ok=True)
     args = [
         "--export-dir", str(export_dir.resolve()),
         "--out", str(cv_path.resolve()),
         "--folds", str(cfg["n_folds"]),
         "--seed", str(ctx.seed),
+        "--config-timeout", str(cfg.get("config_timeout_s", 0)),
     ]  # fmt: skip
+    if not cfg.get("score_defaults", True):
+        args += ["--settings", "tuned"]
+    if ctx.resume:
+        args += ["--resume"]
     _run_dfa(ctx, str(CV_SELECT_RUNNER), args, outdir / "model_selection.log")
     cv = pd.read_csv(cv_path, keep_default_na=False, na_values=[""])
     log = (outdir / "df_analyze.log").read_text(encoding="utf-8", errors="replace")
@@ -586,7 +612,9 @@ def run_web_report(ctx: Context) -> None:
         {web.feature_set_label(web.feature_set_key(s, e))
          for s, e in zip(metrics["selection"], metrics["embed_selector"], strict=True)}
     )  # fmt: skip
+    rule_version = load_yaml(p.categories_file).get("rule_version", 1)
     run_config = [
+        ("Label rule", f"version {rule_version} (docs/LABEL_RULE.md)"),
         ("Seed", str(summary["seed"])),
         ("Complaints", f"{summary['n_train']:,} train · {summary['n_test']:,} test"),
         ("Fraud rate", f"{train[df_analyze.TARGET].mean():.1%} train · "

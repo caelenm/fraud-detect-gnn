@@ -74,8 +74,8 @@ df_analyze:
   classifiers: [lgbm, lr, catboost, gandalf, rf, knn]
   htune_trials: 100
   # Balanced accuracy (0.5 cut-off), the same for every model. Not accuracy
-  # (df-analyze's default): with ~16% positives, always predicting "not fraud"
-  # scores 0.84. Not auroc: df-analyze silently tunes most models on balanced
+  # (df-analyze's default): with ~30% positives (label rule v2), always
+  # predicting "not fraud" scores ~0.70. Not auroc: df-analyze silently tunes most models on balanced
   # accuracy when asked for AUROC, but GANDALF on real AUROC, so models would
   # be tuned toward different goals. Model A is NOT chosen by this score; see
   # select_model below.
@@ -90,6 +90,13 @@ select_model:
   # the training set and scored from its probabilities; Model A is the one
   # with the highest mean PR-AUC (the headline metric). The test set is not used.
   n_folds: 5
+  # Also score df-analyze's default hyperparameters (the before-tuning
+  # baseline for the tuning gain). Never used to choose Model A.
+  score_defaults: true
+  # Watchdog: seconds one configuration (all folds) may take before the stage
+  # prints stack traces and fails instead of hanging. The slowest (GANDALF)
+  # took ~6 min on an RTX 4060; 0 disables it.
+  config_timeout_s: 1800
 
 web_report:
   # outputs/report/index.html. Contains narratives: never commit or post it.

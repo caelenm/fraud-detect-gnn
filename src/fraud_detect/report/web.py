@@ -622,8 +622,10 @@ HOW_TO_READ = """
 <ul class="notes panel">
 <li><b>What is predicted:</b> whether the consumer filed the complaint under a
 fraud, scam, identity-theft or unauthorized-transaction category (1) or any other
-issue (0), in <code>configs/categories.yaml</code>. It is the consumer's chosen
-category, not verified fraud. The model never sees the Issue or Sub-issue fields.</li>
+issue (0), per <code>configs/categories.yaml</code>; categories too ambiguous to call
+are excluded from the data. Every category's treatment is listed in
+<code>docs/LABEL_RULE.md</code>. It is the consumer's chosen category, not verified
+fraud. The model never sees the Issue or Sub-issue fields.</li>
 <li><b>PR-AUC</b> is the headline metric because fraud is the minority class. A
 model that guesses scores the test fraud rate.</li>
 <li><b>Model A is chosen on the training set only</b>: every tuned combination is
