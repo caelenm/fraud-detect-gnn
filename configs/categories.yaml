@@ -1,11 +1,14 @@
 # Label rule and product filter, reviewed against the real category report
 # (outputs/reports/category_values.csv from archives 2-4, May 2018 - Aug 2023).
+# A readable summary of how every category is treated, with the reasons, is
+# in docs/LABEL_RULE.md.
 #
 # How this file is checked: the `label` stage refuses to run unless
 # `confirmed: true`, every entry below matches at least one complaint, no
-# complaint matches both lists, and every keyword candidate (Issue/Sub-issue
-# mentioning fraud, scams, identity theft, unauthorized activity, stolen, ...)
-# inside the target products is listed as `positive` or `reviewed_negative`.
+# complaint matches more than one of the three lists, and every keyword
+# candidate (Issue/Sub-issue mentioning fraud, scams, identity theft,
+# unauthorized activity, stolen, ...) inside the target products is listed as
+# `positive`, `reviewed_negative` or `excluded`.
 #
 # Entry format: {product, issue, sub_issue}. Strings must match the data
 # exactly (including CFPB's own spelling). "*" (the default for product and
@@ -16,6 +19,14 @@
 # see AGENTS.md.
 
 confirmed: true
+
+# Version 2 (2026-09-29): category-by-category review, decided on the meaning
+# of each category only, before looking at any model errors. Changes from
+# version 1: "Debt is not yours" and "Impersonated attorney, law enforcement,
+# or government official" became positive; ambiguous categories (card-dispute
+# handling, unrequested cards, and all former reviewed negatives) are now
+# excluded instead of labelled 0.
+rule_version: 2
 
 # "Credit card" and "Prepaid card" are the 2023 renames of
 # "Credit card or prepaid card"; they are the same product. "Debt or credit
@@ -34,12 +45,24 @@ positive:
   - product: Debt collection
     issue: Attempts to collect debt not owed
     sub_issue: Debt was result of identity theft
+  # v2: a debt the consumer says is not theirs is treated like its sibling
+  # "Debt was result of identity theft"; which box a consumer ticks between
+  # the two is close to arbitrary.
+  - product: Debt collection
+    issue: Attempts to collect debt not owed
+    sub_issue: Debt is not yours
+  # v2: impersonating an attorney, police or a government official is a
+  # hallmark of scam ("phantom debt") collectors.
+  - product: Debt collection
+    issue: False statements or representation
+    sub_issue: Impersonated attorney, law enforcement, or government official
 
   # Money transfer
   - product: Money transfer, virtual currency, or money service
     issue: Fraud or scam
   # Bundles "other transaction problems" with unauthorized transactions;
-  # kept positive because the README's label names unauthorized transactions.
+  # kept positive (reviewed again in v2) because unauthorized transactions
+  # are its core.
   - product: Money transfer, virtual currency, or money service
     issue: Unauthorized transactions or other transaction problem
 
@@ -74,20 +97,47 @@ positive:
     issue: Opening an account
     sub_issue: Account opened without my consent or knowledge
 
-# Keyword candidates judged NOT to be fraud events (labelled 0). Listing them
-# records that they were reviewed.
-reviewed_negative:
-  # Complaints about monitoring products or alerts themselves.
-  - issue: Credit monitoring or identity theft protection services
-  - issue: Problem with fraud alerts or security freezes
+# Keyword candidates judged NOT to be fraud events (labelled 0). In v2 all
+# former entries moved to `excluded`; the list is kept (empty) so the file
+# format is unchanged.
+reviewed_negative: []
+
+# v2: complaints in these categories are REMOVED from the dataset before
+# sampling: they are too ambiguous to call fraud or not fraud.
+excluded:
+  # The bank's handling of a purchase dispute: sometimes a disputed
+  # unauthorized charge, mostly merchant quality, refunds and returns.
+  - product: Credit card or prepaid card
+    issue: Problem with a purchase shown on your statement
+    sub_issue: Credit card company isn't resolving a dispute about a purchase on your statement
+  - product: Credit card
+    issue: Problem with a purchase shown on your statement
+    sub_issue: Credit card company isn't resolving a dispute about a purchase on your statement
+  - product: Credit card or prepaid card
+    issue: Problem with a purchase or transfer
+    sub_issue: Card company isn't resolving a dispute about a purchase or transfer
+  - product: Prepaid card
+    issue: Problem with a purchase or transfer
+    sub_issue: Card company isn't resolving a dispute about a purchase or transfer
+  # An unrequested card can be identity theft or an unsolicited offer.
+  - product: Credit card or prepaid card
+    issue: Getting a credit card
+    sub_issue: Sent card you never applied for
+  - product: Credit card
+    issue: Getting a credit card
+    sub_issue: Sent card you never applied for
   # Credit-report accuracy: can be identity theft, but also mixed files or
-  # forgotten legitimate inquiries. Too ambiguous to count as fraud.
+  # forgotten legitimate inquiries (formerly reviewed negatives).
   - issue: Incorrect information on your report
     sub_issue: Information belongs to someone else
   - issue: Improper use of your report
     sub_issue: Credit inquiries on your report that you don't recognize
-  # Mostly about replacing or refunding a lost instrument.
+  # "Lost" is not fraud but "stolen" is; the category does not separate them.
   - product: Money transfer, virtual currency, or money service
     issue: Lost or stolen check
   - product: Money transfer, virtual currency, or money service
     issue: Lost or stolen money order
+  # Complaints about protection products or alerts themselves, not about a
+  # fraud event (formerly reviewed negatives).
+  - issue: Credit monitoring or identity theft protection services
+  - issue: Problem with fraud alerts or security freezes

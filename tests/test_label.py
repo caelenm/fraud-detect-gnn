@@ -14,6 +14,7 @@ from fraud_detect.data.label import (
     LabelConfigError,
     apply_labels,
     candidate_report,
+    excluded_report,
     is_candidate,
     validate_categories,
 )
@@ -97,6 +98,63 @@ def test_candidate_flags():
         }
     )
     assert is_candidate(df).tolist() == [True, False, True]
+
+
+DISPUTE = {
+    "product": "Credit card or prepaid card",
+    "issue": "Problem with a purchase shown on your statement",
+    "sub_issue": "Credit card company isn't resolving a dispute about a purchase on "
+    "your statement",
+}
+
+
+def test_excluded_categories_are_removed_not_labelled():
+    df = complaints_with_categories()
+    cfg = config(excluded=[DISPUTE])
+    validate_categories(df, cfg)
+    labeled = apply_labels(df, cfg)
+    disputed = df.loc[df[C.SUB_ISSUE] == DISPUTE["sub_issue"], C.COMPLAINT_ID]
+    assert len(disputed) == 1
+    assert not labeled[C.COMPLAINT_ID].isin(disputed).any()
+    kept = apply_labels(df, config())  # without the exclusion it is a negative
+    assert kept.set_index(C.COMPLAINT_ID).loc[disputed.iloc[0], C.LABEL] == 0
+    assert len(labeled) == len(kept) - 1
+    report = excluded_report(df, cfg)
+    assert report["n_complaints"].tolist() == [1]
+
+
+def test_excluded_list_is_optional_and_checked_like_the_others():
+    data = copy.deepcopy(SYNTHETIC_CATEGORIES)
+    assert "excluded" not in data
+    assert CategoryConfig.from_dict(data).excluded == ()
+    df = complaints_with_categories()
+    with pytest.raises(LabelConfigError, match="excluded entry matches no complaints"):
+        validate_categories(df, config(excluded=[{"issue": "Synthetic typo issue"}]))
+    with pytest.raises(LabelConfigError, match="both positive and excluded"):
+        validate_categories(df, config(excluded=[{"issue": "Fraud or scam"}]))
+
+
+def test_excluded_counts_as_reviewing_a_keyword_candidate():
+    # The monitoring-services candidate is outside the target products in the
+    # synthetic data, so use an in-target candidate: move "Fraud or scam" from
+    # positive to excluded.
+    cfg = copy.deepcopy(SYNTHETIC_CATEGORIES)
+    cfg["positive"] = [e for e in cfg["positive"] if e["issue"] != "Fraud or scam"]
+    cfg["excluded"] = [{"issue": "Fraud or scam"}]
+    validate_categories(complaints_with_categories(), CategoryConfig.from_dict(cfg))
+
+
+def test_project_label_rule_file_parses_and_has_no_duplicates():
+    from fraud_detect.config import REPO_ROOT, load_yaml
+
+    data = load_yaml(REPO_ROOT / "configs" / "categories.yaml")
+    cfg = CategoryConfig.from_dict(data)
+    assert cfg.confirmed and data["rule_version"] == 2
+    every = [r for _, rules in cfg.lists() for r in rules]
+    assert len(every) == len(set(every))
+    subs = {r.sub_issue for r in cfg.positive}
+    assert {"Debt is not yours", "Debt was result of identity theft"} <= subs
+    assert len(cfg.excluded) > 0
 
 
 def test_candidate_report_counts_every_combination():
