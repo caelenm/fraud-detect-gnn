@@ -4,17 +4,20 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 from pathlib import Path
 
 from fraud_detect.config import (
     DEFAULT_CONFIG,
     REPO_ROOT,
+    Paths,
     apply_overrides,
     get_paths,
     load_config,
 )
 from fraud_detect.pipeline import STAGE_NAMES, STAGES, Context, StageError, get_stage
 from fraud_detect.runlog import new_run_dir, set_seeds, write_run_info
+from fraud_detect.runstate import RunState, config_fingerprint
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -40,6 +43,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="override a config value for this run, e.g. "
         "--set df_analyze.htune_trials=10 (repeatable; recorded in the run log)",
     )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="continue an interrupted run: run the stages it had not finished, "
+        "keeping finished work inside the interrupted stage",
+    )
     parser.add_argument("--list", action="store_true", help="list stages and exit")
     return parser
 
@@ -56,12 +65,31 @@ def select_stages(start: str | None, end: str | None, only: str | None) -> list[
     return STAGE_NAMES[i : j + 1]
 
 
+def plan_stages(names: list[str], force: bool, paths: Paths) -> list[str]:
+    """Stages that will run: from the first one that is forced or has missing
+    outputs, through the end (later stages rerun because their inputs change)."""
+    for i, name in enumerate(names):
+        if force or not all(o.exists() for o in get_stage(name).outputs(paths)):
+            return names[i:]
+    return []
+
+
+def _duration(seconds: float) -> str:
+    minutes, secs = divmod(int(seconds), 60)
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h {minutes:02d}m" if hours else f"{minutes}m {secs:02d}s"
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.list:
         for n, stage in enumerate(STAGES, start=1):
             print(f"{n:>2}. {stage.name:<18} {stage.description}")
         return 0
+    if args.resume and (args.start or args.end or args.only or args.force):
+        print("error: --resume cannot be combined with --from/--to/--only/--force",
+              file=sys.stderr)  # fmt: skip
+        return 2
     try:
         names = select_stages(args.start, args.end, args.only)
     except ValueError as e:
@@ -76,26 +104,78 @@ def main(argv: list[str] | None = None) -> int:
     paths = get_paths(config)
     for d in (paths.interim_dir, paths.processed_dir, paths.reports_dir):
         d.mkdir(parents=True, exist_ok=True)
+
+    fingerprint = config_fingerprint(config)
+    state = RunState.load(paths.outputs_dir)
+    if args.resume:
+        if state is None:
+            print("Nothing to resume: no interrupted run was found.")
+            return 0
+        if state.config_sha256 != fingerprint:
+            print(
+                "error: the config changed since the interrupted run started, so it "
+                "cannot be resumed safely. Start it again with --force "
+                f"(it had these stages left: {', '.join(state.pending)}).",
+                file=sys.stderr,
+            )
+            return 2
+        planned = list(state.pending)
+    else:
+        if state is not None and not args.force:
+            print(
+                "error: an interrupted run has unfinished stages "
+                f"({', '.join(state.pending)}). Continue it with `uv run run.py "
+                "--resume`, or start over with --force.",
+                file=sys.stderr,
+            )
+            return 2
+        planned = plan_stages(names, args.force, paths)
+        if planned:
+            command = list(sys.argv if argv is None else argv)
+            state = RunState(
+                pending=list(planned), config_sha256=fingerprint, command=command
+            )
+            state.save(paths.outputs_dir)
+
     set_seeds(int(config["seed"]))
     run_dir = new_run_dir(paths.runs_dir)
-    write_run_info(run_dir, config, names, REPO_ROOT, argv)
-    ctx = Context(config=config, paths=paths, run_dir=run_dir)
+    write_run_info(run_dir, config, planned, REPO_ROOT, argv)
     print(f"Run log: {run_dir}")
-
-    force = args.force
     for name in names:
-        stage = get_stage(name)
-        outputs = stage.outputs(paths)
-        if not force and all(o.exists() for o in outputs):
+        if name not in planned:
             print(f"== {name}: outputs exist, skipping (use --force to rerun)")
-            continue
-        print(f"== {name}: {stage.description}", flush=True)
+    if not planned:
+        print("Done.")
+        return 0
+    print(f"Stages to run: {', '.join(planned)}", flush=True)
+
+    run_start = time.monotonic()
+    for n, name in enumerate(planned, start=1):
+        stage = get_stage(name)
+        # Only the first stage of a resumed run was interrupted mid-way.
+        ctx = Context(config=config, paths=paths, run_dir=run_dir,
+                      resume=args.resume and n == 1)  # fmt: skip
+        resumed = " (resuming)" if ctx.resume else ""
+        print(f"\n== [{n}/{len(planned)}] {name}{resumed}: {stage.description}",
+              flush=True)  # fmt: skip
+        stage_start = time.monotonic()
         try:
             stage.run(ctx)
         except StageError as e:
             print(f"\nStage '{name}' stopped:\n{e}", file=sys.stderr)
+            print(RESUME_HINT, file=sys.stderr)
             return 2
-        # Inputs of later stages just changed, so they must rerun too.
-        force = True
-    print("Done.")
+        except KeyboardInterrupt:
+            print(f"\n\nInterrupted during '{name}'. Every stage before it is saved.")
+            print(RESUME_HINT)
+            return 130
+        assert state is not None
+        state.mark_done(name, paths.outputs_dir)
+        took = _duration(time.monotonic() - stage_start)
+        total = _duration(time.monotonic() - run_start)
+        print(f"== {name} done in {took} (total {total})", flush=True)
+    print("\nDone.")
     return 0
+
+
+RESUME_HINT = "Continue later with: uv run run.py --resume"

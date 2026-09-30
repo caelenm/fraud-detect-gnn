@@ -139,20 +139,39 @@ def _tuned_scores(tuned: pd.DataFrame) -> dict[tuple[str, str], float]:
 
 
 def _shared_cv_scores(shared_cv: pd.DataFrame) -> dict[tuple[str, str], dict[str, Any]]:
-    """Shared-CV rows keyed like the report: (config model name, selection)."""
+    """Shared-CV rows keyed like the report: (config model name, selection).
+
+    Tuned rows give the scores Model A is chosen by; a tuned row that failed is
+    an error. Default-settings rows (no tuning) add `cv_pr_auc_default` and
+    `cv_auroc_default` for the before/after-tuning comparison; if one failed, those
+    are NaN."""
     out: dict[tuple[str, str], dict[str, Any]] = {}
+    defaults: dict[tuple[str, str], dict[str, float]] = {}
     for row in shared_cv.to_dict("records"):
+        # Tables written before default settings were scored have no column.
+        kind = row.get("settings", "tuned")
         cls = row["model_cls"]
         if cls not in MODEL_NAMES:
             raise ReportError(f"Unknown df-analyze model class {cls!r} in the CV table")
         key = (MODEL_NAMES[cls], str(row["selection"]))
         error = row.get("error")
-        if isinstance(error, str) and error:
+        failed = isinstance(error, str) and bool(error)
+        if kind == "default":
+            defaults[key] = {
+                "cv_pr_auc_default": np.nan if failed else float(row["pr_auc_mean"]),
+                "cv_auroc_default": np.nan if failed else float(row["auroc_mean"]),
+            }
+            continue
+        if failed:
             raise ReportError(
                 f"{key} could not be cross-validated ({error}). Every model must be "
                 "scored the same way before one can be chosen; see model_selection.log."
             )
         out[key] = {new: float(row[old]) for old, new in SHARED_CV_COLUMNS.items()}
+    missing = {"cv_pr_auc_default": np.nan, "cv_auroc_default": np.nan}
+    for key, scores in out.items():
+        scores.update(defaults.get(key, missing))
+        scores["cv_tuning_gain"] = scores["cv_pr_auc"] - scores["cv_pr_auc_default"]
     return out
 
 
@@ -251,8 +270,9 @@ def build_report(
     budget: pd.DataFrame | None = None,
 ) -> str:
     baseline = table[table["model"] == BASELINE_MODEL]
-    shown = ["model", "selection", "cv_pr_auc", "cv_pr_auc_std", "tuning_score",
-             *METRIC_COLUMNS]  # fmt: skip
+    shown = ["model", "selection", "cv_pr_auc", "cv_pr_auc_std", "cv_pr_auc_default",
+             "cv_tuning_gain", "tuning_score", *METRIC_COLUMNS]  # fmt: skip
+    shown = [c for c in shown if c in table.columns]
     a = model_a
     baseline_line = (
         [f"- Dummy baseline PR-AUC: {baseline['pr_auc'].iloc[0]:.4f}"]
@@ -297,6 +317,10 @@ def build_report(
         f"with its tuned hyperparameters on the same {info['cv_folds']} stratified "
         "folds of the training set and scored from its fraud probability. This "
         "is the only score that is comparable across models.",
+        "- **cv_pr_auc_default**: the same model and feature set with df-analyze's "
+        "default hyperparameters (no tuning), on the same folds. **cv_tuning_gain** "
+        "= cv_pr_auc − cv_pr_auc_default. Tuning optimises balanced accuracy, not "
+        "PR-AUC, so the gain can be negative.",
         f"- **tuning_score** is df-analyze's own tuning score ({a['tuning_metric']}), "
         "for information only. It is not comparable across models: most are "
         "scored on hard 0/1 predictions over 5 folds, GANDALF on one validation "
@@ -320,10 +344,12 @@ def _budget_section(budget: pd.DataFrame | None) -> list[str]:
     return [
         "## Tuning budget",
         "",
-        "df-analyze stops each tuning run at a fixed time limit, so models that "
-        "are slower per trial may complete fewer trials. `stopped_by` is `all "
-        "trials`, `time limit`, or `early stop` (no improvement for 15 trials "
-        "after 50, or an exhausted search grid).",
+        "Tuning is a search over hyperparameter settings; `stopped_by` says why the "
+        "SEARCH ended: `all trials`, `time limit` (slower models may complete fewer "
+        "trials), or `early stop` (at least 50 tries ran and the last 15 found no "
+        "better settings, or the search grid was exhausted). `early stop` means the "
+        "search settled, not that the model failed to learn; `cv_tuning_gain` above "
+        "shows what tuning added.",
         "",
         _markdown_table(budget),
         "",

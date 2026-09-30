@@ -28,6 +28,7 @@ from typing import Any
 
 from fraud_detect.config import DEFAULT_CONFIG, REPO_ROOT, Paths, get_paths, load_config
 from fraud_detect.runlog import git_commit
+from fraud_detect.runstate import CHECKPOINT_DIR, STATE_FILE
 
 MANIFEST_NAME = "artifacts_manifest.json"
 BUNDLE_PREFIX = "fraud_artifacts_"
@@ -83,8 +84,11 @@ def collect_files(paths: Paths) -> list[Path]:
     ]
     files += _files_under(paths.processed_dir)
     dfa = paths.df_analyze_output_dir
+    # Resume bookkeeping belongs to one machine's interrupted run; never share it.
+    skip = (paths.runs_dir, dfa, paths.outputs_dir / CHECKPOINT_DIR)
+    state = paths.outputs_dir / STATE_FILE
     for p in _files_under(paths.outputs_dir):
-        if not (p.is_relative_to(paths.runs_dir) or p.is_relative_to(dfa)):
+        if p != state and not any(p.is_relative_to(d) for d in skip):
             files.append(p)
     latest = dfa / "latest.txt"
     if latest.is_file():

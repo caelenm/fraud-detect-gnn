@@ -2,14 +2,17 @@
 
 A complaint is positive (1) if its (product, issue, sub_issue) matches any
 entry in the `positive` list of `configs/categories.yaml`, and negative (0)
-otherwise. Keyword matching is used only to *flag candidates* for review; it
-never assigns labels. The label stage refuses to run until:
+otherwise. Complaints matching an `excluded` entry are removed from the
+dataset before sampling: they are too ambiguous to label either way.
+Keyword matching is used only to *flag candidates* for review; it never
+assigns labels. The label stage refuses to run until:
 
 * the file is marked `confirmed: true`,
 * every entry matches at least one complaint (catches typos),
-* no complaint matches both a positive and a reviewed-negative entry, and
+* no complaint matches more than one of positive, reviewed-negative and
+  excluded, and
 * every keyword candidate inside the target products has been classified as
-  either positive or reviewed-negative.
+  positive, reviewed-negative or excluded.
 """
 
 from __future__ import annotations
@@ -80,19 +83,30 @@ class CategoryConfig:
     target_products: tuple[str, ...]
     positive: tuple[CategoryRule, ...]
     reviewed_negative: tuple[CategoryRule, ...]
+    excluded: tuple[CategoryRule, ...] = ()
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> CategoryConfig:
         for key in ("confirmed", "target_products", "positive", "reviewed_negative"):
             if key not in data:
                 raise LabelConfigError(f"categories file is missing '{key}'")
+
+        def rules(key: str) -> tuple[CategoryRule, ...]:
+            return tuple(CategoryRule.from_dict(e) for e in data.get(key) or [])
+
         return CategoryConfig(
             confirmed=data["confirmed"] is True,
             target_products=tuple(str(p) for p in data["target_products"]),
-            positive=tuple(CategoryRule.from_dict(e) for e in data["positive"] or []),
-            reviewed_negative=tuple(
-                CategoryRule.from_dict(e) for e in data["reviewed_negative"] or []
-            ),
+            positive=rules("positive"),
+            reviewed_negative=rules("reviewed_negative"),
+            excluded=rules("excluded"),  # optional: older files have none
+        )
+
+    def lists(self) -> tuple[tuple[str, tuple[CategoryRule, ...]], ...]:
+        return (
+            ("positive", self.positive),
+            ("reviewed_negative", self.reviewed_negative),
+            ("excluded", self.excluded),
         )
 
 
@@ -127,26 +141,27 @@ def validate_categories(df: pd.DataFrame, cfg: CategoryConfig) -> None:
     if missing_products:
         problems.append(f"target_products not found in the data: {missing_products}")
 
-    for kind, rules in (
-        ("positive", cfg.positive),
-        ("reviewed_negative", cfg.reviewed_negative),
-    ):
+    masks = {}
+    for kind, rules in cfg.lists():
         for rule in rules:
             if not rule.matches(df).any():
                 problems.append(f"{kind} entry matches no complaints: {rule}")
+        masks[kind] = any_match(df, rules)
 
-    both = any_match(df, cfg.positive) & any_match(df, cfg.reviewed_negative)
-    if both.any():
-        combos = _combos(df[both])
-        problems.append(f"complaints match both positive and reviewed_negative: {combos}")
+    kinds = list(masks)
+    for i, a in enumerate(kinds):
+        for b in kinds[i + 1 :]:
+            both = masks[a] & masks[b]
+            if both.any():
+                problems.append(f"complaints match both {a} and {b}: {_combos(df[both])}")
 
     in_target = df[C.PRODUCT].isin(cfg.target_products)
-    covered = any_match(df, cfg.positive) | any_match(df, cfg.reviewed_negative)
+    covered = masks["positive"] | masks["reviewed_negative"] | masks["excluded"]
     uncovered = in_target & is_candidate(df) & ~covered
     if uncovered.any():
         problems.append(
-            "keyword candidates in target products are not classified as positive "
-            f"or reviewed_negative: {_combos(df[uncovered])}"
+            "keyword candidates in target products are not classified as positive, "
+            f"reviewed_negative or excluded: {_combos(df[uncovered])}"
         )
 
     if problems:
@@ -160,10 +175,22 @@ def _combos(df: pd.DataFrame) -> list[tuple[str, str, str]]:
 
 
 def apply_labels(df: pd.DataFrame, cfg: CategoryConfig) -> pd.DataFrame:
-    """Keep target products, add the binary label, and drop Issue/Sub-issue."""
-    out = df[df[C.PRODUCT].isin(cfg.target_products)].copy()
+    """Keep target products, drop excluded categories, add the binary label, and
+    drop Issue/Sub-issue."""
+    out = df[df[C.PRODUCT].isin(cfg.target_products)]
+    out = out[~any_match(out, cfg.excluded)].copy()
     out[C.LABEL] = any_match(out, cfg.positive).astype("int8")
     return out.drop(columns=list(C.LABEL_SOURCE_COLUMNS)).reset_index(drop=True)
+
+
+def excluded_report(df: pd.DataFrame, cfg: CategoryConfig) -> pd.DataFrame:
+    """Complaints in the target products removed by the `excluded` list, per
+    category (for the label stage's report)."""
+    in_target = df[df[C.PRODUCT].isin(cfg.target_products)]
+    dropped = in_target[any_match(in_target, cfg.excluded)]
+    keys = [C.PRODUCT, C.ISSUE, C.SUB_ISSUE]
+    counts = dropped[keys].astype("string").fillna("<missing>").value_counts()
+    return counts.rename("n_complaints").reset_index()
 
 
 def candidate_report(df: pd.DataFrame, cfg: CategoryConfig | None) -> pd.DataFrame:
@@ -181,6 +208,7 @@ def candidate_report(df: pd.DataFrame, cfg: CategoryConfig | None) -> pd.DataFra
         report["rule_reviewed_negative"] = any_match(
             combos, cfg.reviewed_negative
         ).to_numpy()
+        report["rule_excluded"] = any_match(combos, cfg.excluded).to_numpy()
     report[keys] = shown
     return report.sort_values(
         [C.PRODUCT, "n_complaints"], ascending=[True, False], ignore_index=True

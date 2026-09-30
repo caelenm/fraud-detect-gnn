@@ -81,9 +81,30 @@ def test_every_model_must_have_a_shared_cv_score():
     with pytest.raises(ReportError, match="no shared cross-validation"):
         metrics_table(entries, tuned, Y_TEST, partial)
     failed = fake_shared_cv(keys)
-    failed.loc[1, "error"] = "RuntimeError: CUDA out of memory"
+    tuned_lgbm = (failed["model_cls"] == "LightGBMClassifier") & (
+        failed["settings"] == "tuned"
+    )
+    failed.loc[tuned_lgbm, "error"] = "RuntimeError: CUDA out of memory"
     with pytest.raises(ReportError, match="could not be cross-validated"):
         metrics_table(entries, tuned, Y_TEST, failed)
+
+
+def test_tuning_gain_is_tuned_minus_default_and_default_failures_are_not_fatal():
+    keys = {("dummy", "none"): 0.16, ("lgbm", "none"): 0.60, ("catboost", "none"): 0.62}
+    entries, tuned = fake_df_analyze_results(Y_TEST, keys)
+    cv = fake_shared_cv(keys, default_offset=0.03)  # tuning made PR-AUC worse
+    table = metrics_table(entries, tuned, Y_TEST, cv).set_index("model")
+    assert table.loc["lgbm", "cv_pr_auc_default"] == pytest.approx(0.63)
+    assert table.loc["lgbm", "cv_tuning_gain"] == pytest.approx(-0.03)
+    assert choose_model_a(table.reset_index())["model"] == "catboost"  # tuned only
+
+    default_cat = (cv["model_cls"] == "CatBoostClassifier") & (
+        cv["settings"] == "default"
+    )
+    cv.loc[default_cat, "error"] = "ValueError: synthetic failure"
+    table = metrics_table(entries, tuned, Y_TEST, cv).set_index("model")
+    assert np.isnan(table.loc["catboost", "cv_pr_auc_default"])
+    assert np.isnan(table.loc["catboost", "cv_tuning_gain"])
 
 
 def test_dummy_pr_auc_is_close_to_the_positive_rate():

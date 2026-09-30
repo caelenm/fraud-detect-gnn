@@ -4,7 +4,7 @@
 
 Course project for CS555: Data Mining and Machine Learning, St. Francis Xavier University (StFX).
 
-> **Status:** early development. Stages 1–9 (data loading through the df-analyze baseline) are implemented and tested on synthetic data; they have not yet been run on the real archive. The graph, GNN, evaluation, and explanation stages are still planned. No results yet.
+> **Status:** Stages 1–12 (data loading through the df-analyze baseline, fair model selection, and the web report) are implemented and have been run on the real archive under label rule version 1. Those results are superseded by label rule version 2 (see [`docs/LABEL_RULE.md`](docs/LABEL_RULE.md)), which needs a full rerun. The graph, GNN, evaluation, and explanation stages are still planned.
 
 ---
 
@@ -54,16 +54,23 @@ Our 30,000-complaint sample needs only a small fraction of this range.
 
 ### Label
 
-A complaint is **positive (1)** if its Issue or Sub-issue describes fraud, a scam, identity theft, or unauthorized transactions, and **negative (0)** otherwise. Issue and Sub-issue are removed from all feature sets to prevent label leakage. A random sample of labels is hand-checked to estimate how noisy this rule is.
+A complaint is **positive (1)** if the Issue or Sub-issue the consumer chose describes fraud, a scam, identity theft, or an unauthorized transaction, and **negative (0)** otherwise. Categories too ambiguous to call either way are **excluded**: their complaints are removed before sampling. Issue and Sub-issue are removed from all feature sets to prevent label leakage. A random sample of labels is hand-checked to estimate how noisy this rule is.
 
-The rule is an **explicit, reviewed allow-list** of (Product, Issue, Sub-issue) values in [`configs/categories.yaml`](configs/categories.yaml), not a keyword match. Keyword matching would mislabel categories such as "Identity theft protection or other monitoring services" or "Problem with fraud alerts or security freezes", which contain the keywords but are not fraud events. The `load` stage writes every category combination with its count and flags keyword candidates. The `label` stage refuses to run until the file is marked `confirmed: true`, every entry matches at least one complaint, and every keyword candidate in the target products has been classified as positive or reviewed-negative.
+**[`docs/LABEL_RULE.md`](docs/LABEL_RULE.md) lists how every category is treated, with the reasons.**
 
-The reviewed rule (checked against the category report from archives 2–4):
+The rule is an **explicit, reviewed allow-list** of (Product, Issue, Sub-issue) values in [`configs/categories.yaml`](configs/categories.yaml), not a keyword match. Keyword matching would mislabel categories such as "Credit monitoring or identity theft protection services" or "Problem with fraud alerts or security freezes", which contain the keywords but are not fraud events. The `load` stage writes every category combination with its count and flags keyword candidates. The `label` stage refuses to run until:
+- the file is marked `confirmed: true`;
+- every entry matches at least one complaint;
+- no category is in two lists;
+- every keyword candidate in the target products is listed as positive, reviewed-negative or excluded.
 
-- **Positive:** debt collection "Debt was result of identity theft"; money transfer "Fraud or scam" and "Unauthorized transactions or other transaction problem"; card charges the consumer did not make, and cards opened through identity theft, fraud, or without consent; checking/savings unauthorized transactions, and accounts opened through fraud or without consent.
-- **Reviewed negative:** complaints about credit monitoring / identity theft protection services and about fraud alerts or security freezes; "Information belongs to someone else" and "Credit inquiries on your report that you don't recognize" (these could be identity theft, but also mixed-up credit files or forgotten legitimate inquiries, so they are too ambiguous); lost or stolen checks and money orders.
+**Rule version 2** (2026-09-29) comes from a category-by-category review, decided on the meaning of each category only, before looking at any model errors:
+- **Positive:** debt collection "Debt was result of identity theft", **"Debt is not yours"** and **"Impersonated attorney, law enforcement, or government official"**; money transfer "Fraud or scam" and "Unauthorized transactions or other transaction problem"; card charges the consumer did not make, and cards opened through identity theft, fraud, or without consent; checking/savings unauthorized transactions, and accounts opened through fraud or without consent.
+- **Excluded:** the card company not resolving a purchase dispute; cards sent that were never applied for; "Information belongs to someone else"; credit inquiries the consumer doesn't recognize; lost or stolen checks and money orders (lost is not fraud, stolen is, and the category does not separate them); credit monitoring and fraud-alert services.
 
-Before deduplication, 59,663 of the 355,039 target-product complaints with narratives (16.8%) are positive. Debt collection "Debt was result of identity theft" alone accounts for 22,562 of them (38%).
+Before deduplication, 98,723 of the 334,773 labelled target-product complaints with narratives (**29.5%**) are positive, and 20,266 complaints are excluded. Debt collection is now 39.6% fraud and supplies 62% of the positives.
+
+Version 1, used for the first df-analyze results, labelled "Debt is not yours" and "Impersonated…" 0, and labelled the excluded categories 0 as well. Its fraud rate was 16.8% (59,663 of 355,039). Results from the two versions are not comparable.
 
 ### Sample
 
@@ -94,7 +101,7 @@ The company name itself is not a Model A feature; in the GNN it becomes the comp
 We pass our own train and test tables to df-analyze (`--df-train` / `--df-tests`), so both models use exactly the same held-out complaints. Classifiers are LightGBM, logistic regression, CatBoost, GANDALF, random forest and kNN, plus df-analyze's dummy baseline, which it adds automatically. CatBoost and GANDALF train on the GPU when df-analyze's environment can see CUDA; the others run on the CPU. df-analyze's MLP is left out for now. df-analyze pins it to the CPU, where it uses up its 60-minute tuning limit on each of the 4 feature sets and adds about 4 hours per run. GANDALF is still included as a neural network. df-analyze runs its filter and embedded feature selection (wrapper selection is off). It tunes hyperparameters with Optuna for 100 trials, using **balanced accuracy** (at the 0.5 cut-off) for every model. The prediction-based filter selection uses AUROC, computed from probabilities, and picks the same features for every model. Both settings are configurable in `configs/default.yaml`.
 
 **Why balanced accuracy, not AUROC or accuracy.**
-- **Not accuracy** (df-analyze's default): with about 16% positives, always predicting "not fraud" already scores 0.84.
+- **Not accuracy** (df-analyze's default): with about 30% positives (16% under label rule v1), always predicting "not fraud" already scores about 0.70 (0.84 under v1).
 - **Not AUROC:** when asked to tune on AUROC, df-analyze silently scores most models on balanced accuracy of hard 0/1 predictions instead (`enumerables.py`, `ClassifierScorer.tuning_score`), but scores GANDALF on real AUROC through its own code path. Models would then be tuned toward different goals, and their tuning scores would not be comparable. An earlier run did exactly this: GANDALF's tuning "AUROC" of about 0.91 was a different quantity from CatBoost's 0.70, which was really balanced accuracy.
 - **Balanced accuracy** is computed the same way for every model.
 
@@ -210,6 +217,20 @@ uv run run.py --from df_analyze --force --set df_analyze.htune_trials=10  # pilo
 
 `--set section.key=value` overrides one config value for a single invocation (repeatable; the key must already exist in the config). The overridden config is what gets saved in the run log.
 
+### Stopping and resuming
+
+A run can be stopped at any time with Ctrl+C, by closing the terminal, or by shutting the computer down. Continue it later with:
+
+```bash
+uv run run.py --resume
+```
+
+- **Every finished stage is kept.** When `run.py` starts, it records the stages it still has to run in `outputs/pipeline_state.json` and ticks each one off as it completes. `--resume` runs exactly the remaining stages. While an interrupted run is pending, a plain `uv run run.py` refuses to start, so stale outputs from an earlier run are never mistaken for finished work. Use `--resume` to continue, or `--force` to start over.
+- **Long stages also save inside themselves.** `select_model` saves every finished fit, so a resume redoes only the fit that was interrupted. Stages added later (for example one GNN fit per model and seed) use the same per-unit checkpoints (`outputs/checkpoints/<stage>/`).
+- **Some stages restart from their beginning:** `df_analyze` (about 4–5 h) runs all classifiers in one process that cannot be paused, and `embed` (about 30 min) is a single unit. Running df-analyze once per classifier would allow resuming between models. It was rejected because df-analyze's feature selection is not seeded, so separate runs could give different models different feature sets.
+- **A resume refuses a changed config**, because the finished stages were computed with the old one. Start over with `--force` instead.
+- **Watchdog.** If one configuration in `select_model` takes longer than `select_model.config_timeout_s` (30 min), the stage prints every thread's stack to `model_selection.log` and fails instead of hanging. On WSL a hang like this has come from the GPU link getting stuck (`nvidia-smi` stops responding). Run `wsl --shutdown` in Windows PowerShell, open WSL again, then `uv run run.py --resume`.
+
 Each stage can also be run on its own with `uv run scripts/NN_<stage>.py`.
 
 | # | Stage | What it does | Main outputs |
@@ -223,16 +244,21 @@ Each stage can also be run on its own with `uv run scripts/NN_<stage>.py`.
 | 7 | `features` | Tabular and company features (training statistics only) | `data/processed/tabular_features.parquet` |
 | 8 | `df_analyze_input` | Writes the df-analyze train/test tables (no identifiers) | `data/processed/df_analyze/{train,test}.parquet` |
 | 9 | `df_analyze` | Runs df-analyze (Model A) and checks its exported split against ours | `outputs/df_analyze/<timestamp>/`, `outputs/reports/df_analyze_split_check.json` |
-| 10 | `select_model` | Refits every tuned df-analyze combination on the same 5 folds of the training set and scores it from probabilities (PR-AUC, AUROC, balanced accuracy, Brier); records each model's tuning budget | `outputs/reports/model_selection_cv.csv`, `tuning_budget.csv` |
+| 10 | `select_model` | Refits every tuned df-analyze combination on the same 5 folds of the training set and scores it from probabilities (PR-AUC, AUROC, balanced accuracy, Brier), with its tuned settings and with df-analyze's default settings (the before-tuning baseline); records each model's tuning budget | `outputs/reports/model_selection_cv.csv`, `tuning_budget.csv` |
 | 11 | `df_analyze_report` | Test-set metrics for every tuned df-analyze model, computed from its saved probabilities (PR-AUC, AUROC, fraud-class F1/precision/recall, accuracy, balanced accuracy); picks Model A by shared-CV PR-AUC only | `outputs/reports/model_a_report.md`, `model_a_metrics.csv`, `model_a.json` |
+| 12 | `web_report` | One self-contained HTML page: Model A's configuration, tuned hyperparameters, test metrics and confusion matrix; every tuned model; the tuning budget; the run configuration; and two scrollable cards of Model A's most and least confident test predictions. Placeholders are reserved for Model B and inter-model agreement | `outputs/report/index.html` |
 
-**The label rule is already reviewed** (`configs/categories.yaml`, `confirmed: true`). If the data or the rule changes, rerun `load`, check `outputs/reports/category_values.csv`, and make sure every keyword candidate in the target products is listed as `positive` or `reviewed_negative`. The `label` stage explains exactly what is missing if the file is not consistent with the data.
+**Viewing the web report.** It needs no server. On Windows with WSL, run `explorer.exe outputs/report/index.html` from the repo folder, or open `\\wsl.localhost\<distro>\home\<user>\...\fraud-detect-gnn\outputs\report\index.html` in a browser. On Linux or macOS, open the file directly. The page contains complaint narratives: share it only with the group, the same way as the bundle, and never commit or post it. Confidence is the probability the model's output gives the class it predicted, so it runs from 0.5 to 1.0. Very small and very large probabilities are shown in scientific notation (e.g. `1 − 6.4e-07`) so they stay distinguishable.
+
+**The label rule is already reviewed** (`configs/categories.yaml`, `confirmed: true`, rule version 2; see `docs/LABEL_RULE.md`). If the data or the rule changes, rerun `load`, check `outputs/reports/category_values.csv`, and make sure every keyword candidate in the target products is listed as `positive`, `reviewed_negative` or `excluded`. The `label` stage writes the excluded complaints per category to `outputs/reports/label_excluded.csv`. The `label` stage explains exactly what is missing if the file is not consistent with the data.
 
 Every invocation writes its config, seed, git commit, and package versions to `outputs/runs/<timestamp>/`.
 
 **GPU:** with `gpu.require: true` (the default), the `embed` and `df_analyze` stages first check that df-analyze's environment can see a CUDA GPU. They stop with troubleshooting steps if it can't, and record the GPU in `outputs/runs/<timestamp>/cuda_info_*.json`. Set `gpu.require: false` on machines without an NVIDIA GPU; embedding then runs on the CPU, which takes hours for 30,000 narratives.
 
-**Runtime notes:** long narratives are truncated to the model's 512-token limit. df-analyze's runtime grows with the number of classifiers and `htune_trials` (each Optuna trial for GANDALF trains a neural network), so consider a pilot run with fewer trials first. Each model is tuned separately on each of df-analyze's 4 feature sets, and df-analyze stops each tuning run at a fixed time limit (15–60 minutes depending on the model). A full run on an RTX 4060 laptop therefore takes roughly 12–16 hours, plus under an hour for `select_model`. Because of these time limits, the number of trials actually completed, and so the results, can depend on how fast the machine is.
+**Runtime notes:** long narratives are truncated to the model's 512-token limit. df-analyze's runtime grows with the number of classifiers and `htune_trials` (each Optuna trial for GANDALF trains a neural network), so consider a pilot run with fewer trials first. Each model is tuned separately on each of df-analyze's 4 feature sets, and df-analyze stops each tuning run at a fixed time limit (15–60 minutes depending on the model). In practice most searches end earlier: once 50 settings have been tried, the search stops if the last 15 found nothing better. That means the settings search has settled; it does not mean the model failed to learn. The full run of 2026-09-28 on an RTX 4060 laptop (WSL2) took 4 h 07 min for df-analyze. `select_model` took 17 min scoring tuned settings only, and about twice that now that it also scores default settings.
+
+**Effect of tuning.** `select_model` also refits every (model, feature set) with **df-analyze's default hyperparameters** on the same folds. The reports show cross-validated PR-AUC untuned vs. tuned, and the difference as the tuning gain. The true first try of the search cannot be reproduced, because df-analyze saves only the best settings. Tuning optimises balanced accuracy, not PR-AUC, so the gain can be negative. Only the tuned scores are used to choose Model A. The worst case, with every model hitting its time limit, is about 12–16 hours. Because of these time limits, the number of trials actually completed, and so the results, can depend on how fast the machine is.
 
 ### Sharing outputs with the group
 
@@ -286,7 +312,8 @@ fraud-detect-gnn/
 │   ├── cli.py           # command line shared by run.py and scripts/
 │   ├── data/            # loading, labelling, deduplication, sampling
 │   ├── features/        # embeddings, PCA, tabular features
-│   ├── models/          # df-analyze (Model A); GNN later
+│   ├── models/          # df-analyze (Model A), fair model selection; GNN later
+│   ├── report/          # static HTML report (web.py, report.css)
 │   ├── external.py      # runs df-analyze scripts in their own environment
 │   ├── artifacts.py     # packing and unpacking output bundles
 │   └── runlog.py        # seeds and run metadata
