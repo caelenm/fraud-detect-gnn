@@ -34,7 +34,7 @@ STATE_FILE = "pipeline_state.json"
 CHECKPOINT_DIR = "checkpoints"
 
 
-def _atomic_write(path: Path, text: str) -> None:
+def atomic_write_text(path: Path, text: str) -> None:
     """Write via a temporary file so a crash never leaves a half-written file."""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
@@ -68,7 +68,7 @@ class RunState:
         return cls(**json.loads(path.read_text(encoding="utf-8")))
 
     def save(self, outputs_dir: Path) -> None:
-        _atomic_write(self.path(outputs_dir), json.dumps(asdict(self), indent=2))
+        atomic_write_text(self.path(outputs_dir), json.dumps(asdict(self), indent=2))
 
     def mark_done(self, stage: str, outputs_dir: Path) -> None:
         """Record a finished stage; delete the state file once none remain."""
@@ -101,7 +101,7 @@ class UnitStore:
 
     def save(self, unit: str, result: dict[str, Any]) -> None:
         payload = {"unit": unit, "saved_utc": datetime.now(UTC).isoformat(), **result}
-        _atomic_write(self._file(unit), json.dumps(payload, indent=2, default=str))
+        atomic_write_text(self._file(unit), json.dumps(payload, indent=2, default=str))
 
     def load(self, unit: str) -> dict[str, Any]:
         return json.loads(self._file(unit).read_text(encoding="utf-8"))

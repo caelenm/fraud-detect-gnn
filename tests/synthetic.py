@@ -241,3 +241,29 @@ def fake_shared_cv(
                 }
             )
     return pd.DataFrame(rows)
+
+
+def renamed_product_complaints() -> pd.DataFrame:
+    """Invented complaints where a product is renamed part-way through, the
+    pattern the label audit must make visible. "Synthetic product OLD" exists in
+    2019-2020 (half fraud), "Synthetic product NEW" only in 2021 (no fraud), and
+    "Synthetic product STABLE" in every year (one fraud in four)."""
+    rows = []
+    for year in (2019, 2020):
+        for i in range(4):
+            rows.append(("Synthetic product OLD", f"{year}-03-0{i + 1}", i % 2))
+    for i in range(4):
+        rows.append(("Synthetic product NEW", f"2021-0{i + 5}-01", 0))
+    for year in (2019, 2020, 2021):
+        for i in range(4):
+            rows.append(("Synthetic product STABLE", f"{year}-07-0{i + 1}", int(i == 0)))
+    return pd.DataFrame(
+        {
+            C.PRODUCT: [r[0] for r in rows],
+            C.SUB_PRODUCT: [
+                None if i % 3 == 0 else "Synthetic sub 1" for i in range(len(rows))
+            ],
+            C.DATE_RECEIVED: pd.to_datetime([r[1] for r in rows]),
+            C.LABEL: np.array([r[2] for r in rows], dtype="int8"),
+        }
+    )
