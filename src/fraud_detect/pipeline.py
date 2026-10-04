@@ -21,13 +21,13 @@ import pyarrow.parquet as pq
 
 from fraud_detect import columns as C
 from fraud_detect.config import REPO_ROOT, Paths, df_analyze_dir, load_yaml
-from fraud_detect.data import dedup, label, load, sample
+from fraud_detect.data import audit, dedup, label, load, sample
 from fraud_detect.external import ExternalToolError, run_df_analyze_script
 from fraud_detect.features import tabular, text
 from fraud_detect.models import df_analyze, df_analyze_report, selection
 from fraud_detect.report import web
 from fraud_detect.runlog import git_commit, write_json
-from fraud_detect.runstate import CHECKPOINT_DIR, UnitStore
+from fraud_detect.runstate import CHECKPOINT_DIR, UnitStore, atomic_write_text
 
 
 class StageError(RuntimeError):
@@ -654,6 +654,49 @@ def run_web_report(ctx: Context) -> None:
     print(f"Saved the web report to {out}")
 
 
+# --------------------------------------------------------------------------
+# Stage 13: label shortcut audit (fraud rate by product name x year)
+# --------------------------------------------------------------------------
+# It only reads the labelled data and the sample, but it sits at the end of
+# STAGES on purpose: run.py reruns every stage after the first one with missing
+# outputs, so placing it after `label` would rerun embedding and df-analyze.
+LABEL_AUDIT_REPORT = "label_audit.md"
+LABEL_AUDIT_TABLES = (
+    "label_audit_product_year.csv",
+    "label_audit_sub_product_year.csv",
+    "label_audit_product_span.csv",
+)
+AUDIT_COLUMNS = [C.PRODUCT, C.SUB_PRODUCT, C.DATE_RECEIVED, C.LABEL]
+
+
+def run_label_audit(ctx: Context) -> None:
+    p = ctx.paths
+    _require(p.labeled, p.sample)
+    labeled = pd.read_parquet(p.labeled, columns=AUDIT_COLUMNS)
+    sampled = pd.read_parquet(p.sample, columns=AUDIT_COLUMNS)
+
+    def both(build: Callable[[pd.DataFrame], pd.DataFrame]) -> pd.DataFrame:
+        return pd.concat(
+            [build(labeled).assign(dataset="labelled"),
+             build(sampled).assign(dataset="sample")],
+            ignore_index=True,
+        )  # fmt: skip
+
+    by_year, by_sub_product, span = LABEL_AUDIT_TABLES
+    tables = {
+        by_year: both(audit.product_year),
+        by_sub_product: both(audit.sub_product_year),
+        span: audit.product_span(labeled),
+    }
+    for name, table in tables.items():
+        atomic_write_text(p.reports_dir / name, table.to_csv(index=False))
+    report = audit.audit_report(labeled, sampled)
+    # Written last, so the stage counts as finished only when everything is saved.
+    atomic_write_text(p.reports_dir / LABEL_AUDIT_REPORT, report)
+    print(report)
+    print(f"Saved the audit to {p.reports_dir / LABEL_AUDIT_REPORT}")
+
+
 STAGES: list[Stage] = [
     Stage("load", "Read archives 2-4, keep narratives, report categories", run_load,
           lambda p: [p.complaints, p.reports_dir / "category_values.csv"]),
@@ -684,6 +727,10 @@ STAGES: list[Stage] = [
                      p.reports_dir / MODEL_A_SUMMARY]),
     Stage("web_report", "HTML report: parameters, results, confidence cards",
           run_web_report, lambda p: [web_report_path(p)]),
+    Stage("label_audit", "Label shortcut check: fraud rate by product x year",
+          run_label_audit,
+          lambda p: [p.reports_dir / LABEL_AUDIT_REPORT,
+                     *(p.reports_dir / t for t in LABEL_AUDIT_TABLES)]),
 ]  # fmt: skip
 
 STAGE_NAMES = [s.name for s in STAGES]
