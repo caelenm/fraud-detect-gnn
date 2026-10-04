@@ -4,7 +4,7 @@
 
 Course project for CS555: Data Mining and Machine Learning, St. Francis Xavier University (StFX).
 
-> **Status:** Stages 1–12 (data loading through the df-analyze baseline, fair model selection, and the web report) are implemented and have been run on the real archive. Results under label rule version 1 are superseded by version 2 (see [`docs/LABEL_RULE.md`](docs/LABEL_RULE.md)). Stage 13 (a label shortcut audit) is implemented. The plan now compares four models on two datasets (see [Comparison design](#comparison-design)); the neighbour-feature model, the graphs, the GNNs, AMLworld, evaluation and explanation are still planned.
+> **Status:** Stages 1–12 (data loading through the df-analyze baseline, fair model selection, and the web report) are implemented and have been run on the real archive. Results under label rule version 1 are superseded by version 2 (see [`docs/LABEL_RULE.md`](docs/LABEL_RULE.md)). Stage 13 (a label shortcut audit) is implemented. The plan now compares four models on two datasets (see [Comparison design](#comparison-design), and [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md) for the full research plan: hypotheses, dataset findings, protocols, milestones and open decisions); the neighbour-feature model, the graphs, the GNNs, AMLworld, evaluation and explanation are still planned.
 
 ---
 
@@ -353,6 +353,9 @@ fraud-detect-gnn/
 ├── pack_artifacts.py    # bundles stage outputs into a .tgz to share (not via git)
 ├── unpack_artifacts.py  # restores a bundle so run.py skips finished stages
 ├── pyproject.toml / uv.lock / .python-version
+├── docs/
+│   ├── RESEARCH_PLAN.md # hypotheses, protocols, milestones, open decisions
+│   └── LABEL_RULE.md    # how every complaint category is labelled
 ├── configs/
 │   ├── default.yaml     # paths, sampling, dedup, split, PCA, df-analyze settings
 │   └── categories.yaml  # reviewed label rule and product filter

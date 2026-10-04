@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Instructions for AI coding agents (primarily Claude Code) working in this repository. Read this file fully before making changes. `README.md` describes the research design; this file describes how to work on it.
+Instructions for AI coding agents (primarily Claude Code) working in this repository. Read this file fully before making changes. `README.md` describes the research design; this file describes how to work on it. **[`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md) is the working research plan:** hypotheses, dataset findings, protocols, milestones with acceptance criteria, and the open decisions. Read it before picking up any work item. If it conflicts with this file, this file wins.
 
 ## Project in one paragraph
 
