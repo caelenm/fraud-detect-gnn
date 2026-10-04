@@ -33,6 +33,8 @@ __pycache__/
 # Secrets and local config
 .env
 .env.*
+kaggle.json
+.kaggle/
 
 # OS / editor
 .DS_Store

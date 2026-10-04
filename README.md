@@ -1,10 +1,10 @@
 # fraud-detect-gnn
 
-**Does a graph help? Tabular models vs. graph neural networks for fraud classification, on a constructed graph (CFPB complaints) and a real one (Elliptic Bitcoin transactions)**
+**Does a graph help? Tabular models vs. graph neural networks for fraud classification, on a constructed graph (CFPB complaints) and an observed transaction graph (IBM AMLworld)**
 
 Course project for CS555: Data Mining and Machine Learning, St. Francis Xavier University (StFX).
 
-> **Status:** Stages 1–12 (data loading through the df-analyze baseline, fair model selection, and the web report) are implemented and have been run on the real archive. Results under label rule version 1 are superseded by version 2 (see [`docs/LABEL_RULE.md`](docs/LABEL_RULE.md)). Stage 13 (a label shortcut audit) is implemented. The plan now compares four models on two datasets (see [Comparison design](#comparison-design)); the neighbour-feature model, the graphs, the GNNs, Elliptic, evaluation and explanation are still planned.
+> **Status:** Stages 1–12 (data loading through the df-analyze baseline, fair model selection, and the web report) are implemented and have been run on the real archive. Results under label rule version 1 are superseded by version 2 (see [`docs/LABEL_RULE.md`](docs/LABEL_RULE.md)). Stage 13 (a label shortcut audit) is implemented. The plan now compares four models on two datasets (see [Comparison design](#comparison-design)); the neighbour-feature model, the graphs, the GNNs, AMLworld, evaluation and explanation are still planned.
 
 ---
 
@@ -13,9 +13,9 @@ Course project for CS555: Data Mining and Machine Learning, St. Francis Xavier U
 This project asks one question: **does using a graph improve fraud classification over the same kind of model without one?** We answer it with the same four models (see [Comparison design](#comparison-design)) on two datasets:
 
 - **CFPB consumer complaints**, where there is no observed network (consumers are anonymous), so the graph has to be *constructed* from each complaint's own attributes: its company, product, state, and optionally text similarity.
-- **The Elliptic Bitcoin transaction graph**, where the edges are *real* payment flows between transactions.
+- **IBM AMLworld (HI-Small)**, a money-laundering dataset where the graph is *observed*: every transaction moves money from one bank account to another. The transactions are simulated, but the simulation is calibrated against real transaction data.
 
-The interesting result is the contrast: whether the graph helps where the relationships are real but not where they are built from features the tabular model already sees. Either outcome is reported as it is.
+The interesting result is the contrast: whether the graph helps where the relationships are observed (money moving between accounts) but not where they are built from features the tabular model already sees. Either outcome is reported as it is.
 
 On CFPB the task is **classifying fraud-related complaints**, not detecting fraud. The label is the category the consumer chose when filing, and the strongest features are narrative embeddings, so a model mostly learns whether a complaint is *about* fraud (for example, "I am a victim of identity theft…"). That is a legitimate text-classification task, and results are described that way.
 
@@ -27,7 +27,7 @@ The models are explained with feature-importance methods so we can compare *what
 ## Research questions
 
 1. Does a graph improve on the same model without one? If it does, is message passing needed, or do neighbour-aggregated features in a tree model capture the same information?
-2. Does the answer differ between a constructed graph (CFPB) and a real one (Elliptic)?
+2. Does the answer differ between a constructed graph (CFPB) and an observed transaction graph (AMLworld)?
 3. Which feature groups (on CFPB: complaint text, company, product, region) drive each model's predictions, and do the models agree?
 
 ## Comparison design
@@ -36,16 +36,18 @@ Each dataset gets the same four models, trained on the same split and scored on 
 
 | # | Model | Uses the graph's information? | Message passing? |
 |---|---|---|---|
-| 1 | **Tabular:** df-analyze's best model on each node's own features (Model A) | no | no |
-| 2 | **Tabular + neighbour features:** the same pipeline, with each node's own features plus aggregates of its neighbours' features (never their labels), following GADBench | yes | no |
-| 3 | **Graph-free control:** the GNN below with all edges removed (an MLP on each node's own features) | no | no |
-| 4 | **GNN:** GraphSAGE over the graph (heterogeneous on CFPB, homogeneous on Elliptic) | yes | yes |
+| 1 | **Tabular:** df-analyze's best model on each example's own features (a complaint, or a transaction) (Model A) | no | no |
+| 2 | **Tabular + neighbour features:** the same pipeline, with each example's own features plus aggregates of its graph neighbours' features (never their labels), following GADBench | yes | no |
+| 3 | **Graph-free control:** the GNN below with all edges removed (an MLP on each example's own features) | no | no |
+| 4 | **GNN:** heterogeneous GraphSAGE over the graph (complaints with their company, product and region on CFPB; transactions with their sending and receiving accounts on AMLworld) | yes | yes |
 
 - **4 vs. 3:** does message passing over the graph help, with the architecture held fixed?
 - **2 vs. 1:** does the graph's information help a tree model?
 - **4 vs. 2:** given the same graph information, does message passing beat simple aggregation? GADBench (NeurIPS 2023) found that tree ensembles with neighbourhood aggregation often match or beat GNNs built for fraud and anomaly detection.
 
-On CFPB the edges are built from features Models 1 and 3 already see, so the expected result is GNN ≈ graph-free control. That is a finding, not a failure, and the Elliptic contrast is what makes it informative.
+**Every model uses the same data.** On each dataset, all four models are trained on the same labelled training examples and scored on the same test examples with the same metrics. Models 2 and 4 additionally see the graph around those examples, without labels; that is the difference being measured.
+
+On CFPB the edges are built from features Models 1 and 3 already see, so the expected result is GNN ≈ graph-free control. That is a finding, not a failure, and the AMLworld contrast is what makes it informative.
 
 ## Data
 
@@ -61,12 +63,6 @@ On August 14, 2026 the CFPB stopped publishing complaint narratives in the live 
 Our 30,000-complaint sample needs only a small fraction of this range.
 
 **Data is not included in this repository.** Run `./download_dataset.sh` to fetch the three archive files into `data/raw/` (see [Setup](#setup)).
-
-### Second dataset: Elliptic (planned)
-
-The [Elliptic Bitcoin dataset](https://www.kaggle.com/datasets/ellipticco/elliptic-data-set) (Weber et al., 2019) is a real transaction graph at course scale: 203,769 transactions (nodes), 234,355 payment flows (directed edges), and 49 time steps. About 4.5K transactions are labelled illicit, 42K licit, and the rest unknown. Each node has 166 features: the time step plus 93 local features describing the transaction itself, and 72 features that aggregate its one-hop neighbourhood. PyTorch Geometric ships a loader (`EllipticBitcoinDataset`). Like CFPB, it is downloaded locally and never committed.
-
-It suits the comparison for three reasons. Its edges are observed, not constructed. Its 72 pre-aggregated neighbour features map exactly onto Model 2 (local features only vs. local plus aggregated). And the original paper found that a random forest on all features beat a graph convolutional network, so the tabular arms are a strong, published baseline.
 
 | Field | Type | Use in this project |
 |---|---|---|
@@ -106,6 +102,19 @@ Version 1, used for the first df-analyze results, labelled "Debt is not yours" a
 30,000 complaints with narratives from fraud-prone products: credit cards and prepaid cards (including their 2023 renames "Credit card" and "Prepaid card"), checking and savings accounts, money transfers, and debt collection. The exact product names are in `configs/categories.yaml`. The sample is drawn by stratified random sampling so that the natural fraud rate is preserved. This size keeps df-analyze runs tractable on a single machine.
 
 Near-duplicate narratives are removed before sampling and splitting, so that copies of the same text cannot appear in both train and test. Narratives are normalised (lower-cased, CFPB `XXXX` redactions collapsed, punctuation removed) and compared with MinHash LSH on word 5-gram shingles. Pairs with estimated Jaccard similarity ≥ 0.85 are grouped, and each group keeps its earliest complaint. To keep this cheap, deduplication runs on a stratified pool 1.5× the sample size, and the final sample is drawn from the deduplicated pool.
+
+### Second dataset: IBM AMLworld (planned)
+
+[AMLworld](https://www.kaggle.com/datasets/ealtman2019/ibm-transactions-for-anti-money-laundering-aml) (Altman et al., NeurIPS 2023 Datasets and Benchmarks) is a set of synthetic financial transactions. They are produced by an agent-based simulation of individuals, companies and banks, calibrated against real transaction data. Its labels are complete: every laundering transaction is tagged, unlike real anti-money-laundering data, where most laundering is never detected. We use **HI-Small** (the small set with the higher laundering rate). It covers about 515,000 bank accounts and about 5 million transactions over roughly ten days, with about 1 laundering transaction per 1,000. The loader checks the exact counts. Each transaction records its timestamp, sending bank and account, receiving bank and account, amounts and currencies, payment format, and whether it is laundering. The file is downloaded from Kaggle (a free account is needed) into `data/raw/amlworld/`. Like CFPB, the data and any Kaggle credentials are never committed.
+
+It suits the comparison because its graph is observed: an edge is money actually moving between two accounts. Laundering is also defined by patterns that span several transactions, such as fan-out, fan-in and cycles, so a model that sees an account's other transactions has a plausible advantage. If the graph helps anywhere in this project, it should help here.
+
+**Split and sampling (decided 2026-10-04).** Transactions are split by day: the first 60% of days for training, the next 20% for validation, and the last 20% for testing (the protocol of the dataset's authors).
+- **Training set:** the training period has about 3 million transactions, far too many for df-analyze, and a 30,000-row sample at the natural rate would contain only about 30 laundering transactions. The labelled training set is therefore **every laundering transaction from the training days plus a fixed random sample of the others, about 30,000 rows** (case-control sampling, seeded, with the IDs saved). **All four models train on exactly this set.**
+- **Graph context:** Models 2 and 4 also see the full transaction graph up to the period being scored, without labels.
+- **Validation and test:** both are the full validation and test days at the natural rate. The validation days are used to choose Model A, set decision thresholds, and early-stop the neural models. The test days are touched only once, for the final scores.
+- **Effect of the sampling:** it changes predicted probabilities but not how transactions are ranked, so PR-AUC and AUROC are unaffected, and thresholds come from the natural-rate validation days.
+- **Comparability:** published AMLworld results train on every transaction, so our numbers are not directly comparable with them.
 
 ## Approach
 
@@ -149,7 +158,16 @@ df-analyze drops identifiers and re-encodes features in its exported `X_train.cs
 
 **Graph schema (CFPB), in one paragraph.** Every complaint is a `complaint` node whose features are exactly Model A's features (the 30 text components plus the tabular and company features). Each complaint has one edge to its `company` node, one to its `product` node, and one to its `region` (state) node, each with a reverse edge, so information can flow complaint → company → other complaints about that company. Company nodes carry the company statistics computed from training complaints only (complaint count, timely-response rate, response-type rates); companies with no training complaints share one fallback node holding the overall training rates. Product and region nodes have no input features and learn an embedding instead. Optionally (an open decision), each complaint also links to its k most similar *training* complaints by narrative embedding. Test complaints are attached inductively. The training graph contains only training complaints. At evaluation time, each test complaint is added with its company, product and region edges (and any similarity edges, which point only to training complaints), and is scored without its label entering the graph. Large companies become hubs with thousands of complaints; neighbour sampling caps how many neighbours each node aggregates.
 
-**Graph schema (Elliptic).** Nodes are transactions with their local features; directed edges are payment flows. Edges never cross time steps, so with the standard temporal split (time steps 1–34 train, 35–49 test) the test transactions form their own subgraphs, and evaluation is inductive by construction. Unlabelled transactions stay in the graph as context, but never enter the loss or the metrics. The time step defines the split and is not a feature (test time steps never occur in training). Model 1 (tabular) uses only the 93 local features; the 72 provided neighbour aggregates belong to Model 2.
+**Graph schema (AMLworld).** Every transaction is a `transaction` node, and its features are its own attributes:
+- amount (log-scaled);
+- the payment and receiving currencies;
+- payment format;
+- whether sender and receiver use the same bank;
+- hour of day and day of week.
+
+Each transaction has an edge from its sending `account` node and an edge to its receiving `account` node, each with a reverse edge. Information can therefore flow from a transaction to its accounts and on to the accounts' other transactions, which is where patterns such as fan-out and cycles live. Account nodes have no input features (a constant), so everything the network learns about an account comes from its transactions. Account and bank identifiers define the graph and are never features, and absolute time is never a feature, because the test days never occur in training.
+
+The training graph contains only training-day transactions. The validation days are added for validation, and at test time the test days' transactions are added, without labels, so each test transaction is scored with the transactions up to and including its own period. The loss uses only the shared labelled training sample. Classifying transactions as nodes, rather than as edges as in IBM's Multi-GNN, lets the same heterogeneous GraphSAGE code serve both datasets.
 
 No node or edge feature on either dataset is derived from labels.
 
@@ -354,13 +372,14 @@ fraud-detect-gnn/
 └── outputs/             # local only, git-ignored
 ```
 
-Planned: neighbour-aggregated features, `graph/`, GNN models, an Elliptic loader, `eval/`, and `explain/` modules as their stages land.
+Planned: neighbour-aggregated features, `graph/`, GNN models, an AMLworld loader, `eval/`, and `explain/` modules as their stages land.
 
 ## Limitations
 
 - **Labels are consumer-chosen categories, not verified fraud.** Consumers choose the Issue category when filing, so some disputes or billing errors are tagged as fraud, and some real fraud is filed under generic issues. The CFPB task is therefore classifying fraud-related complaints, not detecting fraud.
 - **Taxonomy changes could create a shortcut.** The CFPB renamed products and sub-issues over time (for example the 2023 split of "Credit card or prepaid card"). If fraud and not-fraud categories came from different taxonomy versions, product name and date would predict the label without the text. The `label_audit` stage tabulates the fraud rate by product × year to check this; if it shows a shortcut, a time-based split is an open decision.
-- **The CFPB graph is constructed, not observed.** Its edges come from attributes Model A already uses, so a GNN on it is expected to add little. The Elliptic comparison is there to show the contrast with real edges.
+- **The CFPB graph is constructed, not observed.** Its edges come from attributes Model A already uses, so a GNN on it is expected to add little. The AMLworld comparison is there to show the contrast with observed edges.
+- **AMLworld is synthetic.** Its labels are complete and its patterns are calibrated against real data, but conclusions about it are about the simulation. Training on a case-control sample also means our AMLworld numbers are not directly comparable with published results that train on every transaction.
 - **Complaints are unverified allegations.** The CFPB does not verify narratives.
 - **Not a representative sample.** Narratives are published only when consumers opt in, and complaints reflect negative experiences by design.
 - **Results cover May 2018 to August 2023 only.** Complaint patterns before and after this window (including the post-2023 surge) may differ, so results may not generalize to them.
@@ -377,7 +396,8 @@ Planned: neighbour-aggregated features, `graph/`, GNN models, an Elliptic loader
 - Schlichtkrull et al. (2018). *Modeling Relational Data with Graph Convolutional Networks* (R-GCN).
 - Lv et al. (2021). *Are we really making much progress? Revisiting, benchmarking, and refining heterogeneous graph neural networks.* KDD. https://arxiv.org/abs/2112.14936
 - Tang et al. (2023). *GADBench: Revisiting and Benchmarking Supervised Graph Anomaly Detection.* NeurIPS Datasets and Benchmarks. https://arxiv.org/abs/2306.12251
-- Weber et al. (2019). *Anti-Money Laundering in Bitcoin: Experimenting with Graph Convolutional Networks for Financial Forensics.* KDD Workshop on Anomaly Detection in Finance. https://arxiv.org/abs/1908.02591
+- Altman et al. (2023). *Realistic Synthetic Financial Transactions for Anti-Money Laundering Models.* NeurIPS Datasets and Benchmarks. https://arxiv.org/abs/2306.16424
+- Egressy et al. (2024). *Provably Powerful Graph Neural Networks for Directed Multigraphs* (Multi-GNN, the reference GNNs for AMLworld). AAAI. https://arxiv.org/abs/2306.11586
 - Dou et al. (2020). *Enhancing Graph Neural Network-based Fraud Detectors against Camouflaged Fraudsters* (CARE-GNN). https://arxiv.org/abs/2008.08692
 - Ying et al. (2019). *GNNExplainer: Generating Explanations for Graph Neural Networks.*
 - CFPB, *The CFPB to Cease Discretionary Publication of Complaint Narratives and Visualizations* (August 14, 2026).
