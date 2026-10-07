@@ -1,14 +1,22 @@
-"""Model A: df-analyze command line and split verification.
+"""Model A: df-analyze command line, column names, and run verification.
 
 We create the train/test split ourselves and pass it to df-analyze with
 `--df-train` / `--df-tests` (method `list`), so the frozen test set is defined
 by our saved node IDs. df-analyze re-encodes features, so after a run we
 verify that its exported X/y train and test tables line up row-for-row with
-ours before anything downstream relies on them.
+ours, and that it typed every column as we specified and dropped none,
+before anything downstream relies on them.
+
+Column names: df-analyze renames "trashy" feature names (`sanitize_names` at
+the pinned commit), and its rules collapse the block separator `__` to `_`.
+The df-analyze input therefore uses `df_analyze_name(column)`, which is what
+df-analyze would rename it to, so df-analyze renames nothing and its outputs
+use the same names as our input tables.
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,6 +32,37 @@ TARGET = C.TARGET
 
 class SplitVerificationError(RuntimeError):
     """Raised when df-analyze's exported split does not match ours."""
+
+
+class TypeCheckError(RuntimeError):
+    """Raised when df-analyze typed or dropped a column against our spec."""
+
+
+# df-analyze's sanitize_names (preprocessing/cleaning.py at the pinned commit).
+_TRASH = re.compile(r"[\\\.\^\$\*\+\?\{\}\[\]\(\)\| ]")
+_LGBM = re.compile(r"[,:\"]")
+
+
+def df_analyze_name(name: str) -> str:
+    """The name df-analyze gives a feature column (see the module docstring)."""
+    renamed = _LGBM.sub("_", _TRASH.sub("_", name))
+    renamed = re.sub(r"_+", "_", renamed)
+    return renamed[:-1] if renamed.endswith("_") else renamed
+
+
+def df_analyze_names(columns: Sequence[str]) -> dict[str, str]:
+    """Our column name -> df-analyze's, refusing collisions and the target."""
+    names = {c: df_analyze_name(c) for c in columns}
+    seen: dict[str, str] = {}
+    for original, renamed in names.items():
+        if renamed == TARGET:
+            raise ValueError(f"Column {original!r} would be renamed to the target")
+        if renamed in seen:
+            raise ValueError(
+                f"Columns {seen[renamed]!r} and {original!r} both become {renamed!r}"
+            )
+        seen[renamed] = original
+    return names
 
 
 def df_analyze_args(
@@ -176,4 +215,77 @@ def verify_export(
         "n_test": len(test),
         "continuous_columns_checked": checked,
         "labels_identical": True,
+    }
+
+
+# df-analyze's inferred kinds (InferredKind values at the pinned commit) ->
+# our column types. Every other kind (id, time, const, cat, ...) means the
+# column was dropped or would be one-hot encoded: a mismatch.
+DFA_KINDS = {
+    "bin": "binary",
+    "cont": "continuous",
+    "cont-coerce": "continuous",
+    "ord": "ordinal",
+    "user-ord": "ordinal",
+    "ord-coerce": "ordinal",
+}
+# Kinds df-analyze drops before modelling (its "destructive" changes).
+DROPPED_KINDS = {"id", "id?", "time", "time?", "const", "nyan"}
+
+
+def find_inferred_types(run_outdir: Path) -> Path:
+    matches = sorted(run_outdir.rglob("inspection/inferred_types.csv"))
+    if len(matches) != 1:
+        raise TypeCheckError(
+            f"Expected exactly one inspection/inferred_types.csv under {run_outdir}, "
+            f"found {[str(m) for m in matches]}"
+        )
+    return matches[0]
+
+
+def check_inferred_types(
+    inferred: pd.DataFrame,
+    expected: dict[str, str],
+    exported_columns: Sequence[str],
+) -> dict[str, Any]:
+    """Compare df-analyze's inferred_types.csv (index feature_name; columns
+    user, inferred, reason) with our types, keyed by df-analyze names.
+
+    Fails if a column's final type differs, if df-analyze typed a column we
+    did not give it, or if one of our columns is missing from its inspection
+    or from its exported training table (dropped). Coercions (df-analyze was
+    unsure and guessed) are allowed when the guess matches ours, and reported.
+    """
+    found = {str(k): str(v) for k, v in inferred["inferred"].items()}
+    reasons = {str(k): str(v) for k, v in inferred["reason"].items()}
+    problems, rows = [], []
+    for name, ours in expected.items():
+        kind = found.get(name)
+        theirs = DFA_KINDS.get(kind or "", f"not modelled ({kind})")
+        rows.append({"feature": name, "ours": ours, "df_analyze": kind,
+                     "reason": reasons.get(name, "")})  # fmt: skip
+        if kind is None:
+            problems.append(f"{name}: missing from df-analyze's inspection")
+        elif theirs != ours:
+            problems.append(f"{name}: ours {ours}, df-analyze {kind} ({reasons[name]})")
+    for name in sorted(set(found) - set(expected)):
+        problems.append(f"{name}: typed by df-analyze ({found[name]}) but not ours")
+    exported = set(exported_columns)
+    dropped = [n for n in expected if n not in exported]
+    problems += [f"{n}: missing from df-analyze's exported X_train" for n in dropped]
+    destructive = [
+        f"{n}: {found[n]} ({reasons[n]})"
+        for n in found
+        if found[n] in DROPPED_KINDS or "coerce" in found[n].lower()
+    ]
+    if problems:
+        raise TypeCheckError(
+            "df-analyze's column types differ from column_spec.json, or it dropped "
+            "features:\n- " + "\n- ".join(problems)
+        )
+    return {
+        "n_features": len(expected),
+        "all_types_match": True,
+        "dropped_or_coerced": destructive,
+        "columns": rows,
     }

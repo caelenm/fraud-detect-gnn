@@ -203,3 +203,17 @@ def fake_block(name: str, n: int = 10, width: int = 3, seed: int = 0) -> pd.Data
     block = pd.DataFrame(rng.normal(size=(n, width))).add_prefix(f"{name}__x")
     block.insert(0, C.NODE_ID, np.arange(n, dtype=np.int64))
     return block
+
+
+def fake_inferred_types(kinds: dict[str, str]) -> pd.DataFrame:
+    """Invented df-analyze inspection/inferred_types.csv: index feature_name,
+    columns user, inferred, reason (as written by InspectionResults.basic_df)."""
+    frame = pd.DataFrame(
+        {
+            "user": ["ord" if k.startswith("user-ord") else "" for k in kinds.values()],
+            "inferred": list(kinds.values()),
+            "reason": ["fake reason"] * len(kinds),
+        },
+        index=pd.Index(list(kinds), name="feature_name"),
+    )
+    return frame

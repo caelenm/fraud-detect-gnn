@@ -90,9 +90,10 @@ def test_df_analyze_input_stage_writes_only_own_columns_and_target(tmp_path):
     p = get_paths(config)
     train = pd.read_parquet(p.df_analyze_input_dir / "train.parquet")
     test = pd.read_parquet(p.df_analyze_input_dir / "test.parquet")
-    expected = [f"own__f{j:02d}" for j in range(5)] + [C.TARGET]
+    # Exactly the own block's columns (under df-analyze's names) plus target.
+    expected = [f"own_f{j:02d}" for j in range(5)] + [C.TARGET]
     assert list(train.columns) == expected and list(test.columns) == expected
     saved = pd.read_csv(p.test_ids)
     assert test[C.TARGET].tolist() == saved[C.LABEL].tolist()
     block = pd.read_parquet(p.block_file(C.OWN_BLOCK)).set_index(C.NODE_ID)
-    assert np.allclose(test["own__f01"], block.loc[saved[C.NODE_ID], "own__f01"])
+    assert np.allclose(test["own_f01"], block.loc[saved[C.NODE_ID], "own__f01"])

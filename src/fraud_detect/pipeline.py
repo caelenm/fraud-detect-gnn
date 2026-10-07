@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -18,15 +19,18 @@ import numpy as np
 import pandas as pd
 
 from fraud_detect import columns as C
-from fraud_detect.config import Paths, dataset_config
+from fraud_detect.config import REPO_ROOT, Paths, dataset_config, df_analyze_dir
 from fraud_detect.data import audit, care_gnn, download, split
+from fraud_detect.external import ExternalToolError, run_df_analyze_script
 from fraud_detect.features import blocks, own
+from fraud_detect.models import df_analyze, selection
 from fraud_detect.runstate import (
     CHECKPOINT_DIR,
     UnitStore,
     atomic_write,
     atomic_write_json,
     atomic_write_parquet,
+    atomic_write_text,
 )
 
 
@@ -357,12 +361,21 @@ def run_df_analyze_input(ctx: Context) -> None:
     untyped = [c for c in feature_cols if c not in spec]
     if untyped:
         raise StageError(f"No column type in {p.column_spec} for: {untyped}")
+    try:
+        renames = df_analyze.df_analyze_names(feature_cols)
+    except ValueError as e:
+        raise StageError(str(e)) from e
+    # Written with the names df-analyze uses, so it renames nothing.
+    train, test = train.rename(columns=renames), test.rename(columns=renames)
     info = {
         "feature_set": ctx.config["feature_set"],
         "blocks": names,
         "n_train": len(train),
         "n_test": len(test),
-        "columns": {c: spec[c]["type"] for c in feature_cols},
+        # df-analyze name -> our block column and its type (column_spec.json)
+        "columns": {
+            renames[c]: {"block_column": c, "type": spec[c]["type"]} for c in feature_cols
+        },
     }
     atomic_write_parquet(p.df_analyze_input_dir / "train.parquet", train)
     atomic_write_parquet(p.df_analyze_input_dir / "test.parquet", test)
@@ -371,6 +384,234 @@ def run_df_analyze_input(ctx: Context) -> None:
         f"Feature set {info['feature_set']} ({', '.join(names)}): "
         f"{len(feature_cols)} features; train {train.shape}, test {test.shape}"
     )
+
+
+def read_feature_set_info(p: Paths) -> dict[str, Any]:
+    path = p.df_analyze_input_dir / FEATURE_SET_INFO
+    _require(path)
+    return _read_json(path)
+
+
+def columns_of_type(info: dict[str, Any], kind: str) -> list[str]:
+    return [name for name, c in info["columns"].items() if c["type"] == kind]
+
+
+# --------------------------------------------------------------------------
+# Stage 7: run df-analyze; verify its split and its column types
+# --------------------------------------------------------------------------
+# df-analyze models that train on the GPU when CUDA is available.
+GPU_CLASSIFIERS = frozenset({"catboost", "gandalf"})
+CUDA_INFO_RUNNER = REPO_ROOT / "scripts" / "dfa" / "cuda_info.py"
+CUDA_HELP = """df-analyze's environment cannot see a CUDA GPU. Check that:
+  - `nvidia-smi` works in this shell (inside a toolbox/container the NVIDIA
+    driver's user-space libraries must be visible there too), and
+  - this prints True:
+      uv run --python '{python}' --directory {dfa} \\
+        python -c "import torch; print(torch.cuda.is_available())"
+To run on the CPU instead, set `gpu.require: false` in the config."""
+SPLIT_CHECK = "split_check.json"
+TYPE_CHECK = "type_check.json"
+
+
+def _run_dfa(ctx: Context, script: str, args: list[str], log_path: Path) -> None:
+    """Run a script in df-analyze's environment; turn failures into StageError."""
+    cfg = ctx.config["df_analyze"]
+    try:
+        run_df_analyze_script(
+            df_analyze_dir(ctx.config),
+            script,
+            args,
+            log_path,
+            cfg.get("commit"),
+            python=cfg.get("python"),
+        )
+    except ExternalToolError as e:
+        raise StageError(str(e)) from e
+
+
+def check_cuda(ctx: Context, purpose: str) -> bool:
+    """Ask df-analyze's environment whether it can use a CUDA GPU, log the answer
+    to the run directory, and stop if a GPU is required but missing."""
+    report = ctx.run_dir / "cuda_info.json"
+    args = ["--report", str(report.resolve())]
+    _run_dfa(ctx, str(CUDA_INFO_RUNNER), args, ctx.run_dir / "cuda_info.log")
+    info = _read_json(report)
+    if info["cuda_available"]:
+        print(f"GPU for {purpose}: {info['device_name']} (torch {info['torch']})")
+        return True
+    message = CUDA_HELP.format(
+        python=ctx.config["df_analyze"].get("python"), dfa=df_analyze_dir(ctx.config)
+    )
+    if ctx.config["gpu"]["require"]:
+        raise StageError(message)
+    print(f"WARNING: {purpose} will run on the CPU.\n{message}")
+    return False
+
+
+def run_df_analyze(ctx: Context) -> None:
+    p = ctx.paths
+    train_path = p.df_analyze_input_dir / "train.parquet"
+    test_path = p.df_analyze_input_dir / "test.parquet"
+    _require(train_path, test_path)
+    info = read_feature_set_info(p)
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    outdir = p.df_analyze_output_dir / stamp
+    outdir.mkdir(parents=True, exist_ok=False)
+    gpu_models = GPU_CLASSIFIERS.intersection(ctx.config["df_analyze"]["classifiers"])
+    if gpu_models:
+        # CatBoost and GANDALF switch to the GPU when df-analyze sees CUDA.
+        check_cuda(ctx, "df-analyze (" + ", ".join(sorted(gpu_models)) + ")")
+    args = df_analyze.df_analyze_args(
+        ctx.config["df_analyze"],
+        train_path,
+        test_path,
+        outdir,
+        ctx.seed,
+        ordinals=columns_of_type(info, own.ORDINAL),
+    )
+    _run_dfa(ctx, "df-analyze.py", args, outdir / "df_analyze.log")
+    verify_df_analyze_run(ctx, outdir, info)
+    atomic_write_text(p.df_analyze_output_dir / "latest.txt", stamp + "\n")
+
+
+def verify_df_analyze_run(ctx: Context, outdir: Path, info: dict[str, Any]) -> None:
+    """Check df-analyze's exported split against ours row by row, and its
+    inferred column types against column_spec.json; save both reports."""
+    p = ctx.paths
+    train = pd.read_parquet(p.df_analyze_input_dir / "train.parquet")
+    test = pd.read_parquet(p.df_analyze_input_dir / "test.parquet")
+    try:
+        export = df_analyze.read_export(df_analyze.find_export_dir(outdir))
+        split_report = df_analyze.verify_export(
+            export, train, test, columns_of_type(info, own.CONTINUOUS)
+        )
+        inferred = pd.read_csv(df_analyze.find_inferred_types(outdir), index_col=0)
+        expected = {name: c["type"] for name, c in info["columns"].items()}
+        type_report = df_analyze.check_inferred_types(
+            inferred, expected, export.X_train.columns
+        )
+    except (df_analyze.SplitVerificationError, df_analyze.TypeCheckError) as e:
+        raise StageError(f"{e}\nStop and ask before working around this.") from e
+    for name, report in ((TYPE_CHECK, type_report), (SPLIT_CHECK, split_report)):
+        atomic_write_json(outdir / name, report)
+        atomic_write_json(p.model_reports_dir / name, {"run": outdir.name, **report})
+    print("Verified: df-analyze's exported train/test rows match our saved split.")
+    print(f"Verified: df-analyze kept all {type_report['n_features']} features with our "
+          "column types.")  # fmt: skip
+    for line in type_report["dropped_or_coerced"]:
+        print(f"  df-analyze note: {line}")
+
+
+def _latest_verified_run(p: Paths) -> tuple[str, Path]:
+    """The latest df-analyze run, which must have passed both checks."""
+    latest = p.df_analyze_output_dir / "latest.txt"
+    _require(latest)
+    stamp = latest.read_text(encoding="utf-8").strip()
+    outdir = p.df_analyze_output_dir / stamp
+    for check in (SPLIT_CHECK, TYPE_CHECK):
+        if not (outdir / check).is_file():
+            raise StageError(
+                f"df-analyze run {outdir} has no {check}, so it was never verified. "
+                "Rerun the df_analyze stage."
+            )
+    return stamp, outdir
+
+
+# --------------------------------------------------------------------------
+# Stage 8: score every tuned model on the saved grouped CV folds (train only)
+# --------------------------------------------------------------------------
+CV_SELECT_RUNNER = REPO_ROOT / "scripts" / "dfa" / "cv_select.py"
+SHARED_CV = "model_selection_cv.csv"
+OOF_PREDICTIONS = "oof_predictions.parquet"
+TUNING_BUDGET = "tuning_budget.csv"
+FOLDS_IN_TRAIN_ORDER = "cv_folds_train_order.csv"
+
+
+def folds_in_train_order(p: Paths) -> pd.DataFrame:
+    """The saved CV fold of every training row, in the df-analyze train table's
+    row order (= train_ids.csv order)."""
+    _require(p.cv_folds, p.train_ids)
+    train_ids = pd.read_csv(p.train_ids)
+    folds = pd.read_csv(p.cv_folds).set_index(C.NODE_ID)["fold"]
+    missing = set(train_ids[C.NODE_ID]) - set(folds.index)
+    if missing:
+        raise StageError(f"{len(missing)} training nodes have no CV fold; rerun split")
+    return pd.DataFrame(
+        {
+            C.NODE_ID: train_ids[C.NODE_ID],
+            "fold": folds.loc[train_ids[C.NODE_ID]].to_numpy(),
+        }
+    )
+
+
+def run_select_model(ctx: Context) -> None:
+    """df-analyze's tuning scores are not comparable across models (and its
+    internal CV is not grouped), so refit every tuned combination on the saved
+    grouped folds of the training set and score it from its probabilities (see
+    scripts/dfa/cv_select.py). The test set is not read. The report stage
+    chooses Model A from this table."""
+    p = ctx.paths
+    stamp, outdir = _latest_verified_run(p)
+    export_dir = df_analyze.find_export_dir(outdir)
+    cfg = ctx.config["select_model"]
+    folds = folds_in_train_order(p)
+    folds_path = outdir / FOLDS_IN_TRAIN_ORDER
+    atomic_write(folds_path, lambda tmp: folds.to_csv(tmp, index=False))
+    cv_path, oof_path = outdir / SHARED_CV, outdir / OOF_PREDICTIONS
+    # The CV script saves its tables after every configuration. On --resume it
+    # keeps the finished ones; on a fresh run it starts over.
+    if not ctx.resume:
+        cv_path.unlink(missing_ok=True)
+        oof_path.unlink(missing_ok=True)
+    args = [
+        "--export-dir", str(export_dir.resolve()),
+        "--out", str(cv_path.resolve()),
+        "--oof-out", str(oof_path.resolve()),
+        "--folds-file", str(folds_path.resolve()),
+        "--seed", str(ctx.seed),
+        "--config-timeout", str(cfg.get("config_timeout_s", 0)),
+    ]  # fmt: skip
+    if not cfg.get("score_defaults", True):
+        args += ["--settings", "tuned"]
+    if ctx.resume:
+        args += ["--resume"]
+    _run_dfa(ctx, str(CV_SELECT_RUNNER), args, outdir / "model_selection.log")
+    cv = pd.read_csv(cv_path, keep_default_na=False, na_values=[""])
+    log = (outdir / "df_analyze.log").read_text(encoding="utf-8", errors="replace")
+    budget = selection.parse_tuning_budget(log)
+    atomic_write(outdir / TUNING_BUDGET, lambda tmp: budget.to_csv(tmp, index=False))
+    failed = cv["error"].fillna("").astype(str) != ""
+    tuned = cv["settings"] == "tuned"
+    errors = cv[failed & tuned]
+    for r in cv[failed & ~tuned].itertuples():
+        print(
+            f"WARNING: {r.model_cls} ({r.selection}) with default settings could not be "
+            f"scored, so its before-tuning score is missing: {r.error}"
+        )
+    if not errors.empty:
+        raise StageError(
+            "These tuned models could not be cross-validated, so the models cannot "
+            f"be compared fairly:\n{errors[['model_cls', 'selection', 'error']]}\n"
+            f"See {outdir / 'model_selection.log'}; fix and rerun "
+            "`uv run run.py --dataset <name> --from select_model`."
+        )
+    atomic_write(p.model_reports_dir / TUNING_BUDGET,
+                 lambda tmp: budget.to_csv(tmp, index=False))  # fmt: skip
+    # Written last: marks the stage as done.
+    atomic_write(p.model_reports_dir / SHARED_CV, lambda tmp: cv.to_csv(tmp, index=False))
+    # embed_selector is empty (read as NaN) except for embedded selection;
+    # pivot_table would silently drop those rows.
+    shown = (
+        cv.assign(embed_selector=cv["embed_selector"].fillna(""))
+        .pivot_table(
+            index=["model_cls", "selection", "embed_selector"],
+            columns="settings",
+            values="pr_auc_mean",
+        )
+        .reset_index()
+    )
+    print(shown.sort_values("tuned", ascending=False).to_string(index=False))
+    print(f"Saved shared-CV scores for run {stamp} to {p.model_reports_dir / SHARED_CV}")
 
 
 STAGES: list[Stage] = [
@@ -391,10 +632,10 @@ STAGES: list[Stage] = [
                      p.df_analyze_input_dir / "test.parquet",
                      p.df_analyze_input_dir / FEATURE_SET_INFO]),
     Stage("df_analyze", "Run df-analyze (Model A); verify split and types",
-          _not_implemented("M6"), lambda p: [p.model_reports_dir / "split_check.json"]),
+          run_df_analyze, lambda p: [p.model_reports_dir / SPLIT_CHECK,
+                                     p.model_reports_dir / TYPE_CHECK]),
     Stage("select_model", "Score every tuned model on the grouped CV folds",
-          _not_implemented("M6"),
-          lambda p: [p.model_reports_dir / "model_selection_cv.csv"]),
+          run_select_model, lambda p: [p.model_reports_dir / SHARED_CV]),
     Stage("df_analyze_report", "Model A test metrics, threshold, bootstrap CIs",
           _not_implemented("M7"), lambda p: [p.model_reports_dir / "model_a.json"]),
     Stage("web_report", "HTML report: parameters, results, confidence cards",
