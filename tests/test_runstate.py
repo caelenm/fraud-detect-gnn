@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import yaml
+from helpers import tmp_config
 
 from fraud_detect.cli import main, plan_stages
-from fraud_detect.config import DEFAULT_CONFIG, get_paths, load_config, with_dataset
+from fraud_detect.config import get_paths, with_dataset
 from fraud_detect.pipeline import STAGE_NAMES, Context
 from fraud_detect.runstate import RunState, UnitStore, config_fingerprint
 
@@ -31,18 +31,6 @@ def test_unit_store_saves_skips_and_resets(tmp_path):
     assert [u["unit"] for u in store.all()] == ["graphsage/seed-1"]
     store.reset()
     assert store.all() == []
-
-
-def tmp_config(tmp_path, dataset="amazon"):
-    """The default config with every path under tmp_path and a dataset chosen.
-    Returns the config file (for the CLI) and the config with the dataset set."""
-    config = load_config(DEFAULT_CONFIG)
-    for key in ("raw_dir", "processed_dir", "outputs_dir"):
-        config["paths"][key] = str(tmp_path / key)
-    config["dataset"] = dataset
-    path = tmp_path / "config.yaml"
-    path.write_text(yaml.safe_dump(config), encoding="utf-8")
-    return path, with_dataset(config, None)
 
 
 def test_unit_store_is_emptied_on_a_fresh_run_and_kept_on_resume(tmp_path):

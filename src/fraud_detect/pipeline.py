@@ -13,8 +13,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
+from fraud_detect import columns as C
 from fraud_detect.config import Paths, dataset_config
-from fraud_detect.runstate import CHECKPOINT_DIR, UnitStore
+from fraud_detect.data import care_gnn, download
+from fraud_detect.runstate import (
+    CHECKPOINT_DIR,
+    UnitStore,
+    atomic_write,
+    atomic_write_json,
+    atomic_write_parquet,
+)
 
 
 class StageError(RuntimeError):
@@ -29,6 +39,9 @@ class Context:
     # True when this stage was interrupted earlier and is being continued with
     # `run.py --resume`: keep the units it already finished.
     resume: bool = False
+    # run.py --force: the download stage may then replace a raw file whose
+    # checksum differs from the expected one.
+    force: bool = False
 
     @property
     def seed(self) -> int:
@@ -75,11 +88,92 @@ def _not_implemented(milestone: str) -> Callable[[Context], None]:
     return run
 
 
+# --------------------------------------------------------------------------
+# Stage 1: download (checksum-verified)
+# --------------------------------------------------------------------------
+def run_download(ctx: Context) -> None:
+    try:
+        download.download_dataset(
+            ctx.paths.raw_dir, ctx.config["download"]["base_url"], ctx.data, ctx.force
+        )
+    except download.DownloadError as e:
+        raise StageError(str(e)) from e
+
+
+# --------------------------------------------------------------------------
+# Stage 2: load the .mat: node table, relation edge lists, count checks
+# --------------------------------------------------------------------------
+def run_load(ctx: Context) -> None:
+    p, data = ctx.paths, ctx.data
+    _require(p.mat)
+    print(f"Reading {p.mat}", flush=True)
+    try:
+        graph = care_gnn.read_mat(p.mat, data["relations"])
+        edges = {
+            name: care_gnn.edge_list(graph.adjacency[name])
+            for name in care_gnn.relation_names(data["relations"])
+        }
+        care_gnn.check_edges_in_range(edges, graph.n_nodes)
+        groups = care_gnn.group_ids(data["groups"], graph.features, edges)
+        nodes = care_gnn.node_table(graph.labels, int(data["unlabelled_prefix"]), groups)
+        counts = care_gnn.observed_counts(graph, nodes, edges)
+        care_gnn.check_counts(counts, data["expected"], p.mat.name)
+    except care_gnn.DatasetError as e:
+        raise StageError(str(e)) from e
+
+    mat_sha256 = download.sha256_file(p.mat)
+    relations = []
+    for name, e in edges.items():
+        atomic_write(p.relation_file(name),
+                     lambda tmp, e=e: np.savez_compressed(tmp, edges=e))  # fmt: skip
+        relations.append(
+            {
+                "name": name,
+                "source_key": data["relations"].get(name, care_gnn.HOMO),
+                "file": p.relation_file(name).name,
+                "n_edges": int(e.shape[1]),
+                "n_nodes": graph.n_nodes,
+                "mat_sha256": mat_sha256,
+            }
+        )
+    atomic_write_parquet(p.nodes, nodes)
+    labelled = nodes[C.IS_LABELLED]
+    summary = {
+        "dataset": ctx.dataset,
+        "source": p.mat.name,
+        "mat_sha256": mat_sha256,
+        **counts,
+        "n_unlabelled": int((~labelled).sum()),
+        "positive_rate_labelled": counts["n_positive"] / max(counts["n_labelled"], 1),
+        "grouping": data["groups"],
+        "n_groups_labelled": int(nodes.loc[labelled, C.GROUP_ID].nunique()),
+    }
+    atomic_write_json(p.reports_dir / "load_summary.json", summary)
+    manifest = {
+        "dataset": ctx.dataset,
+        "format": "npz key 'edges': int32 array of shape (2, E); each undirected "
+        "edge once with src < dst; no self-loops",
+        "source": p.mat.name,
+        "mat_sha256": mat_sha256,
+        "n_nodes": graph.n_nodes,
+        "relations": relations,
+    }
+    # Written last: the stage counts as finished only when everything is saved.
+    atomic_write_json(p.graph_manifest, manifest)
+    edge_text = ", ".join(f"{r['name']} {r['n_edges']:,}" for r in relations)
+    print(
+        f"{graph.n_nodes:,} nodes ({counts['n_labelled']:,} labelled, "
+        f"{counts['n_positive']:,} positive), {counts['n_features']} features, "
+        f"{summary['n_groups_labelled']:,} split groups among labelled nodes; "
+        f"undirected edges: {edge_text}. All counts match the config."
+    )
+
+
 STAGES: list[Stage] = [
-    Stage("download", "Fetch and checksum the CARE-GNN .mat file",
-          _not_implemented("M3"), lambda p: [p.mat]),
-    Stage("load", "Node table, relation edge lists, count checks",
-          _not_implemented("M3"), lambda p: [p.nodes, p.graph_manifest]),
+    Stage("download", "Fetch and checksum the CARE-GNN .mat file", run_download,
+          lambda p: [p.mat]),
+    Stage("load", "Node table, relation edge lists, count checks", run_load,
+          lambda p: [p.nodes, p.graph_manifest]),
     Stage("split", "Grouped stratified train/test split and CV folds",
           _not_implemented("M4"),
           lambda p: [p.train_ids, p.test_ids, p.cv_folds, p.split_summary]),

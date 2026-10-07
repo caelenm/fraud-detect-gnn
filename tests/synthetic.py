@@ -129,3 +129,42 @@ def fake_model_tables(
         )
 
     return table(n_train), table(n_test)
+
+
+def fake_care_gnn_mat(
+    n_nodes: int = 60, n_features: int = 5, unlabelled_prefix: int = 8, seed: int = 0
+) -> dict:
+    """Invented contents of a CARE-GNN-style .mat file (for scipy.io.savemat):
+    sparse `features`, a 1 x n `label` row (0 for the unlabelled prefix, as in
+    Amazon), two symmetric relations and their union `homo`.
+
+    Planted structure for the tests: labelled nodes p and p+1 have identical
+    feature rows (a duplicate group); relation `net_aaa` links nodes in pairs
+    (2k, 2k+1) for k < 10, so those pairs are its connected components."""
+    import scipy.sparse as sp  # noqa: PLC0415
+
+    rng = np.random.default_rng(seed)
+    features = rng.integers(0, 9, size=(n_nodes, n_features)).astype(float)
+    features[:, 0] = np.arange(n_nodes)  # unique rows unless planted below
+    p = unlabelled_prefix
+    features[p + 1] = features[p]
+    labels = (rng.random(n_nodes) < 0.3).astype(float)
+    labels[:p] = 0  # unlabelled nodes are stored as 0
+    labels[p], labels[p + 2] = 1, 0  # both classes among labelled nodes
+
+    def symmetric(pairs: list[tuple[int, int]]) -> sp.csc_matrix:
+        rows = [a for a, b in pairs] + [b for a, b in pairs]
+        cols = [b for a, b in pairs] + [a for a, b in pairs]
+        return sp.csc_matrix((np.ones(len(rows)), (rows, cols)), shape=(n_nodes,) * 2)
+
+    pairs_a = [(2 * k, 2 * k + 1) for k in range(10)]
+    pairs_b = [(int(a), int(b)) for a, b in rng.integers(0, n_nodes, (30, 2)) if a != b]
+    a, b = symmetric(pairs_a), symmetric(pairs_b)
+    homo = ((a + b) > 0).astype(float)
+    return {
+        "features": sp.csc_matrix(features),
+        "label": labels.reshape(1, -1),
+        "net_aaa": a,
+        "net_bbb": b,
+        "homo": sp.csc_matrix(homo),
+    }

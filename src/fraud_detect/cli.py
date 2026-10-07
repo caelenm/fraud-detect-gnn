@@ -162,7 +162,7 @@ def main(argv: list[str] | None = None) -> int:
         stage = get_stage(name)
         # Only the first stage of a resumed run was interrupted mid-way.
         ctx = Context(config=config, paths=paths, run_dir=run_dir,
-                      resume=args.resume and n == 1)  # fmt: skip
+                      resume=args.resume and n == 1, force=args.force)  # fmt: skip
         resumed = " (resuming)" if ctx.resume else ""
         print(f"\n== [{n}/{len(planned)}] {name}{resumed}: {stage.description}",
               flush=True)  # fmt: skip
