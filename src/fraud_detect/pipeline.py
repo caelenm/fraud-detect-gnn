@@ -62,6 +62,11 @@ class Context:
         return str(self.config["dataset"])
 
     @property
+    def split_seed(self) -> int:
+        """Seed of the grouped split: independent for each split repeat."""
+        return self.seed + 1000 * int(self.config["split"].get("repeat", 0))
+
+    @property
     def data(self) -> dict[str, Any]:
         """The active dataset's config section."""
         return dataset_config(self.config)
@@ -203,8 +208,8 @@ def run_split(ctx: Context) -> None:
     nodes = pd.read_parquet(p.nodes)
     cfg = ctx.config["split"]
     try:
-        nodes = split.split_nodes(nodes, cfg, ctx.seed)
-        summary = split.summary(nodes, cfg, ctx.seed)
+        nodes = split.split_nodes(nodes, cfg, ctx.split_seed)
+        summary = split.summary(nodes, cfg, ctx.split_seed)
     except split.SplitError as e:
         raise StageError(str(e)) from e
     atomic_write_parquet(p.nodes, nodes)

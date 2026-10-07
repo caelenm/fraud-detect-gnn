@@ -72,6 +72,9 @@ def with_dataset(config: dict[str, Any], dataset: str | None) -> dict[str, Any]:
             f"Unknown dataset {name!r}; choose from {', '.join(dataset_names(out))}"
         )
     out["dataset"] = name
+    repeat, n_repeats = int(out["split"]["repeat"]), int(out["split"]["n_repeats"])
+    if not 0 <= repeat < max(n_repeats, 1):
+        raise ConfigError(f"split.repeat {repeat} is outside 0..{n_repeats - 1}")
     feature_set = out.get("feature_set")
     if feature_set not in out["feature_sets"]:
         raise ConfigError(
@@ -181,18 +184,24 @@ def _resolve(root: Path, value: str) -> Path:
     return path if path.is_absolute() else root / path
 
 
+def run_folder(dataset: str, repeat: int = 0) -> str:
+    """Folder name of one dataset and split repeat (repeat 0: the dataset)."""
+    return dataset if repeat == 0 else f"{dataset}_repeat{repeat}"
+
+
 def get_paths(config: dict[str, Any], root: Path = REPO_ROOT) -> Paths:
-    """Paths for the active dataset and feature set (see `with_dataset`)."""
+    """Paths for the active dataset, split repeat and feature set."""
     p = config["paths"]
     dataset = config.get("dataset")
     if not dataset:
         raise ConfigError("No dataset selected (use --dataset or `dataset:`)")
+    folder = run_folder(dataset, int(config["split"].get("repeat", 0)))
     return Paths(
         root=root,
         raw_dir=_resolve(root, p["raw_dir"]),
         mat=_resolve(root, p["raw_dir"]) / config["datasets"][dataset]["mat"],
-        processed_dir=_resolve(root, p["processed_dir"]) / dataset,
-        outputs_dir=_resolve(root, p["outputs_dir"]) / dataset,
+        processed_dir=_resolve(root, p["processed_dir"]) / folder,
+        outputs_dir=_resolve(root, p["outputs_dir"]) / folder,
         feature_set=str(config["feature_set"]),
     )
 

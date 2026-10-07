@@ -94,6 +94,16 @@ split:
   # Grouped, stratified CV folds on the training set, shared by select_model
   # (and later by any out-of-fold feature).
   cv_folds: 5
+  # Independently seeded grouped splits (split seed = seed + 1000 * repeat).
+  # With n_repeats > 1, run.py runs the pipeline once per repeat and writes
+  # Model A's mean ± SD across repeats to
+  # outputs/<dataset>/<feature_set>/repeats_summary.md. Repeat 0 uses the
+  # usual folders; repeat k uses data/processed/<dataset>_repeat<k>/ and
+  # outputs/<dataset>_repeat<k>/. Each repeat is a full df-analyze run, so
+  # 3 repeats take 3 times as long: ask before enabling (plan §4, §10).
+  n_repeats: 1
+  # The repeat to run; set it (--set split.repeat=2) to run one repeat only.
+  repeat: 0
 
 audit:
   # A feature whose univariate AUROC (oriented to be >= 0.5) on training nodes
