@@ -8,16 +8,19 @@ as they are implemented.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pandas as pd
 
 from fraud_detect import columns as C
 from fraud_detect.config import Paths, dataset_config
-from fraud_detect.data import care_gnn, download
+from fraud_detect.data import audit, care_gnn, download, split
+from fraud_detect.features import own
 from fraud_detect.runstate import (
     CHECKPOINT_DIR,
     UnitStore,
@@ -169,18 +172,172 @@ def run_load(ctx: Context) -> None:
     )
 
 
+def _read_json(path: Path) -> Any:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def load_edges(path: Path) -> np.ndarray:
+    """A relation's (2, E) edge list written by the load stage."""
+    with np.load(path) as f:
+        return f["edges"]
+
+
+def read_nodes(p: Paths) -> pd.DataFrame:
+    """The node table, checked against the saved split files when they exist."""
+    _require(p.nodes)
+    nodes = pd.read_parquet(p.nodes)
+    if p.train_ids.exists() and p.test_ids.exists():
+        try:
+            split.check_against_saved_ids(
+                nodes, pd.read_csv(p.train_ids), pd.read_csv(p.test_ids)
+            )
+        except split.SplitError as e:
+            raise StageError(str(e)) from e
+    return nodes
+
+
+# --------------------------------------------------------------------------
+# Stage 3: grouped, stratified train/test split and shared CV folds
+# --------------------------------------------------------------------------
+def run_split(ctx: Context) -> None:
+    p = ctx.paths
+    _require(p.nodes)
+    nodes = pd.read_parquet(p.nodes)
+    cfg = ctx.config["split"]
+    try:
+        nodes = split.split_nodes(nodes, cfg, ctx.seed)
+        summary = split.summary(nodes, cfg, ctx.seed)
+    except split.SplitError as e:
+        raise StageError(str(e)) from e
+    atomic_write_parquet(p.nodes, nodes)
+    for path, table in (
+        (p.train_ids, split.ids_table(nodes, C.TRAIN)),
+        (p.test_ids, split.ids_table(nodes, C.TEST)),
+        (p.cv_folds, split.folds_table(nodes)),
+    ):
+        atomic_write(path, lambda tmp, table=table: table.to_csv(tmp, index=False))
+    atomic_write_json(p.reports_dir / "split_summary.json", summary)
+    atomic_write_json(p.split_summary, summary)  # last: marks the stage done
+    for part in ("train", "test"):
+        s = summary[part]
+        print(f"{part:>5}: {s['n_nodes']:>6,} nodes, {s['n_positive']:>5,} positive "
+              f"({s['positive_rate']:.4f}), {s['n_groups']:>6,} groups")  # fmt: skip
+    print(f"CV folds on train: {cfg['cv_folds']}; no group crosses train/test or folds.")
+
+
+# --------------------------------------------------------------------------
+# Stage 4: own-feature block and column types (training nodes only)
+# --------------------------------------------------------------------------
+def run_features(ctx: Context) -> None:
+    p = ctx.paths
+    _require(p.mat, p.train_ids)
+    nodes = read_nodes(p)
+    features = care_gnn.read_features(p.mat)
+    if len(features) != len(nodes):
+        raise StageError(
+            f"{p.mat.name} has {len(features)} rows, nodes.parquet {len(nodes)}"
+        )
+    block = own.own_block(features)
+    train_ids = pd.read_csv(p.train_ids)[C.NODE_ID].to_numpy()
+    spec = own.column_spec(block, train_ids)
+    if spec[own.CONSTANT]:
+        raise StageError(
+            f"Columns constant on the training nodes: {spec[own.CONSTANT]}. They "
+            "carry no information and df-analyze would drop them; ask the group "
+            "before removing them."
+        )
+    atomic_write_parquet(p.block_file(C.OWN_BLOCK), block)
+    atomic_write_json(p.column_spec, spec)  # last: marks the stage done
+    print(
+        f"own block: {block.shape[1] - 1} features for {len(block):,} nodes; types "
+        f"from training nodes: {len(spec[own.BINARY])} binary, "
+        f"{len(spec[own.ORDINAL])} ordinal, {len(spec[own.CONTINUOUS])} continuous"
+    )
+
+
+# --------------------------------------------------------------------------
+# Stage 5: audit (counts and statistics only)
+# --------------------------------------------------------------------------
+AUDIT_REPORT = "audit.md"
+AUDIT_TABLES = ("audit_features.csv", "audit_relations.csv", "audit_groups.csv")
+
+
+def run_audit(ctx: Context) -> None:
+    p, data = ctx.paths, ctx.data
+    _require(p.graph_manifest, p.block_file(C.OWN_BLOCK), p.column_spec, p.split_summary)
+    nodes = read_nodes(p)
+    block = pd.read_parquet(p.block_file(C.OWN_BLOCK))
+    spec = _read_json(p.column_spec)
+    manifest = _read_json(p.graph_manifest)
+    threshold = float(ctx.config["audit"]["shortcut_auroc"])
+
+    labelled = nodes[C.IS_LABELLED]
+    found = {
+        "n_nodes": len(nodes),
+        "n_labelled": int(labelled.sum()),
+        "n_positive": int(nodes.loc[labelled, C.LABEL].sum()),
+        "n_features": block.shape[1] - 1,
+        "n_edges": {r["name"]: r["n_edges"] for r in manifest["relations"]},
+    }
+    try:
+        care_gnn.check_counts(found, data["expected"], ctx.dataset)
+    except care_gnn.DatasetError as e:
+        raise StageError(str(e)) from e
+
+    features = audit.feature_table(block, nodes, spec, threshold)
+    duplicates = audit.duplicate_counts(block, nodes)
+    groups = audit.group_table(nodes)
+    purity = audit.group_purity(nodes)
+    relations = pd.DataFrame(
+        [
+            audit.relation_row(r["name"], load_edges(p.graph_dir / r["file"]), nodes)
+            for r in manifest["relations"]
+        ]
+    )
+    report = audit.report(
+        ctx.dataset,
+        audit.count_table(found, data["expected"]),
+        _read_json(p.split_summary),
+        features,
+        duplicates,
+        groups,
+        purity,
+        relations,
+        threshold,
+    )
+    for name, table in zip(AUDIT_TABLES, (features, relations, groups), strict=True):
+        atomic_write(p.reports_dir / name,
+                     lambda tmp, table=table: table.to_csv(tmp, index=False))  # fmt: skip
+    atomic_write_json(p.reports_dir / "audit_summary.json",
+                      {"duplicates": duplicates, "group_purity": purity})  # fmt: skip
+    if duplicates["test_rows_identical_to_a_train_row"]:
+        raise StageError(
+            f"{duplicates['test_rows_identical_to_a_train_row']} test rows are identical "
+            "to a training row, so identical nodes sit on both sides of the split. "
+            f"See {p.reports_dir / 'audit_features.csv'} and fix the grouping."
+        )
+    atomic_write(p.reports_dir / AUDIT_REPORT,
+                 lambda tmp: tmp.write_text(report, encoding="utf-8"))  # fmt: skip
+    flagged = features[features["possible_shortcut"]]
+    print(report.split("## Exact duplicate")[0])
+    print(
+        f"{len(flagged)} feature(s) flagged as possible shortcuts "
+        f"(AUROC >= {threshold}). Full audit: {p.reports_dir / AUDIT_REPORT}"
+    )
+
+
 STAGES: list[Stage] = [
     Stage("download", "Fetch and checksum the CARE-GNN .mat file", run_download,
           lambda p: [p.mat]),
     Stage("load", "Node table, relation edge lists, count checks", run_load,
           lambda p: [p.nodes, p.graph_manifest]),
-    Stage("split", "Grouped stratified train/test split and CV folds",
-          _not_implemented("M4"),
+    Stage("split", "Grouped stratified train/test split and CV folds", run_split,
           lambda p: [p.train_ids, p.test_ids, p.cv_folds, p.split_summary]),
     Stage("features", "Own-feature block and column types (training nodes)",
-          _not_implemented("M4"), lambda p: [p.block_file("own"), p.column_spec]),
-    Stage("audit", "Counts, feature statistics, duplicates, homophily",
-          _not_implemented("M4"), lambda p: [p.reports_dir / "audit.md"]),
+          run_features, lambda p: [p.block_file(C.OWN_BLOCK), p.column_spec]),
+    Stage("audit", "Counts, feature statistics, duplicates, homophily", run_audit,
+          lambda p: [p.reports_dir / AUDIT_REPORT,
+                     *(p.reports_dir / t for t in AUDIT_TABLES)]),
     Stage("df_analyze_input", "df-analyze train/test tables for the feature set",
           _not_implemented("M5"),
           lambda p: [p.df_analyze_input_dir / "train.parquet",

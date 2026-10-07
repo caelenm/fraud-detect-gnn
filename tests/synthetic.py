@@ -168,3 +168,30 @@ def fake_care_gnn_mat(
         "net_bbb": b,
         "homo": sp.csc_matrix(homo),
     }
+
+
+def fake_node_table(
+    n: int = 400, unlabelled: int = 0, group_size: int = 3, seed: int = 0
+) -> pd.DataFrame:
+    """Invented node table shaped like the load stage's output: the first
+    `unlabelled` nodes have no label; labelled nodes come in groups of
+    `group_size` consecutive nodes that share one label (like a YelpChi user's
+    reviews), about 15% positive."""
+    rng = np.random.default_rng(seed)
+    groups = np.arange(n) // group_size
+    group_label = (rng.random(groups.max() + 1) < 0.15).astype(int)
+    label = pd.array(group_label[groups], dtype="Int8")
+    is_labelled = np.arange(n) >= unlabelled
+    label[~is_labelled] = pd.NA
+    split = pd.array([None] * n, dtype="string")
+    split[~is_labelled] = C.UNLABELLED
+    return pd.DataFrame(
+        {
+            C.NODE_ID: np.arange(n, dtype=np.int64),
+            C.LABEL: label,
+            C.IS_LABELLED: is_labelled,
+            C.GROUP_ID: groups.astype(np.int64),
+            C.SPLIT: split,
+            C.CV_FOLD: pd.array([None] * n, dtype="Int8"),
+        }
+    )
