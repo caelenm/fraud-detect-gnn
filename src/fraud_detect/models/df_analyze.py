@@ -1,14 +1,15 @@
-"""Model A: df-analyze input tables, command line, and split verification.
+"""Model A: df-analyze command line and split verification.
 
 We create the train/test split ourselves and pass it to df-analyze with
 `--df-train` / `--df-tests` (method `list`), so the frozen test set is defined
-by our saved Complaint IDs. df-analyze drops identifiers and re-encodes
-features, so after a run we verify that its exported X/y train and test tables
-line up row-for-row with ours before anything downstream relies on them.
+by our saved node IDs. df-analyze re-encodes features, so after a run we
+verify that its exported X/y train and test tables line up row-for-row with
+ours before anything downstream relies on them.
 """
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -16,53 +17,30 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from fraud_detect import columns as C
-from fraud_detect.features.tabular import (
-    CATEGORICAL_FEATURES,
-    COMPANY_PREFIX,
-    ORDINAL_FEATURES,
-)
-
 TARGET = "target"
-COMPANY_COUNT = COMPANY_PREFIX + "n_train_complaints"
 
 
 class SplitVerificationError(RuntimeError):
     """Raised when df-analyze's exported split does not match ours."""
 
 
-def build_tables(
-    features: pd.DataFrame,
-    text_pca: pd.DataFrame,
-    labels: pd.DataFrame,
-    train_ids: pd.Series,
-    test_ids: pd.Series,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Join features, text components and labels; return (train, test) tables
-    with rows in the order of `train_ids` / `test_ids` and no identifier."""
-    if set(train_ids) & set(test_ids):
-        raise ValueError("Train and test Complaint IDs overlap")
-    table = features.merge(text_pca, on=C.COMPLAINT_ID, how="inner", validate="1:1")
-    table = table.merge(
-        labels[[C.COMPLAINT_ID, C.LABEL]], on=C.COMPLAINT_ID, how="inner", validate="1:1"
-    )
-    table = table.rename(columns={C.LABEL: TARGET}).set_index(C.COMPLAINT_ID)
-    for col in table.columns:
-        if col != TARGET and (C.is_label_derived(col) or col in (C.COMPANY, C.LABEL)):
-            raise AssertionError(f"Forbidden column in df-analyze input: {col}")
-    missing = set(train_ids).union(test_ids) - set(table.index)
-    if missing:
-        raise ValueError(f"{len(missing)} split Complaint IDs have no feature row")
-    train = table.loc[train_ids.to_numpy()].reset_index(drop=True)
-    test = table.loc[test_ids.to_numpy()].reset_index(drop=True)
-    return train, test
-
-
 def df_analyze_args(
-    cfg: dict[str, Any], train_path: Path, test_path: Path, outdir: Path, seed: int
+    cfg: dict[str, Any],
+    train_path: Path,
+    test_path: Path,
+    outdir: Path,
+    seed: int,
+    ordinals: Sequence[str] = (),
+    categoricals: Sequence[str] = (),
 ) -> list[str]:
     """Command-line arguments for df-analyze.py. Paths must be absolute because
-    df-analyze runs from its own directory."""
+    df-analyze runs from its own directory.
+
+    Feature types are passed explicitly (from column_spec.json) instead of
+    letting df-analyze guess. An empty list is passed by leaving the flag out:
+    df-analyze's default for both is [] (`column_parser` at the pinned commit
+    would also turn "" into [], but omitting the flag does not rely on that).
+    """
     args = [
         "--df-train", str(train_path.resolve()),
         "--df-tests", str(test_path.resolve()),
@@ -71,8 +49,14 @@ def df_analyze_args(
         # is already the `list` method (tune on train, evaluate on the test file).
         "--target", TARGET,
         "--mode", "classify",
-        "--categoricals", ",".join(CATEGORICAL_FEATURES),
-        "--ordinals", ",".join(ORDINAL_FEATURES + (COMPANY_COUNT,)),
+    ]  # fmt: skip
+    for flag, columns in (("--categoricals", categoricals), ("--ordinals", ordinals)):
+        bad = [c for c in columns if not c or "," in c or c != c.strip()]
+        if bad:
+            raise ValueError(f"Column names df-analyze cannot parse in {flag}: {bad}")
+        if columns:
+            args += [flag, ",".join(columns)]
+    args += [
         "--classifiers", *cfg["classifiers"],
         "--htune-trials", str(cfg["htune_trials"]),
         "--htune-cls-metric", str(cfg["htune_cls_metric"]),

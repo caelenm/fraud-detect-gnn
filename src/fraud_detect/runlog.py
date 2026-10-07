@@ -21,7 +21,7 @@ LOGGED_PACKAGES = (
     "pandas",
     "pyarrow",
     "scikit-learn",
-    "datasketch",
+    "scipy",
     "pyyaml",
     "torch",
     "torch-geometric",

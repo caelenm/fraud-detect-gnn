@@ -1,4 +1,7 @@
-"""Stage 7: run only the 'features' stage (same as: uv run run.py --only features)."""
+"""Stage 4: run only the 'features' stage for one dataset.
+
+Same as: uv run run.py --dataset <yelpchi|amazon> --only features
+"""
 
 import sys
 

@@ -1,15 +1,19 @@
 """Static HTML report of Model A: parameters, results, and confidence cards.
 
 The page is one self-contained file (no scripts, no external requests) that
-opens in any browser. It is written to outputs/report/index.html and travels
-with the output bundle. It contains complaint narratives, so like every other
-output it must never be committed or posted publicly.
+opens in any browser. It is written to
+outputs/<dataset>/<feature_set>/report/index.html and travels with the output
+bundle. It shows row-level test data (node IDs, labels, feature values), so
+like every other output it must never be committed or posted publicly.
 
 Confidence is read directly from the model's output: the probability it gives
 the class it predicted, P(fraud) if it predicted fraud, else 1 - P(fraud). It
-ranges from 0.5 (a coin flip) to 1.0 (certain). Only test complaints are shown.
+ranges from 0.5 (a coin flip) to 1.0 (certain). Only test nodes are shown,
+each with its most extreme features: the ones whose values rank highest among
+the training nodes (features are anonymous, so their values are the only
+description available).
 
-Sections for Model B (the GNN) and inter-model agreement are placeholders
+Sections for the graph models and inter-model agreement are placeholders
 until those stages exist.
 """
 
@@ -17,7 +21,6 @@ from __future__ import annotations
 
 import ast
 import json
-import re
 from dataclasses import dataclass, field
 from html import escape
 from pathlib import Path
@@ -121,34 +124,45 @@ def find_entry(
     )
 
 
-def excerpt(text: Any, max_chars: int) -> str:
-    """Whitespace-collapsed narrative, cut at a word boundary."""
-    if not isinstance(text, str):
-        return ""
-    clean = re.sub(r"\s+", " ", text).strip()
-    if len(clean) <= max_chars:
-        return clean
-    cut = clean[:max_chars]
-    space = cut.rfind(" ")
-    if space > max_chars * 0.6:
-        cut = cut[:space]
-    return cut.rstrip(" ,.;:") + " …"
+def top_features(test: pd.DataFrame, train: pd.DataFrame, n: int) -> list[list[tuple]]:
+    """For each test row, its `n` features with the highest percentile among the
+    training rows, as (name, value, percentile) tuples, highest first.
+
+    Ranking by training percentile rather than raw value keeps features on
+    different scales comparable (Amazon's are counts, YelpChi's are in [0, 1]).
+    Ties are broken by feature name so the order is reproducible."""
+    if list(test.columns) != list(train.columns):
+        raise WebReportError("Train and test feature columns differ")
+    names = sorted(test.columns)
+    pct = np.column_stack(
+        [
+            np.searchsorted(np.sort(train[c].to_numpy(float)), test[c].to_numpy(float),
+                            side="right") / len(train)
+            for c in names
+        ]
+    )  # fmt: skip
+    values = test[names].to_numpy(float)
+    out = []
+    for i in range(len(test)):
+        order = np.argsort(-pct[i], kind="stable")[:n]
+        out.append([(names[j], float(values[i, j]), float(pct[i, j])) for j in order])
+    return out
 
 
 def confidence_table(
     prob_fraud: np.ndarray, predicted: np.ndarray, actual: np.ndarray, meta: pd.DataFrame
 ) -> pd.DataFrame:
-    """Test complaints with their prediction, label and output confidence.
+    """Test nodes with their prediction, label and output confidence.
 
-    `meta` holds one row per test complaint in the same order as the
-    predictions (Complaint ID, product, state, date, narrative)."""
+    `meta` holds one row per test node in the same order as the predictions:
+    `node_id` and `top_features` (see `top_features`)."""
     prob_fraud = np.asarray(prob_fraud, dtype=float)
     predicted = np.asarray(predicted, dtype=int)
     actual = np.asarray(actual, dtype=int)
     if not (len(prob_fraud) == len(predicted) == len(actual) == len(meta)):
         raise WebReportError(
             f"Row counts differ: {len(prob_fraud)} probabilities, {len(predicted)} "
-            f"predictions, {len(actual)} labels, {len(meta)} complaints"
+            f"predictions, {len(actual)} labels, {len(meta)} nodes"
         )
     if ((prob_fraud < 0) | (prob_fraud > 1)).any():
         raise WebReportError("Fraud probabilities outside [0, 1]")
@@ -165,12 +179,12 @@ def most_and_least_confident(
     table: pd.DataFrame, n: int
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Top `n` by confidence, highest first; bottom `n`, lowest first. Ties are
-    broken by Complaint ID so the order is reproducible."""
+    broken by node ID so the order is reproducible."""
     most = table.sort_values(
-        ["confidence", C.COMPLAINT_ID], ascending=[False, True], kind="stable"
+        ["confidence", C.NODE_ID], ascending=[False, True], kind="stable"
     ).head(n)
     least = table.sort_values(
-        ["confidence", C.COMPLAINT_ID], ascending=[True, True], kind="stable"
+        ["confidence", C.NODE_ID], ascending=[True, True], kind="stable"
     ).head(n)
     return most, least
 
@@ -186,7 +200,7 @@ class ReportInputs:
     run_config: list[tuple[str, str]]  # label, value
     budget: pd.DataFrame | None = None  # tuning_budget.csv
     n_samples: int = 25
-    excerpt_chars: int = 600
+    dataset_label: str = ""  # e.g. "YelpChi (reviews)"
     notes: list[str] = field(default_factory=list)
 
 
@@ -273,11 +287,13 @@ def _header(inputs: ReportInputs) -> str:
     )
     return (
         '<header class="top"><div>'
-        '<div class="eyebrow">CS555 · Fraud complaint detection</div>'
+        '<div class="eyebrow">CS555 · Graph fraud detection · '
+        f"{escape(inputs.dataset_label)}</div>"
         "<h1>Model report</h1></div>"
         f'<div class="meta">{meta}</div></header>'
-        '<div class="notice"><b>Contains complaint narratives.</b> Share within the '
-        "group only; never commit this file or post it publicly.</div>"
+        '<div class="notice"><b>Contains row-level test data</b> (node IDs, labels, '
+        "feature values). Share within the group only; never commit this file or "
+        "post it publicly.</div>"
     )
 
 
@@ -301,7 +317,7 @@ def _headline(inputs: ReportInputs) -> str:
         _tile(
             "Test set",
             _int(s["n_test"]),
-            f"complaints · {_pct(s['test_positive_rate'])} fraud",
+            f"nodes · {_pct(s['test_positive_rate'])} fraud",
         ),
     ]
     return (
@@ -413,15 +429,21 @@ def _param(value: Any) -> str:
     return str(value)
 
 
-def _sample(rank: int, row: pd.Series, excerpt_chars: int) -> str:
+def _feature_chips(features: list[tuple]) -> str:
+    return "".join(
+        f"<span>{escape(str(name))} <b>{escape(_param(float(value)))}</b> "
+        f'<span class="pct">p{100 * float(pct):.0f}</span></span>'
+        for name, value, pct in features
+    )
+
+
+def _sample(rank: int, row: pd.Series) -> str:
     correct = bool(row["correct"])
     fill = max(0.0, min(1.0, (float(row["confidence"]) - 0.5) / 0.5)) * 100
-    date = pd.Timestamp(row[C.DATE_RECEIVED]).strftime("%Y-%m-%d")
-    text = excerpt(row[C.NARRATIVE], excerpt_chars)
     return (
         '<div class="sample"><div class="sample-top">'
         f'<span class="rank">#{rank}</span>'
-        f'<span class="id">Complaint {escape(str(row[C.COMPLAINT_ID]))}</span>'
+        f'<span class="id">Node {escape(str(row[C.NODE_ID]))}</span>'
         '<span class="spacer"></span>'
         f'<span class="badge">predicted {_label(row["predicted"])}</span>'
         f'<span class="badge">actual {_label(row["actual"])}</span>'
@@ -431,11 +453,10 @@ def _sample(rank: int, row: pd.Series, excerpt_chars: int) -> str:
         f'<div class="fill" style="width:{fill:.1f}%"></div></div>'
         f'<span class="num">{prob_text(row["confidence"])}</span></div>'
         '<div class="facts">'
-        f"<span>P(fraud) <b>{prob_text(row['prob_fraud'])}</b></span>"
-        f"<span>Product <b>{escape(str(row[C.PRODUCT]))}</b></span>"
-        f"<span>State <b>{escape(_or_dash(row[C.STATE]))}</b></span>"
-        f"<span>Received <b>{date}</b></span></div>"
-        f'<div class="narrative">{escape(text)}</div></div>'
+        f"<span>P(fraud) <b>{prob_text(row['prob_fraud'])}</b></span></div>"
+        '<div class="facts features"><span class="muted">Highest-ranked features '
+        "(value, training percentile):</span>"
+        f"{_feature_chips(row['top_features'])}</div></div>"
     )
 
 
@@ -447,10 +468,8 @@ def _or_dash(value: Any) -> str:
     )
 
 
-def _card(title: str, blurb: str, rows: pd.DataFrame, n: int, excerpt_chars: int) -> str:
-    items = "".join(
-        _sample(i, row, excerpt_chars) for i, (_, row) in enumerate(rows.iterrows(), 1)
-    )
+def _card(title: str, blurb: str, rows: pd.DataFrame, n: int) -> str:
+    items = "".join(_sample(i, row) for i, (_, row) in enumerate(rows.iterrows(), 1))
     n_correct = int(rows["correct"].sum())
     return (
         '<div class="panel conf-card"><div class="conf-head">'
@@ -470,7 +489,7 @@ def _confidence(inputs: ReportInputs) -> str:
         '<p class="lede">Confidence is read directly from the model\'s output: the '
         "probability it assigns to the class it predicts, P(fraud) if it predicts "
         "fraud, else 1 − P(fraud). It ranges from 0.5 (a coin flip) to 1.0 (certain). "
-        "Only test complaints are shown; correct and wrong predictions are both "
+        "Only test nodes are shown; correct and wrong predictions are both "
         "included, and confident mistakes are the most informative.</p>"
         '<div class="grid-2">'
         + _card(
@@ -478,14 +497,12 @@ def _confidence(inputs: ReportInputs) -> str:
             "Highest output confidence, most certain first.",
             most,
             n,
-            inputs.excerpt_chars,
         )
         + _card(
             "Least confident",
             "Output confidence closest to 0.5: the model's most uncertain calls.",
             least,
             n,
-            inputs.excerpt_chars,
         )
         + "</div></section>"
     )
@@ -585,34 +602,33 @@ def _pending_panel(title: str, body: str) -> str:
 
 
 PENDING = (
-    "<section><h2>Model A vs. Model B</h2>"
-    '<p class="lede">Reserved for the graph neural network. These panels fill in '
-    "once the GNN stages exist.</p>"
+    "<section><h2>The model ladder</h2>"
+    '<p class="lede">Reserved for the graph models (docs/RESEARCH_PLAN.md §1). '
+    "These panels fill in once those stages exist.</p>"
     '<div class="grid-2">'
     + _pending_panel(
-        "Head-to-head",
-        "Model A, the heterogeneous GraphSAGE (Model B) and its graph-free control on "
-        "the same test complaints."
-        "<ul><li>PR-AUC, AUROC, F1, recall (mean ± std over seeds for the GNN)</li>"
-        "<li>Effect of the graph: GNN minus graph-free control</li></ul>",
+        "Does the graph help?",
+        "Every rung on the same test nodes, with paired group-bootstrap intervals."
+        "<ul><li>Model 2 − Model 1: hand-made neighbour aggregates</li>"
+        "<li>Model 5 − Model 1: self-supervised GNN embeddings in df-analyze</li>"
+        "<li>Model 4 − Model 3: GraphSAGE with and without edges (mean ± std over "
+        "seeds)</li></ul>",
     )
     + _pending_panel(
         "Inter-model agreement",
-        "Where Model A and Model B agree and disagree on the same complaints."
+        "Where Model A and the GNN agree and disagree on the same test nodes."
         "<ul><li>Agreement rate and Cohen's kappa on predicted labels</li>"
         "<li>Correlation of their fraud probabilities</li>"
-        "<li>Complaints each model gets right that the other gets wrong</li>"
-        "<li>Confidence cards for both models side by side</li></ul>",
+        "<li>Nodes each model gets right that the other gets wrong</li></ul>",
     )
     + _pending_panel(
-        "Feature-group importance",
-        "Permutation importance by group (text, company, product, region) for both "
-        "models.",
+        "Feature-block importance",
+        "Permutation importance of the own-feature block and each relation's "
+        "neighbour or embedding block.",
     )
     + _pending_panel(
-        "Edge-type ablation",
-        "Drop in GNN PR-AUC when company, product, region or similarity edges are "
-        "removed.",
+        "Relation ablation",
+        "Drop in GNN PR-AUC when each relation's edges are removed.",
     )
     + "</div></section>"
 )
@@ -620,12 +636,12 @@ PENDING = (
 HOW_TO_READ = """
 <section><h2>How to read this report</h2>
 <ul class="notes panel">
-<li><b>What is predicted:</b> whether the consumer filed the complaint under a
-fraud, scam, identity-theft or unauthorized-transaction category (1) or any other
-issue (0), per <code>configs/categories.yaml</code>; categories too ambiguous to call
-are excluded from the data. Every category's treatment is listed in
-<code>docs/LABEL_RULE.md</code>. It is the consumer's chosen category, not verified
-fraud. The model never sees the Issue or Sub-issue fields.</li>
+<li><b>What is predicted:</b> on YelpChi, whether Yelp's filter flagged a review
+as spam (1) or not (0); on Amazon, whether a user is labelled fraudulent (1) or
+benign (0). Features are the datasets' anonymous, precomputed node features. Amazon's
+first 3,305 users have no label and are never scored.</li>
+<li><b>The test set is grouped:</b> all reviews by one YelpChi user, and all Amazon
+users with identical features, are on the same side of the split.</li>
 <li><b>PR-AUC</b> is the headline metric because fraud is the minority class. A
 model that guesses scores the test fraud rate.</li>
 <li><b>Model A is chosen on the training set only</b>: every tuned combination is
@@ -637,7 +653,8 @@ differently for different models, so it cannot rank them.</li>
 confidence is not the same as being right.</li>
 <li>df-analyze's <code>5-fold</code> results table refits models on test-set folds and is
 deliberately excluded.</li>
-<li>Single split and single seed for Model A: no variance estimate across splits.</li>
+<li>Model A uses a single split and seed. The bootstrap intervals resample whole
+test groups; they do not cover variation across splits.</li>
 </ul></section>
 """
 
@@ -657,7 +674,7 @@ def render(inputs: ReportInputs) -> str:
             PENDING,
             HOW_TO_READ,
             "<footer>Generated by <code>uv run run.py --only web_report</code> · build "
-            f"{escape(inputs.header['build'])} · Contains complaint narratives: share "
+            f"{escape(inputs.header['build'])} · Contains row-level test data: share "
             "with the group only, never commit or post publicly.</footer>",
         ]
     )

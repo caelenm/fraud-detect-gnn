@@ -1,6 +1,6 @@
-"""Stage 10: run only the 'select_model' stage.
+"""Stage 8: run only the 'select_model' stage for one dataset.
 
-Same as: uv run run.py --only select_model
+Same as: uv run run.py --dataset <yelpchi|amazon> --only select_model
 """
 
 import sys

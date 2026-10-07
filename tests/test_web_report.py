@@ -27,9 +27,9 @@ def test_most_and_least_confident_order_and_ties():
     pred = (prob > 0.5).astype(int)
     table = web.confidence_table(prob, pred, pred, fake_test_meta(6))
     most, least = web.most_and_least_confident(table, 3)
-    # 0.99 (SYN-0001), 0.99 (SYN-0002 via 1 - 0.01), 0.99 (SYN-0005): ties by ID
-    assert most[C.COMPLAINT_ID].tolist() == ["SYN-0001", "SYN-0002", "SYN-0005"]
-    assert least[C.COMPLAINT_ID].tolist() == ["SYN-0000", "SYN-0003", "SYN-0004"]
+    # 0.99 (node 9001), 0.99 (9002, via 1 - 0.01), 0.99 (9005): ties by node ID
+    assert most[C.NODE_ID].tolist() == [9001, 9002, 9005]
+    assert least[C.NODE_ID].tolist() == [9000, 9003, 9004]
 
 
 def test_mismatched_lengths_are_rejected():
@@ -46,11 +46,19 @@ def test_prob_text_keeps_extremes_distinguishable():
     assert web.prob_text(0.99995) != web.prob_text(0.99998)
 
 
-def test_excerpt_and_helpers():
-    assert web.excerpt("  a\n\nb  ", 50) == "a b"
-    cut = web.excerpt("word " * 100, 23)
-    assert cut.endswith(" …") and len(cut) <= 25
-    assert web.excerpt(None, 10) == ""
+def test_top_features_rank_by_training_percentile():
+    train = pd.DataFrame({"own__a": [0.0, 1.0, 2.0, 3.0], "own__b": [10, 20, 30, 40]})
+    test = pd.DataFrame({"own__a": [3.0, 0.0], "own__b": [15, 100]})
+    top = web.top_features(test, train, n=1)
+    # Row 0: own__a at the top of its training range beats own__b at the 25th
+    # percentile, although own__b's raw value is larger.
+    assert top[0] == [("own__a", 3.0, 1.0)]
+    assert top[1] == [("own__b", 100.0, 1.0)]
+    with pytest.raises(web.WebReportError):
+        web.top_features(test[["own__b", "own__a"]], train, n=1)
+
+
+def test_helpers():
     assert web.feature_set_key("embed", "linear") == "embed_linear"
     assert web.feature_set_key("none", float("nan")) == "none"
     assert web.parse_params('{"depth": 6}') == {"depth": 6}
@@ -88,7 +96,8 @@ def report_inputs(n: int = 30, n_samples: int = 5) -> web.ReportInputs:
     pred = (prob > 0.5).astype(int)
     actual = rng.integers(0, 2, n)
     meta = fake_test_meta(n)
-    meta.loc[0, C.NARRATIVE] = "<script>alert('synthetic')</script> & more"
+    unsafe_name = "<script>alert('synthetic')</script> & more"
+    meta.at[0, "top_features"] = [(unsafe_name, 0.5, 0.9)]
     model_a = {
         "model": "catboost", "selection": "embed", "embed_selector": "linear",
         "cv_pr_auc": 0.5, "cv_pr_auc_std": 0.01, "tuning_metric": "BalancedAccuracy",
@@ -125,16 +134,17 @@ def report_inputs(n: int = 30, n_samples: int = 5) -> web.ReportInputs:
             "git_commit": "abc",
             "run": "SYN-RUN",
         },
-        run_config=[("Seed", "1"), ("Complaints", "60 train")],
+        run_config=[("Seed", "1"), ("Nodes", "60 train")],
         budget=budget,
         n_samples=n_samples,
+        dataset_label="Synthetic",
     )
 
 
-def test_render_escapes_narratives_and_fills_every_section():
+def test_render_escapes_values_and_fills_every_section():
     page = web.render(report_inputs(n_samples=5))
-    assert "<script>alert" not in page  # narrative text is escaped
-    assert "&lt;script&gt;" in page or "SYN-0000" not in page
+    assert "<script>alert" not in page  # every inserted value is escaped
+    assert "&lt;script&gt;" in page or "Node 9000" not in page
     assert page.count('class="sample"') == 10  # 5 per card
     assert page.count('class="selected"') == 1  # Model A's row
     assert "CatBoost" in page and "Embedded: linear" in page
@@ -143,12 +153,13 @@ def test_render_escapes_narratives_and_fills_every_section():
     assert "CV PR-AUC 0.450 untuned → 0.500 tuned (+0.050)" in page
     assert '<span class="gain good">+0.050</span>' in page
     assert '<span class="gain bad">-0.020</span>' in page
-    assert "Contains complaint narratives" in page
+    assert "Contains row-level test data" in page
+    assert "complaint" not in page.lower() and "narrative" not in page.lower()
     assert "<link" not in page and "<script" not in page  # self-contained, static
     assert re.search(r'style="width:\d+\.\d%"', page)
 
 
-def test_report_shows_the_escaped_narrative_when_selected():
-    inputs = report_inputs(n=6, n_samples=6)  # every complaint appears
+def test_report_shows_the_escaped_feature_name_when_selected():
+    inputs = report_inputs(n=6, n_samples=6)  # every node appears
     page = web.render(inputs)
     assert "&lt;script&gt;alert(&#x27;synthetic&#x27;)&lt;/script&gt; &amp; more" in page

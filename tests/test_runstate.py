@@ -5,7 +5,7 @@ from __future__ import annotations
 import yaml
 
 from fraud_detect.cli import main, plan_stages
-from fraud_detect.config import DEFAULT_CONFIG, get_paths, load_config
+from fraud_detect.config import DEFAULT_CONFIG, get_paths, load_config, with_dataset
 from fraud_detect.pipeline import STAGE_NAMES, Context
 from fraud_detect.runstate import RunState, UnitStore, config_fingerprint
 
@@ -33,13 +33,16 @@ def test_unit_store_saves_skips_and_resets(tmp_path):
     assert store.all() == []
 
 
-def tmp_config(tmp_path):
+def tmp_config(tmp_path, dataset="amazon"):
+    """The default config with every path under tmp_path and a dataset chosen.
+    Returns the config file (for the CLI) and the config with the dataset set."""
     config = load_config(DEFAULT_CONFIG)
-    for key in ("raw_dir", "interim_dir", "processed_dir", "outputs_dir"):
+    for key in ("raw_dir", "processed_dir", "outputs_dir"):
         config["paths"][key] = str(tmp_path / key)
+    config["dataset"] = dataset
     path = tmp_path / "config.yaml"
     path.write_text(yaml.safe_dump(config), encoding="utf-8")
-    return path, config
+    return path, with_dataset(config, None)
 
 
 def test_unit_store_is_emptied_on_a_fresh_run_and_kept_on_resume(tmp_path):
@@ -65,11 +68,24 @@ def test_cli_resume_guards(tmp_path, capsys):
     assert main(["--config", str(path), "--resume"]) == 0
     assert "Nothing to resume" in capsys.readouterr().out
 
-    RunState(pending=["pca"], config_sha256="another-config").save(outputs)
+    RunState(pending=["audit"], config_sha256="another-config").save(outputs)
     assert main(["--config", str(path), "--resume"]) == 2  # config changed
     assert "config changed" in capsys.readouterr().err
 
-    RunState(pending=["pca"], config_sha256=config_fingerprint(config)).save(outputs)
-    assert main(["--config", str(path), "--only", "pca"]) == 2  # unfinished run
+    RunState(pending=["audit"], config_sha256=config_fingerprint(config)).save(outputs)
+    assert main(["--config", str(path), "--only", "audit"]) == 2  # unfinished run
     assert "--resume" in capsys.readouterr().err
     assert main(["--config", str(path), "--resume", "--force"]) == 2
+
+
+def test_run_state_is_per_dataset(tmp_path, capsys):
+    path, config = tmp_config(tmp_path, dataset="amazon")
+    RunState(pending=["audit"], config_sha256=config_fingerprint(config)).save(
+        get_paths(config).outputs_dir
+    )
+    # An interrupted Amazon run neither blocks nor is resumed by a YelpChi run.
+    assert main(["--config", str(path), "--dataset", "yelpchi", "--resume"]) == 0
+    assert "Nothing to resume" in capsys.readouterr().out
+    yelp = get_paths(with_dataset(config, "yelpchi"))
+    assert RunState.load(yelp.outputs_dir) is None
+    assert RunState.load(get_paths(config).outputs_dir).pending == ["audit"]

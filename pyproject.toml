@@ -1,17 +1,17 @@
 [project]
 name = "fraud-detect"
 version = "0.1.0"
-description = "Explainable fraud complaint detection: tabular AutoML vs. graph neural networks"
+description = "Graph fraud detection on YelpChi and Amazon: tabular AutoML (df-analyze) vs. graph neural networks"
 readme = "README.md"
 license = "GPL-3.0-only"
 requires-python = ">=3.11"
 dependencies = [
-    "datasketch>=2.0.0",
     "numpy>=2.4.6",
     "pandas>=3.0.6",
     "pyarrow>=25.0.1",
     "pyyaml>=6.0.3",
     "scikit-learn>=1.9.1",
+    "scipy>=1.16",
 ]
 
 [build-system]

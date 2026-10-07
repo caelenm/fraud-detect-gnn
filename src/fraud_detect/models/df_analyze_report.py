@@ -284,8 +284,8 @@ def build_report(
         "",
         f"- df-analyze run: `{info['run']}` (tuning trials per model: "
         f"{info['htune_trials']}, seed {info['seed']})",
-        f"- Train: {info['n_train']:,} complaints; test: {info['n_test']:,} "
-        f"complaints, {info['test_positive_rate']:.2%} fraud",
+        f"- Train: {info['n_train']:,} nodes; test: {info['n_test']:,} "
+        f"nodes, {info['test_positive_rate']:.2%} fraud",
         f"- No-skill PR-AUC on this test set = its fraud rate: "
         f"{info['test_positive_rate']:.4f}",
         *baseline_line,

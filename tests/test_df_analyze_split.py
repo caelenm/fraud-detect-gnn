@@ -1,9 +1,9 @@
-"""The saved test Complaint IDs must match df-analyze's exported test set.
+"""The saved test node IDs must match df-analyze's exported test set.
 
 These tests fake a df-analyze export directory in tmp_path, mimicking how
-df-analyze writes it (clip + min-max normalised continuous columns, one-hot
-categoricals, no identifiers), and check that verification accepts an aligned
-export and rejects reordered, truncated or relabelled ones.
+df-analyze writes it (clip + min-max normalised continuous columns, binary
+columns passed through, no identifiers), and check that verification accepts
+an aligned export and rejects reordered, truncated or relabelled ones.
 """
 
 from __future__ import annotations
@@ -11,40 +11,29 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import pytest
-from synthetic import labeled_sample
+from synthetic import fake_model_tables
 
-from fraud_detect.data.sample import ids_for, stratified_split
-from fraud_detect.features.tabular import build_tabular_features
-from fraud_detect.features.text import fit_pca
 from fraud_detect.models.df_analyze import TARGET as T
 from fraud_detect.models.df_analyze import (
     SplitVerificationError,
-    build_tables,
     df_analyze_args,
     find_export_dir,
     read_export,
     verify_export,
 )
 
+CONTINUOUS = ["own__f00", "own__f01"]
+
 
 def our_tables():
-    df = labeled_sample(n=300)
-    split = stratified_split(df, 0.4, seed=0)
-    train_ids, test_ids = ids_for(split, "train"), ids_for(split, "test")
-    rng = np.random.default_rng(0)
-    emb = pd.DataFrame(rng.normal(size=(len(df), 12))).add_prefix("embed")
-    emb.insert(0, "complaint_id", df["complaint_id"].to_numpy())
-    pcs, _ = fit_pca(emb, train_ids, n_components=5, seed=0)
-    features, _, _ = build_tabular_features(df, train_ids)
-    train, test = build_tables(features, pcs, df, train_ids, test_ids)
-    pca_cols = [c for c in train.columns if c.startswith("text_pc")]
-    return train, test, pca_cols
+    train, test = fake_model_tables()
+    return train, test, CONTINUOUS
 
 
-def like_df_analyze(table: pd.DataFrame, pca_cols: list[str]) -> pd.DataFrame:
-    """Clip to a robust range, then min-max scale; one-hot a categorical."""
-    out = pd.get_dummies(table[["state"]].astype(str), dtype=float)
-    for col in pca_cols:
+def like_df_analyze(table: pd.DataFrame, cont_cols: list[str]) -> pd.DataFrame:
+    """Clip to a robust range, then min-max scale; pass a binary column through."""
+    out = table[["own__f03"]].astype(float)
+    for col in cont_cols:
         x = table[col]
         lo, hi = x.quantile(0.05), x.quantile(0.95)
         width = hi - lo
@@ -76,7 +65,7 @@ def test_aligned_export_passes(tmp_path):
     train, test, pca_cols = our_tables()
     report = verify(write_export(tmp_path, train, test, pca_cols), train, test, pca_cols)
     assert report["n_test"] == len(test)
-    assert report["continuous_columns_checked"] == {"train": 5, "test": 5}
+    assert report["continuous_columns_checked"] == {"train": 2, "test": 2}
 
 
 def test_reordered_test_rows_fail(tmp_path):
@@ -136,3 +125,18 @@ def test_df_analyze_args_use_predefined_split(tmp_path):
     assert "--df-tests-method" not in args  # upstream bug; default is `list`
     assert "--classifiers lgbm lr" in joined
     assert "--wrapper-select" not in args  # wrapper selection stays off
+
+
+def test_df_analyze_args_pass_explicit_types_and_omit_empty_lists(tmp_path):
+    cfg = {"classifiers": ["lgbm"], "htune_trials": 5, "htune_cls_metric": "bal-acc"}
+    paths = (tmp_path / "tr.parquet", tmp_path / "te.parquet", tmp_path / "out")
+    args = df_analyze_args(cfg, *paths, seed=1, ordinals=["own__f02", "own__f05"])
+    i = args.index("--ordinals")
+    assert args[i + 1] == "own__f02,own__f05"
+    # No categoricals: the flag is left out (df-analyze's default is []), never
+    # passed as "", which a different parser could read as one column named "".
+    assert "--categoricals" not in args and "" not in args
+    none = df_analyze_args(cfg, *paths, seed=1)
+    assert "--ordinals" not in none and "--categoricals" not in none
+    with pytest.raises(ValueError, match="cannot parse"):
+        df_analyze_args(cfg, *paths, seed=1, ordinals=["a,b"])

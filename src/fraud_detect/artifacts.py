@@ -1,7 +1,8 @@
 """Pack and unpack pipeline outputs so group members can skip long stages.
 
-A bundle is one .tgz holding every stage output under data/ and outputs/ (never
-the raw archives) plus a manifest with a SHA-256 checksum for each file.
+A bundle is one .tgz holding every stage output of one dataset under
+data/processed/<dataset>/ and outputs/<dataset>/ (never the raw downloads)
+plus a manifest with a SHA-256 checksum for each file.
 Unpacking it into another clone puts each file back in the same place, so
 `uv run run.py` there skips every stage that is already done, exactly as it
 does on the machine that made the bundle.
@@ -26,7 +27,15 @@ from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
-from fraud_detect.config import DEFAULT_CONFIG, REPO_ROOT, Paths, get_paths, load_config
+from fraud_detect.config import (
+    DEFAULT_CONFIG,
+    REPO_ROOT,
+    ConfigError,
+    Paths,
+    get_paths,
+    load_config,
+    with_dataset,
+)
 from fraud_detect.runlog import git_commit
 from fraud_detect.runstate import CHECKPOINT_DIR, STATE_FILE
 
@@ -69,34 +78,44 @@ def _relative(path: Path, root: Path) -> str:
         raise ArtifactError(f"{path} is outside the repository ({root})") from e
 
 
-def collect_files(paths: Paths) -> list[Path]:
-    """Every file that goes into a bundle.
+def _latest_df_analyze_run(dfa_dir: Path) -> Path | None:
+    latest = dfa_dir / "latest.txt"
+    if not latest.is_file():
+        return None
+    stamp = latest.read_text(encoding="utf-8").strip()
+    return dfa_dir / stamp if stamp and (dfa_dir / stamp).is_dir() else None
 
-    Included: data/interim and data/processed (except the embed stage's scratch
-    files in data/interim/embed), and outputs/ except the per-invocation run
-    logs in outputs/runs. Of the df-analyze runs, only the latest finished one
-    (named in outputs/df_analyze/latest.txt) is included.
+
+def collect_files(paths: Paths) -> list[Path]:
+    """Every file of the active dataset that goes into a bundle.
+
+    Included: data/processed/<dataset>/ and outputs/<dataset>/, except the
+    per-invocation run logs (outputs/<dataset>/runs) and the resume
+    bookkeeping. Of each feature set's df-analyze runs, only the latest
+    finished one (named in its df_analyze/latest.txt) is included. The raw
+    downloads are never included: everyone fetches them with the download
+    stage, which verifies their checksums.
     """
-    files = [
-        p
-        for p in _files_under(paths.interim_dir)
-        if not p.is_relative_to(paths.embed_dir)
-    ]
-    files += _files_under(paths.processed_dir)
-    dfa = paths.df_analyze_output_dir
+    files = _files_under(paths.processed_dir)
     # Resume bookkeeping belongs to one machine's interrupted run; never share it.
-    skip = (paths.runs_dir, dfa, paths.outputs_dir / CHECKPOINT_DIR)
+    skip = (paths.runs_dir, paths.outputs_dir / CHECKPOINT_DIR)
     state = paths.outputs_dir / STATE_FILE
     for p in _files_under(paths.outputs_dir):
-        if p != state and not any(p.is_relative_to(d) for d in skip):
-            files.append(p)
-    latest = dfa / "latest.txt"
-    if latest.is_file():
-        stamp = latest.read_text(encoding="utf-8").strip()
-        if stamp and (dfa / stamp).is_dir():
-            files.append(latest)
-            files += _files_under(dfa / stamp)
+        if p == state or any(p.is_relative_to(d) for d in skip):
+            continue
+        run_dir = _df_analyze_run_dir(p)
+        if run_dir is not None and run_dir != _latest_df_analyze_run(run_dir.parent):
+            continue  # an older df-analyze run
+        files.append(p)
     return sorted(set(files))
+
+
+def _df_analyze_run_dir(path: Path) -> Path | None:
+    """The df-analyze run directory (<...>/df_analyze/<stamp>) holding `path`."""
+    for parent in path.parents:
+        if parent.parent.name == "df_analyze":
+            return parent
+    return None
 
 
 def pack(paths: Paths, out: Path, config_files: list[Path]) -> dict[str, Any]:
@@ -118,6 +137,7 @@ def pack(paths: Paths, out: Path, config_files: list[Path]) -> dict[str, Any]:
     manifest = {
         "format_version": FORMAT_VERSION,
         "created_utc": datetime.now(UTC).isoformat(timespec="seconds"),
+        "dataset": paths.processed_dir.name,
         "git_commit": git_commit(paths.root),
         "platform": platform.platform(),
         "configs": {
@@ -219,16 +239,26 @@ def _extract_verified(
 
 
 def unpack(
-    bundle: Path, root: Path, config_files: list[Path], force: bool = False
+    bundle: Path,
+    root: Path,
+    config_files: list[Path],
+    force: bool = False,
+    dataset: str | None = None,
 ) -> UnpackResult:
     """Unpack a bundle into the repository at `root`.
 
     Files already present with the same checksum are left alone. If any file
     exists with different contents, nothing is written unless `force` is set.
+    With `dataset`, the bundle must have been packed for that dataset.
     """
     result = UnpackResult()
     with tarfile.open(bundle, "r:gz") as tar:
         manifest = _read_manifest(tar)
+        packed = manifest.get("dataset")
+        if dataset is not None and packed != dataset:
+            raise ArtifactError(
+                f"{bundle.name} holds dataset {packed!r}, not {dataset!r}"
+            )
         entries = {e["path"]: e for e in manifest["files"]}
         result.warnings = compare_environment(manifest, root, config_files)
 
@@ -277,8 +307,12 @@ def unpack(
 # --------------------------------------------------------------------------
 def _config_files(config_path: Path, paths: Paths) -> list[Path]:
     """Config files recorded in (and compared against) a bundle's manifest."""
-    candidates = [config_path.resolve(), paths.categories_file.resolve()]
+    candidates = [config_path.resolve()]
     return [c for c in candidates if c.is_relative_to(paths.root.resolve())]
+
+
+def _paths(config_path: Path, dataset: str | None) -> Paths:
+    return get_paths(with_dataset(load_config(config_path), dataset))
 
 
 def _mb(n: float) -> str:
@@ -299,13 +333,19 @@ def pack_main(argv: list[str] | None = None) -> int:
         description="Bundle finished pipeline outputs into one .tgz for group members."
     )
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    parser.add_argument("--dataset", help="dataset to pack: yelpchi or amazon")
     parser.add_argument(
         "-o", "--output", type=Path, help="bundle to write (default: repo root)"
     )
     args = parser.parse_args(argv)
-    paths = get_paths(load_config(args.config))
+    try:
+        paths = _paths(args.config, args.dataset)
+    except ConfigError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    out = args.output or REPO_ROOT / f"{BUNDLE_PREFIX}{stamp}{BUNDLE_SUFFIX}"
+    name = f"{BUNDLE_PREFIX}{paths.processed_dir.name}_{stamp}{BUNDLE_SUFFIX}"
+    out = args.output or REPO_ROOT / name
     print("Hashing and packing outputs (this can take a few minutes)...", flush=True)
     try:
         manifest = pack(paths, out, _config_files(args.config, paths))
@@ -318,18 +358,19 @@ def pack_main(argv: list[str] | None = None) -> int:
     print("With this bundle unpacked, `uv run run.py` treats these stages as:")
     print_stage_status(paths)
     print(
-        "Share it outside git (e.g. OneDrive or Teams): it contains complaint "
-        "narratives and is too large for GitHub."
+        "Share it outside git (e.g. OneDrive or Teams): it contains row-level "
+        "data and is too large for GitHub."
     )
     return 0
 
 
-def find_bundle(directory: Path) -> Path:
-    found = sorted(directory.glob(f"{BUNDLE_PREFIX}*{BUNDLE_SUFFIX}"))
+def find_bundle(directory: Path, dataset: str) -> Path:
+    pattern = f"{BUNDLE_PREFIX}{dataset}_*{BUNDLE_SUFFIX}"
+    found = sorted(directory.glob(pattern))
     if not found:
         raise ArtifactError(
-            f"No {BUNDLE_PREFIX}*{BUNDLE_SUFFIX} file in {directory}. Put the bundle "
-            "next to unpack_artifacts.py, or pass its path."
+            f"No {pattern} file in {directory}. Put the bundle next to "
+            "unpack_artifacts.py, or pass its path."
         )
     if len(found) > 1:
         print(f"Found {len(found)} bundles; using the newest, {found[-1].name}")
@@ -349,15 +390,24 @@ def unpack_main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument(
+        "--dataset", help="dataset the bundle must hold: yelpchi or amazon"
+    )
+    parser.add_argument(
         "--force", action="store_true", help="overwrite existing files that differ"
     )
     args = parser.parse_args(argv)
-    paths = get_paths(load_config(args.config))
     try:
-        bundle = args.bundle or find_bundle(REPO_ROOT)
+        paths = _paths(args.config, args.dataset)
+        bundle = args.bundle or find_bundle(REPO_ROOT, paths.processed_dir.name)
         print(f"Unpacking {bundle} ...", flush=True)
-        result = unpack(bundle, paths.root, _config_files(args.config, paths), args.force)
-    except (ArtifactError, tarfile.TarError, OSError) as e:
+        result = unpack(
+            bundle,
+            paths.root,
+            _config_files(args.config, paths),
+            args.force,
+            dataset=paths.processed_dir.name,
+        )
+    except (ArtifactError, ConfigError, tarfile.TarError, OSError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
     for w in result.warnings:
