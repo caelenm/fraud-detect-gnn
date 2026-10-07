@@ -233,6 +233,18 @@ DFA_KINDS = {
 DROPPED_KINDS = {"id", "id?", "time", "time?", "const", "nyan"}
 
 
+def binary_indicator(name: str, exported: set[str], ours: set[str]) -> str | None:
+    """The exported column df-analyze made from binary column `name`, if any.
+
+    df-analyze encodes a binary column without NaNs with
+    `pd.get_dummies(..., drop_first=True)` (preprocessing/cleaning.py at the
+    pinned commit): one 0/1 indicator named `<name>_<second value>`, e.g.
+    own_f22 -> own_f22_1.0. Exactly one such column must exist, and it must not
+    be one of our own column names."""
+    matches = [c for c in exported if c.startswith(name + "_") and c not in ours]
+    return matches[0] if len(matches) == 1 else None
+
+
 def find_inferred_types(run_outdir: Path) -> Path:
     matches = sorted(run_outdir.rglob("inspection/inferred_types.csv"))
     if len(matches) != 1:
@@ -271,8 +283,15 @@ def check_inferred_types(
     for name in sorted(set(found) - set(expected)):
         problems.append(f"{name}: typed by df-analyze ({found[name]}) but not ours")
     exported = set(exported_columns)
-    dropped = [n for n in expected if n not in exported]
-    problems += [f"{n}: missing from df-analyze's exported X_train" for n in dropped]
+    encoded = {}
+    for name, ours in expected.items():
+        if name in exported:
+            continue
+        indicator = binary_indicator(name, exported, set(expected))
+        if ours == "binary" and indicator is not None:
+            encoded[name] = indicator
+        else:
+            problems.append(f"{name}: missing from df-analyze's exported X_train")
     destructive = [
         f"{n}: {found[n]} ({reasons[n]})"
         for n in found
@@ -286,6 +305,7 @@ def check_inferred_types(
     return {
         "n_features": len(expected),
         "all_types_match": True,
+        "binary_encoded_as": encoded,
         "dropped_or_coerced": destructive,
         "columns": rows,
     }

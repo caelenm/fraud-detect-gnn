@@ -74,6 +74,20 @@ def test_type_mismatches_and_dropped_features_fail(kinds, exported, message):
         )
 
 
+def test_binary_columns_may_be_exported_as_one_indicator():
+    """df-analyze one-hot encodes a binary column with drop_first=True, so
+    own_f02 is exported as own_f02_1.0: kept, not dropped."""
+    kinds = {"own_f00": "cont", "own_f01": "ord", "own_f02": "bin"}
+    exported = ["own_f00", "own_f01", "own_f02_1.0"]
+    report = dfa.check_inferred_types(fake_inferred_types(kinds), EXPECTED, exported)
+    assert report["binary_encoded_as"] == {"own_f02": "own_f02_1.0"}
+    # Only binary columns may be renamed, and only to exactly one indicator.
+    for bad in (["own_f00_x", "own_f01", "own_f02"],
+                ["own_f00", "own_f01", "own_f02_0.0", "own_f02_1.0"]):  # fmt: skip
+        with pytest.raises(dfa.TypeCheckError, match="exported X_train"):
+            dfa.check_inferred_types(fake_inferred_types(kinds), EXPECTED, bad)
+
+
 def test_type_check_reads_a_fake_inferred_types_csv(tmp_path):
     inspection = tmp_path / "train" / "hash" / "inspection"
     inspection.mkdir(parents=True)
