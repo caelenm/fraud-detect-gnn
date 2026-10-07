@@ -20,7 +20,7 @@ import pandas as pd
 from fraud_detect import columns as C
 from fraud_detect.config import Paths, dataset_config
 from fraud_detect.data import audit, care_gnn, download, split
-from fraud_detect.features import own
+from fraud_detect.features import blocks, own
 from fraud_detect.runstate import (
     CHECKPOINT_DIR,
     UnitStore,
@@ -326,6 +326,53 @@ def run_audit(ctx: Context) -> None:
     )
 
 
+# --------------------------------------------------------------------------
+# Stage 6: df-analyze input tables for the active feature set
+# --------------------------------------------------------------------------
+FEATURE_SET_INFO = "feature_set.json"
+
+
+def feature_set_blocks(ctx: Context) -> list[str]:
+    return list(ctx.config["feature_sets"][ctx.config["feature_set"]])
+
+
+def run_df_analyze_input(ctx: Context) -> None:
+    p = ctx.paths
+    _require(p.train_ids, p.test_ids, p.column_spec)
+    nodes = read_nodes(p)
+    names = feature_set_blocks(ctx)
+    try:
+        features = blocks.load_feature_set(p.features_dir, names)
+        train_ids, test_ids = pd.read_csv(p.train_ids), pd.read_csv(p.test_ids)
+        train, test = blocks.model_tables(features, train_ids, test_ids)
+    except blocks.BlockError as e:
+        raise StageError(str(e)) from e
+    # The labels in the ID files must be the node table's labels.
+    by_id = nodes.set_index(C.NODE_ID)[C.LABEL]
+    for ids, table in ((train_ids, train), (test_ids, test)):
+        if not np.array_equal(by_id.loc[ids[C.NODE_ID]].to_numpy(int), table[C.TARGET]):
+            raise StageError("Labels in the split files differ from nodes.parquet")
+    spec = _read_json(p.column_spec)["columns"]
+    feature_cols = [c for c in train.columns if c != C.TARGET]
+    untyped = [c for c in feature_cols if c not in spec]
+    if untyped:
+        raise StageError(f"No column type in {p.column_spec} for: {untyped}")
+    info = {
+        "feature_set": ctx.config["feature_set"],
+        "blocks": names,
+        "n_train": len(train),
+        "n_test": len(test),
+        "columns": {c: spec[c]["type"] for c in feature_cols},
+    }
+    atomic_write_parquet(p.df_analyze_input_dir / "train.parquet", train)
+    atomic_write_parquet(p.df_analyze_input_dir / "test.parquet", test)
+    atomic_write_json(p.df_analyze_input_dir / FEATURE_SET_INFO, info)
+    print(
+        f"Feature set {info['feature_set']} ({', '.join(names)}): "
+        f"{len(feature_cols)} features; train {train.shape}, test {test.shape}"
+    )
+
+
 STAGES: list[Stage] = [
     Stage("download", "Fetch and checksum the CARE-GNN .mat file", run_download,
           lambda p: [p.mat]),
@@ -339,9 +386,10 @@ STAGES: list[Stage] = [
           lambda p: [p.reports_dir / AUDIT_REPORT,
                      *(p.reports_dir / t for t in AUDIT_TABLES)]),
     Stage("df_analyze_input", "df-analyze train/test tables for the feature set",
-          _not_implemented("M5"),
+          run_df_analyze_input,
           lambda p: [p.df_analyze_input_dir / "train.parquet",
-                     p.df_analyze_input_dir / "test.parquet"]),
+                     p.df_analyze_input_dir / "test.parquet",
+                     p.df_analyze_input_dir / FEATURE_SET_INFO]),
     Stage("df_analyze", "Run df-analyze (Model A); verify split and types",
           _not_implemented("M6"), lambda p: [p.model_reports_dir / "split_check.json"]),
     Stage("select_model", "Score every tuned model on the grouped CV folds",

@@ -17,7 +17,9 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-TARGET = "target"
+from fraud_detect import columns as C
+
+TARGET = C.TARGET
 
 
 class SplitVerificationError(RuntimeError):

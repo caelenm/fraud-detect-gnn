@@ -195,3 +195,11 @@ def fake_node_table(
             C.CV_FOLD: pd.array([None] * n, dtype="Int8"),
         }
     )
+
+
+def fake_block(name: str, n: int = 10, width: int = 3, seed: int = 0) -> pd.DataFrame:
+    """Invented feature block: node_id plus <name>__x0 ... columns of noise."""
+    rng = np.random.default_rng(seed)
+    block = pd.DataFrame(rng.normal(size=(n, width))).add_prefix(f"{name}__x")
+    block.insert(0, C.NODE_ID, np.arange(n, dtype=np.int64))
+    return block

@@ -16,6 +16,9 @@ CV_FOLD = "cv_fold"  # shared CV fold of a training node; null otherwise
 
 TRAIN, TEST, UNLABELLED = "train", "test", "unlabelled"
 
+# The label column in the df-analyze input tables.
+TARGET = "target"
+
 # Feature columns are "<block>__<name>", e.g. own__f00 (see features/blocks.py).
 BLOCK_SEPARATOR = "__"
 OWN_BLOCK = "own"
@@ -29,6 +32,7 @@ FORBIDDEN_FEATURE_COLUMNS: tuple[str, ...] = (
     GROUP_ID,
     SPLIT,
     CV_FOLD,
+    TARGET,
 )
 
 
