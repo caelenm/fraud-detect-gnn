@@ -76,9 +76,11 @@ The key contrasts later will be 5 vs 1 (does the GNN help df-analyze?), 5 vs 2 (
 | **Labelled nodes** | 45,954 | **8,639** (nodes 3,305 onwards; see below) |
 | Positives | 6,677 (14.53%) | 821 (9.50% of labelled) |
 | Features | 32, already scaled to [0, 1], no integer-valued columns; columns 2–5 are binary | 25; columns 0–6, 16, 17, 19, 20, 22, 24 are integer-valued; column 22 is binary |
-| Relation keys (nnz) | `net_rur` same user (98,630); `net_rtr` same product, same star rating (1,147,232); `net_rsr` same product, same month (6,805,486) | `net_upu` reviewed a common product (351,216); `net_usu` same star rating within one week (7,132,958); `net_uvu` top-5% review-text similarity (2,073,474) |
+| Relation keys (nnz) | `net_rur` same user (98,630); `net_rtr` same product, same month (1,147,232); `net_rsr` same product, same star rating (6,805,486) [corrected] | `net_upu` reviewed a common product (351,216); `net_usu` same star rating within one week (7,132,958); `net_uvu` top-5% review-text similarity (2,073,474) |
 | Exact duplicate feature rows (labelled nodes) | 0 | 293 |
-| Labels come from | Yelp's review filter (Rayana & Akoglu, KDD 2015) | Helpfulness votes, as recalled from the CARE-GNN paper. **Verify in the paper and cite it in the README.** |
+| Labels come from | Yelp's review filter (Rayana & Akoglu, KDD 2015) | Helpfulness votes: users with more than 80% helpful votes are benign, fewer than 20% fraudulent (CARE-GNN, Dou et al. 2020; DGL `FraudAmazonDataset`; features from Zhang et al. 2020) [verified] |
+
+**Corrections made during implementation (2026-10-07).** [corrected] The draft of this plan described `net_rtr` as same product and same star rating and `net_rsr` as same product and same month. It is the other way round (R-T-R: same month; R-S-R: same star rating), per CARE-GNN and the DGL loader's documentation; the keys and edge counts were right. [verified] The Amazon label source is confirmed above.
 
 **Dataset gotchas (the loader must handle all of them):**
 

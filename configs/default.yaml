@@ -39,8 +39,8 @@ datasets:
     # Short relation name -> .mat key. Nodes are reviews.
     relations:
       rur: net_rur    # same user
-      rtr: net_rtr    # same product, same star rating
-      rsr: net_rsr    # same product, same month
+      rtr: net_rtr    # same product, same month (R-T-R)
+      rsr: net_rsr    # same product, same star rating (R-S-R)
     # Nodes 0 .. unlabelled_prefix-1 are unlabelled (stored as label 0).
     unlabelled_prefix: 0
     # Split groups: connected components of this relation (= users), because
