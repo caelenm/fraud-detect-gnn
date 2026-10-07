@@ -47,6 +47,8 @@ def fake_df_analyze_results(
                 "score": score,
                 "probs_test": np.column_stack([1 - p1, p1]).tolist(),
                 "preds_test": (p1 > 0.5).astype(int).tolist(),
+                "params": "{'n_estimators': 50, 'learning_rate': 0.1}",
+                "selected_cols": ["own_f00", "own_f01"],
             }
         )
         tuned.append(
@@ -217,3 +219,30 @@ def fake_inferred_types(kinds: dict[str, str]) -> pd.DataFrame:
         index=pd.Index(list(kinds), name="feature_name"),
     )
     return frame
+
+
+def fake_oof_predictions(
+    keys: list[tuple[str, str]], y_train: np.ndarray, folds: np.ndarray, seed: int = 0
+) -> pd.DataFrame:
+    """Invented cv_select.py out-of-fold predictions: for each (model,
+    selection) key, a tuned and a default-settings row per training row."""
+    rng = np.random.default_rng(seed)
+    classes = dict(FAKE_DFA_MODELS)
+    frames = []
+    for model, selection in keys:
+        for settings in ("tuned", "default"):
+            prob = np.clip(rng.uniform(0, 0.6, len(y_train)) + 0.3 * y_train, 0, 1)
+            frames.append(
+                pd.DataFrame(
+                    {
+                        "model_cls": classes[model],
+                        "selection": selection,
+                        "embed_selector": "",
+                        "settings": settings,
+                        "row": np.arange(len(y_train)),
+                        "fold": folds,
+                        "prob": prob,
+                    }
+                )
+            )
+    return pd.concat(frames, ignore_index=True)

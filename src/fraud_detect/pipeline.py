@@ -23,11 +23,14 @@ from fraud_detect.config import REPO_ROOT, Paths, dataset_config, df_analyze_dir
 from fraud_detect.data import audit, care_gnn, download, split
 from fraud_detect.external import ExternalToolError, run_df_analyze_script
 from fraud_detect.features import blocks, own
-from fraud_detect.models import df_analyze, selection
+from fraud_detect.models import df_analyze, df_analyze_report, evaluation, selection
+from fraud_detect.report import web
+from fraud_detect.runlog import git_commit
 from fraud_detect.runstate import (
     CHECKPOINT_DIR,
     UnitStore,
     atomic_write,
+    atomic_write_csv,
     atomic_write_json,
     atomic_write_parquet,
     atomic_write_text,
@@ -84,15 +87,6 @@ def _require(*paths: Path) -> None:
     for p in paths:
         if not p.exists():
             raise StageError(f"Missing input {p}. Run the earlier stages first.")
-
-
-def _not_implemented(milestone: str) -> Callable[[Context], None]:
-    def run(ctx: Context) -> None:
-        raise StageError(
-            f"This stage is not implemented yet (docs/RESEARCH_PLAN.md, {milestone})."
-        )
-
-    return run
 
 
 # --------------------------------------------------------------------------
@@ -219,7 +213,7 @@ def run_split(ctx: Context) -> None:
         (p.test_ids, split.ids_table(nodes, C.TEST)),
         (p.cv_folds, split.folds_table(nodes)),
     ):
-        atomic_write(path, lambda tmp, table=table: table.to_csv(tmp, index=False))
+        atomic_write_csv(path, table)
     atomic_write_json(p.reports_dir / "split_summary.json", summary)
     atomic_write_json(p.split_summary, summary)  # last: marks the stage done
     for part in ("train", "test"):
@@ -310,8 +304,7 @@ def run_audit(ctx: Context) -> None:
         threshold,
     )
     for name, table in zip(AUDIT_TABLES, (features, relations, groups), strict=True):
-        atomic_write(p.reports_dir / name,
-                     lambda tmp, table=table: table.to_csv(tmp, index=False))  # fmt: skip
+        atomic_write_csv(p.reports_dir / name, table)
     atomic_write_json(p.reports_dir / "audit_summary.json",
                       {"duplicates": duplicates, "group_purity": purity})  # fmt: skip
     if duplicates["test_rows_identical_to_a_train_row"]:
@@ -556,7 +549,7 @@ def run_select_model(ctx: Context) -> None:
     cfg = ctx.config["select_model"]
     folds = folds_in_train_order(p)
     folds_path = outdir / FOLDS_IN_TRAIN_ORDER
-    atomic_write(folds_path, lambda tmp: folds.to_csv(tmp, index=False))
+    atomic_write_csv(folds_path, folds)
     cv_path, oof_path = outdir / SHARED_CV, outdir / OOF_PREDICTIONS
     # The CV script saves its tables after every configuration. On --resume it
     # keeps the finished ones; on a fresh run it starts over.
@@ -579,7 +572,7 @@ def run_select_model(ctx: Context) -> None:
     cv = pd.read_csv(cv_path, keep_default_na=False, na_values=[""])
     log = (outdir / "df_analyze.log").read_text(encoding="utf-8", errors="replace")
     budget = selection.parse_tuning_budget(log)
-    atomic_write(outdir / TUNING_BUDGET, lambda tmp: budget.to_csv(tmp, index=False))
+    atomic_write_csv(outdir / TUNING_BUDGET, budget)
     failed = cv["error"].fillna("").astype(str) != ""
     tuned = cv["settings"] == "tuned"
     errors = cv[failed & tuned]
@@ -595,10 +588,9 @@ def run_select_model(ctx: Context) -> None:
             f"See {outdir / 'model_selection.log'}; fix and rerun "
             "`uv run run.py --dataset <name> --from select_model`."
         )
-    atomic_write(p.model_reports_dir / TUNING_BUDGET,
-                 lambda tmp: budget.to_csv(tmp, index=False))  # fmt: skip
+    atomic_write_csv(p.model_reports_dir / TUNING_BUDGET, budget)
     # Written last: marks the stage as done.
-    atomic_write(p.model_reports_dir / SHARED_CV, lambda tmp: cv.to_csv(tmp, index=False))
+    atomic_write_csv(p.model_reports_dir / SHARED_CV, cv)
     # embed_selector is empty (read as NaN) except for embedded selection;
     # pivot_table would silently drop those rows.
     shown = (
@@ -612,6 +604,235 @@ def run_select_model(ctx: Context) -> None:
     )
     print(shown.sort_values("tuned", ascending=False).to_string(index=False))
     print(f"Saved shared-CV scores for run {stamp} to {p.model_reports_dir / SHARED_CV}")
+
+
+# --------------------------------------------------------------------------
+# Stage 9: Model A report: choice by shared CV, threshold from out-of-fold
+# training predictions, test metrics, group-bootstrap intervals, sanity band
+# --------------------------------------------------------------------------
+MODEL_A_REPORT = "model_a_report.md"
+MODEL_A_METRICS = "model_a_metrics.csv"
+MODEL_A_SUMMARY = "model_a.json"
+THRESHOLDS = "thresholds.csv"
+
+
+def oof_thresholds(oof: pd.DataFrame, y_train: np.ndarray, rule: str) -> pd.DataFrame:
+    """Each tuned model's decision threshold from its out-of-fold training
+    predictions (select_model's oof_predictions.parquet)."""
+    tuned = oof[oof["settings"] == "tuned"]
+    rows = []
+    for (cls, sel), frame in tuned.groupby(["model_cls", "selection"], sort=True):
+        frame = frame.sort_values("row")
+        if not np.array_equal(frame["row"].to_numpy(), np.arange(len(y_train))):
+            raise StageError(f"{cls} ({sel}): out-of-fold predictions do not cover "
+                             "every training row once")  # fmt: skip
+        found = evaluation.threshold_from_oof(frame.assign(y=y_train), rule)
+        model = df_analyze_report.MODEL_NAMES.get(cls, cls)
+        rows.append({"model": model, "selection": sel, **found})
+    return pd.DataFrame(rows)
+
+
+def run_df_analyze_report(ctx: Context) -> None:
+    p = ctx.paths
+    train_path = p.df_analyze_input_dir / "train.parquet"
+    test_path = p.df_analyze_input_dir / "test.parquet"
+    _require(train_path, test_path, p.test_ids)
+    stamp, outdir = _latest_verified_run(p)
+    for name in (SHARED_CV, OOF_PREDICTIONS):
+        if not (outdir / name).is_file():
+            raise StageError(
+                f"df-analyze run {outdir} has no {name}. Run the select_model stage "
+                "first so every model is scored with the same cross-validation."
+            )
+    cfg = ctx.config["report"]
+    y_train = pd.read_parquet(train_path)[C.TARGET].to_numpy()
+    y_test = pd.read_parquet(test_path)[C.TARGET].to_numpy()
+    test_ids = pd.read_csv(p.test_ids)
+    if not np.array_equal(test_ids[C.LABEL].to_numpy(), y_test):
+        raise StageError("Labels in test_ids.csv and the test table disagree")
+    shared_cv = pd.read_csv(outdir / SHARED_CV, keep_default_na=False, na_values=[""])
+    oof = pd.read_parquet(outdir / OOF_PREDICTIONS)
+    budget_path = outdir / TUNING_BUDGET
+    budget = pd.read_csv(budget_path) if budget_path.is_file() else None
+    try:
+        thresholds = oof_thresholds(oof, y_train, str(cfg["threshold_rule"]))
+        by_key = {(r.model, r.selection): r.threshold for r in thresholds.itertuples()}
+        predictions, tuned, options = df_analyze_report.load_run(outdir)
+        table = df_analyze_report.metrics_table(
+            predictions, tuned, y_test, shared_cv, by_key
+        )
+        model_a = df_analyze_report.choose_model_a(table)
+        entry = web.find_entry(predictions, model_a, df_analyze_report.MODEL_NAMES)
+        prob_a = np.asarray(entry["probs_test"], dtype=float)[:, 1]
+        intervals = [
+            evaluation.group_bootstrap(
+                y_test,
+                test_ids[C.GROUP_ID].to_numpy(),
+                prob_a,
+                metric=metric,
+                n_resamples=int(cfg["bootstrap_resamples"]),
+                seed=ctx.seed,
+            ).as_dict()
+            for metric in ("pr_auc", "auroc")
+        ]
+    except (
+        df_analyze_report.ReportError,
+        evaluation.EvaluationError,
+        web.WebReportError,
+    ) as e:
+        raise StageError(str(e)) from e
+    if not np.isclose(intervals[0]["estimate"], model_a["pr_auc"]):
+        raise StageError("Model A's bootstrap estimate differs from its test PR-AUC")
+    band = ctx.data["sanity_band"]
+    warning = evaluation.sanity_check(
+        float(model_a["pr_auc"]), band, float(cfg["sanity_margin"])
+    )
+    n_folds = int(pd.read_csv(p.cv_folds)["fold"].nunique())
+    info = {
+        "dataset": ctx.dataset,
+        "feature_set": ctx.config["feature_set"],
+        "run": stamp,
+        "htune_trials": options.get("htune_trials"),
+        "seed": options.get("seed"),
+        "n_train": len(y_train),
+        "n_test": len(y_test),
+        "test_positive_rate": float(y_test.mean()),
+        "cv_folds": n_folds,
+        "selection_rule": "highest mean shared-CV PR-AUC on the training set "
+        "(saved grouped folds)",
+        "threshold_rule": f"{cfg['threshold_rule']} on out-of-fold training predictions",
+        "sanity_band": band,
+    }
+    report = df_analyze_report.build_report(
+        table, model_a, info, budget, intervals, warning
+    )
+    model_a_dict = {k: v.item() if hasattr(v, "item") else v for k, v in model_a.items()}
+    a_key = (model_a["model"], model_a["selection"])
+    threshold_a = thresholds.set_index(["model", "selection"]).loc[a_key].to_dict()
+    summary = {
+        **info,
+        "model_a": model_a_dict,
+        "model_a_threshold": threshold_a,
+        "intervals": intervals,
+        "sanity_warning": warning,
+    }
+    for directory in (outdir, p.model_reports_dir):
+        for name, frame in ((MODEL_A_METRICS, table), (THRESHOLDS, thresholds)):
+            atomic_write_csv(directory / name, frame)
+        atomic_write_text(directory / MODEL_A_REPORT, report)
+        atomic_write_json(directory / MODEL_A_SUMMARY, summary)  # last: stage done
+    print(report)
+    if warning:
+        bar = "!" * 78
+        print(f"\n{bar}\nWARNING: {warning}\n{bar}")
+    print(f"Saved the report to {p.model_reports_dir / MODEL_A_REPORT}")
+
+
+# --------------------------------------------------------------------------
+# Stage 10: static HTML report (parameters, results, confidence cards)
+# --------------------------------------------------------------------------
+DATASET_LABELS = {"yelpchi": "YelpChi (reviews)", "amazon": "Amazon (users)"}
+
+
+def run_web_report(ctx: Context) -> None:
+    p = ctx.paths
+    summary_path = p.model_reports_dir / MODEL_A_SUMMARY
+    test_path = p.df_analyze_input_dir / "test.parquet"
+    train_path = p.df_analyze_input_dir / "train.parquet"
+    _require(summary_path, p.model_reports_dir / MODEL_A_METRICS, p.test_ids,
+             test_path, train_path)  # fmt: skip
+    summary = _read_json(summary_path)
+    stamp, outdir = _latest_verified_run(p)
+    if summary["run"] != stamp:
+        raise StageError(
+            f"{summary_path} describes df-analyze run {summary['run']}, but the latest "
+            f"run is {stamp}. Rerun `uv run run.py --dataset {ctx.dataset} "
+            "--from select_model`."
+        )
+    cfg = ctx.config["web_report"]
+    info = read_feature_set_info(p)
+    try:
+        predictions, _, _ = df_analyze_report.load_run(outdir)
+        entry = web.find_entry(
+            predictions, summary["model_a"], df_analyze_report.MODEL_NAMES
+        )
+        params = web.parse_params(entry["params"])
+    except (df_analyze_report.ReportError, web.WebReportError) as e:
+        raise StageError(str(e)) from e
+
+    # Test rows are in the order of our saved test IDs (verified by df_analyze).
+    test_ids = pd.read_csv(p.test_ids)
+    train, test = pd.read_parquet(train_path), pd.read_parquet(test_path)
+    y_test = test[C.TARGET].to_numpy()
+    if not np.array_equal(test_ids[C.LABEL].to_numpy(), y_test):
+        raise StageError("Test labels in test_ids.csv and test.parquet disagree")
+    # Show features under their block names (own__f07), not df-analyze's.
+    names = {safe: c["block_column"] for safe, c in info["columns"].items()}
+    features = [c for c in train.columns if c != C.TARGET]
+    prob = np.asarray(entry["probs_test"], dtype=float)[:, 1]
+    try:
+        top = web.top_features(
+            test[features].rename(columns=names),
+            train[features].rename(columns=names),
+            int(cfg["n_top_features"]),
+        )
+        meta = pd.DataFrame({C.NODE_ID: test_ids[C.NODE_ID], "top_features": top})
+        # Cards use the model's own 0.5 cut-off, so confidence is the
+        # probability of the predicted class (0.5 to 1).
+        samples = web.confidence_table(prob, (prob >= 0.5).astype(int), y_test, meta)
+    except web.WebReportError as e:
+        raise StageError(str(e)) from e
+
+    metrics = pd.read_csv(p.model_reports_dir / MODEL_A_METRICS)
+    budget_path = p.model_reports_dir / TUNING_BUDGET
+    budget = pd.read_csv(budget_path) if budget_path.is_file() else None
+    dfa = ctx.config["df_analyze"]
+    types = pd.Series([c["type"] for c in info["columns"].values()]).value_counts()
+    feature_sets = sorted(
+        {web.feature_set_label(web.feature_set_key(s, e))
+         for s, e in zip(metrics["selection"], metrics["embed_selector"], strict=True)}
+    )  # fmt: skip
+    a = summary["model_a"]
+    run_config = [
+        ("Dataset", DATASET_LABELS.get(ctx.dataset, ctx.dataset)),
+        ("Feature set", f"{summary['feature_set']} ({', '.join(info['blocks'])})"),
+        ("Seed", str(summary["seed"])),
+        ("Nodes", f"{summary['n_train']:,} train · {summary['n_test']:,} test "
+                  "(grouped split)"),
+        ("Fraud rate", f"{train[C.TARGET].mean():.1%} train · "
+                       f"{summary['test_positive_rate']:.1%} test"),
+        ("Features", f"{len(features)}: " + ", ".join(f"{n} {k}" for k, n in
+                                                   types.items())),
+        ("Classifiers", ", ".join(web.model_label(m) for m in dfa["classifiers"])
+                        + ", plus dummy baseline"),
+        ("Tuning", f"up to {dfa['htune_trials']} trials per model · "
+                   f"metric {dfa['htune_cls_metric']}"),
+        ("Feature selections", ", ".join(feature_sets)),
+        ("Model choice", f"{summary['cv_folds']}-fold grouped shared CV on train, "
+                         "PR-AUC"),
+        ("Threshold", f"{a['threshold']:.4f} ({summary['threshold_rule']})"),
+        ("df-analyze commit", str(dfa.get("commit") or "not pinned")[:12]),
+    ]  # fmt: skip
+    commit = git_commit(REPO_ROOT)
+    inputs = web.ReportInputs(
+        summary=summary,
+        metrics=metrics,
+        params=params,
+        n_features=len(entry["selected_cols"]),
+        samples=samples,
+        header={
+            "build": stamp,
+            "generated": datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC"),
+            "git_commit": commit[:10] if commit else "unknown",
+            "run": stamp,
+        },
+        run_config=run_config,
+        budget=budget,
+        n_samples=int(cfg["n_samples"]),
+        dataset_label=DATASET_LABELS.get(ctx.dataset, ctx.dataset),
+    )
+    atomic_write_text(p.web_report, web.render(inputs))
+    print(f"Saved the web report to {p.web_report}")
 
 
 STAGES: list[Stage] = [
@@ -637,9 +858,12 @@ STAGES: list[Stage] = [
     Stage("select_model", "Score every tuned model on the grouped CV folds",
           run_select_model, lambda p: [p.model_reports_dir / SHARED_CV]),
     Stage("df_analyze_report", "Model A test metrics, threshold, bootstrap CIs",
-          _not_implemented("M7"), lambda p: [p.model_reports_dir / "model_a.json"]),
+          run_df_analyze_report,
+          lambda p: [p.model_reports_dir / MODEL_A_REPORT,
+                     p.model_reports_dir / MODEL_A_METRICS,
+                     p.model_reports_dir / MODEL_A_SUMMARY]),
     Stage("web_report", "HTML report: parameters, results, confidence cards",
-          _not_implemented("M7"), lambda p: [p.web_report]),
+          run_web_report, lambda p: [p.web_report]),
 ]  # fmt: skip
 
 STAGE_NAMES = [s.name for s in STAGES]

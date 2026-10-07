@@ -7,14 +7,18 @@ turns those into one metrics table on the frozen test set, with the project's
 headline metric (PR-AUC) that df-analyze itself does not report.
 
 Model A is chosen by the shared cross-validation of the `select_model` stage
-(scripts/dfa/cv_select.py): every combination refit on the same folds of the
-training set and scored by PR-AUC from its probabilities (leakage invariant
-9). df-analyze's own tuning score is shown for information only: it is not
-comparable across models (most are scored with balanced accuracy of hard
-predictions over 5 folds, GANDALF on one validation split through its own
-code path). Test metrics are reported for every combination but never used
-for choosing. df-analyze's `5-fold` table refits models on folds of the test
-set and is not used at all.
+(scripts/dfa/cv_select.py): every combination refit on the same saved
+grouped folds of the training set and scored by PR-AUC from its
+probabilities (leakage invariant 8). df-analyze's own tuning score is shown
+for information only: it is not comparable across models (most are scored
+with balanced accuracy of hard predictions over 5 folds, GANDALF on one
+validation split through its own code path). Test metrics are reported for
+every combination but never used for choosing. df-analyze's `5-fold` table
+refits models on folds of the test set and is not used at all.
+
+Threshold metrics (F1, precision, recall, balanced accuracy, confusion
+matrix) are computed at each model's decision threshold, chosen on its
+out-of-fold TRAINING predictions (models/evaluation.py), and at 0.5.
 
 The test rows are in the order of our saved test IDs: the df_analyze stage
 has already verified df-analyze's exported test set against ours row by row.
@@ -65,12 +69,17 @@ BASELINE_MODEL = "dummy"
 METRIC_COLUMNS = [
     "pr_auc",
     "auroc",
+    "threshold",
     "f1",
     "precision",
     "recall",
-    "accuracy",
     "balanced_accuracy",
+    "f1_at_05",
+    "precision_at_05",
+    "recall_at_05",
+    "balanced_accuracy_at_05",
 ]
+THRESHOLD_METRICS = ("f1", "precision", "recall", "accuracy", "balanced_accuracy")
 
 
 class ReportError(RuntimeError):
@@ -114,7 +123,7 @@ def check_label_encoding(labels: pd.DataFrame) -> None:
 
 def binary_metrics(y_true: np.ndarray, prob: np.ndarray, pred: np.ndarray) -> dict:
     """Binary metrics with fraud (1) as the positive class. `prob` is the fraud
-    probability; `pred` is the model's own 0/1 prediction."""
+    probability; `pred` is a 0/1 prediction from it."""
     tn, fp, fn, tp = confusion_matrix(y_true, pred, labels=[0, 1]).ravel()
     return {
         "pr_auc": float(average_precision_score(y_true, prob)),
@@ -175,15 +184,30 @@ def _shared_cv_scores(shared_cv: pd.DataFrame) -> dict[tuple[str, str], dict[str
     return out
 
 
+def test_metrics(y_test: np.ndarray, prob: np.ndarray, threshold: float) -> dict:
+    """Threshold-free metrics, threshold metrics at `threshold` (chosen on
+    training data), and the same threshold metrics at 0.5 (suffix _at_05)."""
+    chosen = binary_metrics(y_test, prob, (prob >= threshold).astype(int))
+    half = binary_metrics(y_test, prob, (prob >= 0.5).astype(int))
+    return {
+        **chosen,
+        "threshold": float(threshold),
+        **{f"{k}_at_05": half[k] for k in THRESHOLD_METRICS},
+    }
+
+
 def metrics_table(
     predictions: list[dict[str, Any]],
     tuned: pd.DataFrame,
     y_test: np.ndarray,
     shared_cv: pd.DataFrame,
+    thresholds: dict[tuple[str, str], float] | None = None,
 ) -> pd.DataFrame:
     """One row per (model, selection): shared-CV scores on the training set,
-    df-analyze's tuning score, and test metrics. Sorted by shared-CV PR-AUC
-    (best first; ties by smaller std, then model name, then selection order)."""
+    df-analyze's tuning score, and test metrics at each model's threshold
+    (`thresholds`, chosen on its out-of-fold training predictions; 0.5 when
+    None) and at 0.5. Sorted by shared-CV PR-AUC (best first; ties by
+    smaller std, then model name, then selection order)."""
     cv_scores = _tuned_scores(tuned)
     shared = _shared_cv_scores(shared_cv)
     rows = []
@@ -201,12 +225,14 @@ def metrics_table(
                 f"saved with its predictions ({entry['score']})"
             )
         probs = np.asarray(entry["probs_test"], dtype=float)
-        pred = np.asarray(entry["preds_test"], dtype=int)
-        if probs.shape != (len(y_test), 2) or pred.shape != (len(y_test),):
+        if probs.shape != (len(y_test), 2):
             raise ReportError(
-                f"{key}: predictions have shape {probs.shape}/{pred.shape}, "
+                f"{key}: predictions have shape {probs.shape}, "
                 f"expected {len(y_test)} test rows"
             )
+        if thresholds is not None and key not in thresholds:
+            raise ReportError(f"{key} has no decision threshold from training data")
+        threshold = 0.5 if thresholds is None else thresholds[key]
         if key not in shared:
             raise ReportError(
                 f"{key} has no shared cross-validation score; rerun the select_model "
@@ -220,7 +246,7 @@ def metrics_table(
                 **shared[key],
                 "tuning_metric": str(entry["metric"]),
                 "tuning_score": cv_scores[key],
-                **binary_metrics(y_test, probs[:, 1], pred),
+                **test_metrics(y_test, probs[:, 1], threshold),
             }
         )
     if len(rows) != len(cv_scores):
@@ -268,7 +294,12 @@ def build_report(
     model_a: pd.Series,
     info: dict[str, Any],
     budget: pd.DataFrame | None = None,
+    intervals: list[dict[str, Any]] | None = None,
+    warning: str | None = None,
 ) -> str:
+    """Markdown report. `info` holds the run facts (dataset, sizes, folds,
+    threshold rule, sanity band); `intervals` the group-bootstrap intervals
+    for Model A; `warning` the sanity-band warning, if any."""
     baseline = table[table["model"] == BASELINE_MODEL]
     shown = ["model", "selection", "cv_pr_auc", "cv_pr_auc_std", "cv_pr_auc_default",
              "cv_tuning_gain", "tuning_score", *METRIC_COLUMNS]  # fmt: skip
@@ -279,27 +310,40 @@ def build_report(
         if not baseline.empty
         else []
     )
+    warning_lines = [f"> **WARNING:** {warning}", ""] if warning else []
+    band = info.get("sanity_band")
+    band_line = (
+        [f"- Sanity band (untuned gradient boosting, plan §2): PR-AUC ≈ "
+         f"{band['pr_auc']:.2f}, AUROC ≈ {band['auroc']:.2f}"]
+        if band else []
+    )  # fmt: skip
     lines = [
-        "# Model A (df-analyze) metrics",
+        f"# Model A (df-analyze) metrics: {info.get('dataset', '')}, "
+        f"feature set {info.get('feature_set', '')}",
         "",
+        *warning_lines,
         f"- df-analyze run: `{info['run']}` (tuning trials per model: "
         f"{info['htune_trials']}, seed {info['seed']})",
         f"- Train: {info['n_train']:,} nodes; test: {info['n_test']:,} "
-        f"nodes, {info['test_positive_rate']:.2%} fraud",
+        f"nodes, {info['test_positive_rate']:.2%} fraud (grouped split)",
         f"- No-skill PR-AUC on this test set = its fraud rate: "
         f"{info['test_positive_rate']:.4f}",
         *baseline_line,
+        *band_line,
         "",
         "## Model A",
         "",
         f"**{a['model']}** with feature selection `{a['selection']}`, chosen by "
         f"its cross-validated PR-AUC on the training set only "
         f"({a['cv_pr_auc']:.4f} ± {a['cv_pr_auc_std']:.4f} over "
-        f"{info['cv_folds']} folds shared by every model).",
+        f"{info['cv_folds']} grouped folds shared by every model).",
         "",
         _markdown_table(pd.DataFrame([a[METRIC_COLUMNS]])),
         "",
-        f"Confusion matrix on the test set: TP {a['tp']:,}, FP {a['fp']:,}, "
+        *_interval_lines(intervals),
+        f"Decision threshold {a['threshold']:.4f} ({info.get('threshold_rule', '')}, "
+        "chosen on Model A's out-of-fold training predictions). Confusion matrix on "
+        f"the test set at that threshold: TP {a['tp']:,}, FP {a['fp']:,}, "
         f"FN {a['fn']:,}, TN {a['tn']:,}.",
         "",
         "## All tuned combinations",
@@ -314,9 +358,10 @@ def build_report(
         "## How to read this",
         "",
         "- **cv_pr_auc** (± **cv_pr_auc_std**): every tuned combination refit "
-        f"with its tuned hyperparameters on the same {info['cv_folds']} stratified "
-        "folds of the training set and scored from its fraud probability. This "
-        "is the only score that is comparable across models.",
+        f"with its tuned hyperparameters on the same {info['cv_folds']} grouped, "
+        "stratified folds of the training set (no user or duplicate group is split "
+        "across folds) and scored from its fraud probability. This is the only "
+        "score that is comparable across models.",
         "- **cv_pr_auc_default**: the same model and feature set with df-analyze's "
         "default hyperparameters (no tuning), on the same folds. **cv_tuning_gain** "
         "= cv_pr_auc − cv_pr_auc_default. Tuning optimises balanced accuracy, not "
@@ -324,18 +369,35 @@ def build_report(
         f"- **tuning_score** is df-analyze's own tuning score ({a['tuning_metric']}), "
         "for information only. It is not comparable across models: most are "
         "scored on hard 0/1 predictions over 5 folds, GANDALF on one validation "
-        "split through its own code path.",
+        "split through its own code path, and df-analyze's internal folds are "
+        "random rather than grouped, which makes them optimistic.",
         "- **PR-AUC** (headline) is average precision of the fraud probability; "
         "**AUROC** uses the same probability. Neither depends on a threshold.",
-        "- **F1, precision, recall** are for the fraud class, using each model's "
-        "own predictions (df-analyze's default decision rule). df-analyze's own "
-        "`f1` is macro-averaged over both classes, so it differs from this one.",
+        "- **threshold**: each model's decision threshold, chosen on its own "
+        "out-of-fold training predictions. **f1, precision, recall, "
+        "balanced_accuracy** are for the fraud class at that threshold; the "
+        "**_at_05** columns use 0.5. df-analyze's own `f1` is macro-averaged over "
+        "both classes, so it differs from these.",
+        "- The 95% intervals resample whole test groups (users on YelpChi, sets of "
+        "identical rows on Amazon). They describe test-set sampling only, not "
+        "variation across splits or seeds.",
         "- df-analyze's `5-fold` results table refits models on test-set folds "
         "and is deliberately not used.",
-        "- These are single-run numbers (one split, one seed), with no variance "
-        "estimate.",
     ]
     return "\n".join(lines) + "\n"
+
+
+def _interval_lines(intervals: list[dict[str, Any]] | None) -> list[str]:
+    if not intervals:
+        return []
+    lines = []
+    for i in intervals:
+        lines.append(
+            f"- Test {i['metric']}: {i['estimate']:.4f}, {i['level']:.0%} interval "
+            f"[{i['low']:.4f}, {i['high']:.4f}] ({i['n_resamples']:,} group-bootstrap "
+            "resamples)"
+        )
+    return [*lines, ""]
 
 
 def _budget_section(budget: pd.DataFrame | None) -> list[str]:

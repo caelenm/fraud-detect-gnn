@@ -6,14 +6,21 @@ Nothing here is real data; the fake .mat contents come from synthetic.py.
 from __future__ import annotations
 
 import hashlib
+import json
 import zipfile
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import scipy.io
 import scipy.sparse as sp
 import yaml
-from synthetic import fake_care_gnn_mat
+from synthetic import (
+    fake_care_gnn_mat,
+    fake_df_analyze_results,
+    fake_oof_predictions,
+    fake_shared_cv,
+)
 
 from fraud_detect.config import DEFAULT_CONFIG, load_config, with_dataset
 
@@ -82,3 +89,34 @@ def fake_dataset(tmp_path: Path, **kwargs) -> tuple[Path, dict]:
 def load_edges(path: Path) -> np.ndarray:
     with np.load(path) as f:
         return f["edges"]
+
+
+FAKE_RUN = "20260101T000000Z"
+
+
+def fake_df_analyze_run(paths, cv_scores: dict[tuple[str, str], float]) -> None:
+    """Write the files of a finished, verified df-analyze run and select_model
+    stage for the feature set in `paths` (all values invented), so the report
+    stages can run. Needs the df_analyze_input stage's tables."""
+    train = pd.read_parquet(paths.df_analyze_input_dir / "train.parquet")
+    test = pd.read_parquet(paths.df_analyze_input_dir / "test.parquet")
+    run = paths.df_analyze_output_dir / FAKE_RUN
+    deep = run / "train" / "hash"
+    for sub in ("tuning/test00", "results/test00", "prepared"):
+        (deep / sub).mkdir(parents=True)
+    entries, tuned = fake_df_analyze_results(test["target"].to_numpy(), cv_scores)
+    tuned.to_csv(deep / "tuning/test00/tuned_models_00.csv")
+    (deep / "results/test00/prediction_results_00.json").write_text(
+        json.dumps({"predictions": entries})
+    )
+    pd.DataFrame({"0": [0, 1]}).to_parquet(deep / "prepared/labels.parquet")
+    (deep / "options.json").write_text(json.dumps({"htune_trials": 3, "seed": 555}))
+    for check in ("split_check.json", "type_check.json"):
+        (run / check).write_text("{}")
+    fake_shared_cv(cv_scores).to_csv(run / "model_selection_cv.csv", index=False)
+    folds = pd.read_csv(paths.cv_folds).set_index("node_id")["fold"]
+    train_ids = pd.read_csv(paths.train_ids)["node_id"]
+    fake_oof_predictions(
+        list(cv_scores), train["target"].to_numpy(), folds.loc[train_ids].to_numpy()
+    ).to_parquet(run / "oof_predictions.parquet", index=False)
+    (paths.df_analyze_output_dir / "latest.txt").write_text(FAKE_RUN + "\n")

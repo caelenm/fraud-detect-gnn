@@ -217,11 +217,21 @@ def prob_text(value: float) -> str:
     """A probability readable at the extremes, where 3 decimals would round
     many different values to 0.000 or 1.000."""
     v = float(value)
+    if v in (0.0, 1.0):
+        return f"{v:.0f}"
     if v < 1e-3:
         return f"{v:.1e}"
     if v > 1 - 1e-3:
         return f"1 − {1 - v:.1e}"
     return f"{v:.3f}"
+
+
+def _interval_text(summary: dict[str, Any], metric: str) -> str:
+    """'95% CI 0.71–0.78 · ' for a metric in the summary's intervals, or ''."""
+    for i in summary.get("intervals") or []:
+        if i["metric"] == metric:
+            return f"95% CI {_num(i['low'])}–{_num(i['high'])} · "
+    return ""
 
 
 def _int(value: Any) -> str:
@@ -305,7 +315,8 @@ def _headline(inputs: ReportInputs) -> str:
         _tile(
             "Test PR-AUC",
             _num(a["pr_auc"]),
-            f"no-skill baseline: {_num(s['test_positive_rate'])}",
+            f"{_interval_text(s, 'pr_auc')}no-skill baseline: "
+            f"{_num(s['test_positive_rate'])}",
             badge="headline",
         ),
         _tile(
@@ -313,18 +324,28 @@ def _headline(inputs: ReportInputs) -> str:
             _num(a["cv_pr_auc"]),
             f"± {_num(a['cv_pr_auc_std'])} over {s['cv_folds']} folds",
         ),
-        _tile("Test AUROC", _num(a["auroc"]), "threshold-free"),
+        _tile(
+            "Test AUROC", _num(a["auroc"]), f"{_interval_text(s, 'auroc')}threshold-free"
+        ),
         _tile(
             "Test set",
             _int(s["n_test"]),
             f"nodes · {_pct(s['test_positive_rate'])} fraud",
         ),
     ]
+    warning = s.get("sanity_warning")
+    warning_html = (
+        f'<div class="notice"><b>Sanity check failed.</b> {escape(warning)}</div>'
+        if warning
+        else ""
+    )
     return (
         "<section><h2>Headline</h2>"
+        f"{warning_html}"
         '<p class="lede">Model A is the df-analyze combination with the highest '
         "cross-validated PR-AUC on the training set. Test-set numbers are reported, "
-        "never used for choosing.</p>"
+        "never used for choosing. Intervals are 95% group-bootstrap intervals over "
+        "the test set.</p>"
         f'<div class="tiles">{"".join(tiles)}</div></section>'
     )
 
@@ -357,15 +378,16 @@ def _model_a_detail(inputs: ReportInputs) -> str:
         or '<tr><td colspan="2">No tuned hyperparameters recorded</td></tr>'
     )
     metric_rows = "".join(
-        f"<tr><td>{escape(name)}</td><td>{_num(a[key])}</td></tr>"
-        for name, key in (
-            ("PR-AUC", "pr_auc"),
-            ("AUROC", "auroc"),
-            ("F1 (fraud class)", "f1"),
-            ("Precision", "precision"),
-            ("Recall", "recall"),
-            ("Balanced accuracy", "balanced_accuracy"),
-            ("Accuracy", "accuracy"),
+        f"<tr><td>{escape(name)}</td><td>{_num(a.get(key))}</td>"
+        f"<td>{_num(a.get(half)) if half else ''}</td></tr>"
+        for name, key, half in (
+            ("PR-AUC", "pr_auc", None),
+            ("AUROC", "auroc", None),
+            ("Decision threshold", "threshold", None),
+            ("F1 (fraud class)", "f1", "f1_at_05"),
+            ("Precision", "precision", "precision_at_05"),
+            ("Recall", "recall", "recall_at_05"),
+            ("Balanced accuracy", "balanced_accuracy", "balanced_accuracy_at_05"),
         )
     )
     cm = (
@@ -392,10 +414,11 @@ def _model_a_detail(inputs: ReportInputs) -> str:
         '<div class="table-scroll"><table><thead><tr><th>Parameter</th><th>Value</th>'
         f"</tr></thead><tbody>{param_rows}</tbody></table></div></div>"
         '<div class="panel panel-pad"><h3 class="sub">Test metrics</h3>'
-        '<div class="table-scroll"><table><thead><tr><th>Metric</th><th>Value</th>'
+        '<div class="table-scroll"><table><thead><tr><th>Metric</th>'
+        "<th>At threshold</th><th>At 0.5</th>"
         f"</tr></thead><tbody>{metric_rows}</tbody></table></div>"
-        '<h3 class="sub spaced">Confusion matrix <span class="badge">test set, '
-        "model's own decision rule</span></h3>"
+        '<h3 class="sub spaced">Confusion matrix <span class="badge">test set, at '
+        f"threshold {_num(a.get('threshold'))}</span></h3>"
         f"{cm}</div></div></section>"
     )
 
@@ -487,10 +510,13 @@ def _confidence(inputs: ReportInputs) -> str:
     return (
         "<section><h2>Model A's most and least confident test predictions</h2>"
         '<p class="lede">Confidence is read directly from the model\'s output: the '
-        "probability it assigns to the class it predicts, P(fraud) if it predicts "
-        "fraud, else 1 − P(fraud). It ranges from 0.5 (a coin flip) to 1.0 (certain). "
-        "Only test nodes are shown; correct and wrong predictions are both "
-        "included, and confident mistakes are the most informative.</p>"
+        "probability it assigns to the class it predicts at the 0.5 cut-off, "
+        "P(fraud) if it predicts fraud, else 1 − P(fraud). It ranges from 0.5 (a coin "
+        "flip) to 1.0 (certain). Only test nodes are shown; correct and wrong "
+        "predictions are both included, and confident mistakes are the most "
+        "informative. Each node's features are anonymous, so the cards list the "
+        "ones ranking highest among the training nodes, with their value and "
+        "training percentile.</p>"
         '<div class="grid-2">'
         + _card(
             "Most confident",
@@ -524,8 +550,9 @@ def _all_models(inputs: ReportInputs) -> str:
             f"<td>{_gain(r.get('cv_tuning_gain'))}</td>"
             f'<td class="col-info">{_num(r["tuning_score"])}</td>'
             f"<td>{_num(r['pr_auc'])}</td><td>{_num(r['auroc'])}</td>"
+            f"<td>{_num(r.get('threshold'))}</td>"
             f"<td>{_num(r['f1'])}</td><td>{_num(r['precision'])}</td>"
-            f"<td>{_num(r['recall'])}</td><td>{_num(r['balanced_accuracy'])}</td></tr>"
+            f"<td>{_num(r['recall'])}</td><td>{_num(r.get('f1_at_05'))}</td></tr>"
         )
     tuning_metric = escape(str(a.get("tuning_metric", "")))
     return (
@@ -541,17 +568,19 @@ def _all_models(inputs: ReportInputs) -> str:
         '<tr><th class="l" colspan="2"></th>'
         '<th class="group" colspan="4">Training set · shared CV PR-AUC</th>'
         '<th class="group col-info">df-analyze</th>'
-        '<th class="group" colspan="6">Test set · for information only</th></tr>'
+        '<th class="group" colspan="7">Test set · for information only</th></tr>'
         '<tr><th class="l">Model</th><th class="l">Feature set</th>'
         "<th>tuned</th><th>± std</th><th>untuned</th><th>tuning gain</th>"
         '<th class="col-info">tuning score *</th>'
-        "<th>PR-AUC</th><th>AUROC</th><th>F1</th><th>Precision</th><th>Recall</th>"
-        "<th>Bal. acc.</th></tr></thead>"
+        "<th>PR-AUC</th><th>AUROC</th><th>Threshold †</th><th>F1</th>"
+        "<th>Precision</th><th>Recall</th><th>F1 at 0.5</th></tr></thead>"
         f"<tbody>{''.join(rows)}</tbody></table></div>"
         f'<p class="lede small" style="margin-top:8px">* df-analyze\'s own tuning score '
         f"({tuning_metric}). Shown for reference; not comparable across models "
         "(GANDALF is scored on one validation split, the others over 5 folds), so "
-        "never used to choose.</p></section>"
+        "never used to choose. † Each model's decision threshold, chosen on its "
+        "out-of-fold training predictions; F1, precision and recall use it.</p>"
+        "</section>"
     )
 
 

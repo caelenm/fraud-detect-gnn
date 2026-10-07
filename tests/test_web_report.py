@@ -44,6 +44,7 @@ def test_prob_text_keeps_extremes_distinguishable():
     assert web.prob_text(0.00002) == "2.0e-05"
     assert web.prob_text(0.99998) == "1 − 2.0e-05"
     assert web.prob_text(0.99995) != web.prob_text(0.99998)
+    assert web.prob_text(1.0) == "1" and web.prob_text(0.0) == "0"
 
 
 def test_top_features_rank_by_training_percentile():

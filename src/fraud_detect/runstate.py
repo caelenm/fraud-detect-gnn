@@ -63,6 +63,10 @@ def atomic_write_parquet(path: Path, frame: pd.DataFrame) -> None:
     atomic_write(path, lambda tmp: frame.to_parquet(tmp, index=False))
 
 
+def atomic_write_csv(path: Path, frame: pd.DataFrame) -> None:
+    atomic_write(path, lambda tmp: frame.to_csv(tmp, index=False))
+
+
 def config_fingerprint(config: dict[str, Any]) -> str:
     """Hash of the effective config, so a resume can refuse a changed config."""
     blob = json.dumps(config, sort_keys=True, default=str).encode("utf-8")
