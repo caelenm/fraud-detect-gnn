@@ -4,7 +4,7 @@
 
 Course project for CS555: Data Mining and Machine Learning, St. Francis Xavier University (StFX).
 
-> **Status:** Model 1 (df-analyze on each node's own features) is implemented end to end for both datasets: download, load, grouped split, features, audit, df-analyze, grouped shared-CV model choice, test report with bootstrap intervals, and an HTML report. The node table, relation edge lists and feature-block interfaces that the graph models need are in place; the graph models themselves (Models 2–6) are not built yet. The working plan is [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md). An earlier version of this project used CFPB complaint narratives; that state is preserved at commit `3336d87` on `main`.
+> **Status:** Model 1 (df-analyze on each node's own features) is implemented end to end for both datasets: download, load, grouped split, features, audit, df-analyze, grouped shared-CV model choice, test report with bootstrap intervals, and an HTML report. The node table, relation edge lists and feature-block interfaces that the graph models need are in place; the graph models themselves (Models 2–6) are not built yet. The working plan is [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md); its §12 lists the next steps (the full Amazon run, then one full YelpChi run, on a local GPU machine). An earlier version of this project used CFPB complaint narratives; that state is preserved at commit `3336d87` on `main`.
 
 ---
 
@@ -60,7 +60,7 @@ One split per dataset, made by us, saved, and passed to df-analyze. The test set
   - YelpChi: 27,571 train / 18,383 test.
   - Amazon: 5,183 / 3,456.
 - **Shared CV folds:** the training nodes are split again into 5 grouped, stratified folds (`cv_folds.csv`). Every model choice uses these folds, and so will any later out-of-fold feature.
-- **Split repeats:** `split.n_repeats` (default 1) runs the whole pipeline on several independently seeded splits and reports Model A's mean ± SD. Each repeat is a full df-analyze run.
+- **Split repeats:** `split.n_repeats` (default 1) runs the whole pipeline on several independently seeded splits and reports Model A's mean ± SD. Each repeat is a full df-analyze run. Decided: 1 for Model 1; 3 for Amazon once Model 2 exists.
 
 The leakage rules (labels only through the training loss, grouped splits, frozen test set, label-free graph features, train-only transforms) are in [`AGENTS.md`](AGENTS.md).
 

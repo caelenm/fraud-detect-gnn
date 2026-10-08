@@ -113,10 +113,8 @@ Still to do (later branches; tracked as GitHub issues):
 
 Ask before implementing anything that commits to one of these (plan §10):
 
-- **YelpChi training size:** the full ≈ 27.6k training nodes (default) or a seeded, group-preserving subsample of the training set.
-- **Threshold rule:** max F1 on out-of-fold training predictions (implemented default, `report.threshold_rule`) vs. another rule.
-- **Amazon split repeats:** `split.n_repeats` 1 (default) or 3 seeded grouped splits; 3 triples the runtime.
 - **Model 6:** amending invariant 1 to allow supervised out-of-fold GNN features.
+- **Which dataset is the main one.** Plan v2 calls YelpChi the main dataset. On 2026-10-08 YelpChi was described as being for pipeline validation, so whether Amazon takes the main role in the ladder's contrasts is for the group to confirm.
 - **Features flagged by the audit as possible shortcuts:** keep, drop, or report results both ways. Never drop a feature without asking.
 - **The earlier pilot's place in the final report** (the state at `main@3336d87`, see the decision log): omit it, or mention it as the motivating pilot.
 - Adding any architecture beyond GraphSAGE and its graph-free control, any dataset beyond YelpChi and Amazon, or any text data.
@@ -129,6 +127,12 @@ Also ask before changing the metrics, the split proportions or grouping rule, th
 - **2026-10-07:** YelpChi is split by user (`net_rur` connected components), and Amazon by exact-duplicate feature groups. Amazon nodes 0–3,304 are unlabelled context only.
 - **2026-10-07:** For graph-derived features, the context rule is that features (never labels) of all nodes may be used, including test nodes. This replaces the earlier rule that test nodes attach only to training nodes.
 - **2026-10-07:** This branch implements Model 1 (df-analyze on own features) robustly and prepares the node, graph and feature-block interfaces. GNN code is deferred.
+- **2026-10-08:**
+  - **YelpChi** uses its **full training set** (≈ 27.6k nodes). It validates the pipeline, so run it only a few times, not after every change.
+  - **Amazon** runs the full Model 1 configuration (100 trials).
+  - The **decision threshold** is **max F1 on out-of-fold training predictions** (`report.threshold_rule: max_f1`).
+  - **`split.n_repeats` stays 1 for Model 1.** Set it to 3 for Amazon once Model 2 exists, so compared rungs share the same splits.
+  - Long runs happen on the group's local GPU machine (plan §12).
 - **Kept from earlier work:** Model A uses df-analyze classifiers **`lgbm`, `lr`, `catboost`, `gandalf`, `rf`, `knn`** (plus the automatic dummy; `mlp` is left out because it is CPU-only in df-analyze and adds about 4 h per run), 100 tuning trials, tuned on **balanced accuracy** for every model (`htune_cls_metric: bal-acc`; not `acc`, which suits imbalanced classes poorly; not `auroc`, which df-analyze applies inconsistently across models), with `--filter-pred-classify auroc` for the prediction-based feature filter; Model A is **chosen by shared 5-fold CV PR-AUC on the training set** (`select_model`), not by df-analyze's tuning score; CatBoost and GANDALF run on the GPU; `--df-tests-method` is never passed (it hits an enum bug in df-analyze 4.1.0).
 
 ## Code conventions

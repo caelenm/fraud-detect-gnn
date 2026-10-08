@@ -395,9 +395,9 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
 
 ## 10. Open decisions ([group decides])
 
-1. **YelpChi training size:** full ≈ 27.6k (default) or a group-preserving subsample.
-2. **Threshold rule:** maximize F1 on out-of-fold predictions (implemented default) vs. another rule.
-3. **Amazon split repeats:** 1 (default) or 3 seeded grouped splits.
+1. ~~**YelpChi training size:** full ≈ 27.6k (default) or a group-preserving subsample.~~ **Decided 2026-10-08: the full training set** (see §11).
+2. ~~**Threshold rule:** maximize F1 on out-of-fold predictions (implemented default) vs. another rule.~~ **Decided 2026-10-08: max F1 on out-of-fold training predictions.**
+3. ~~**Amazon split repeats:** 1 (default) or 3 seeded grouped splits.~~ **Decided 2026-10-08: 1 for now; 3 once Model 2 exists,** so every rung of a comparison shares the same 3 splits.
 4. **Model 6 (later):** amend invariant 1 to allow supervised GNN features produced strictly out-of-fold on the saved CV folds, with test-node features from a GNN trained on all training nodes. Not needed for this branch.
 5. **Flagged shortcut features (after M4):** keep, drop, or report results both ways.
 6. **The CFPB result's place in the final report:** omit it, or mention it as the motivating pilot (README wording only).
@@ -410,4 +410,47 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
 - **2026-10-07:** YelpChi is split by user (`net_rur` connected components), and Amazon by exact-duplicate feature groups. Amazon nodes 0–3,304 are unlabelled context only.
 - **2026-10-07:** For graph-derived features, the context rule is that features (never labels) of all nodes may be used, including test nodes. This replaces the CFPB rule that test nodes attach only to training nodes.
 - **2026-10-07:** This branch implements Model 1 (df-analyze on own features) robustly and prepares the node, graph and feature-block interfaces. GNN code is deferred.
-- **2026-10-08 (M8 pilot, Amazon, `htune_trials=10`, CPU only, no GPU):** every check passed (counts, grouped split, df-analyze's split and column types). df-analyze took 19 min 41 s, of which tuning was 15 min and GANDALF 9 min of that. `select_model` took 4 min 27 s; the whole pilot took 24 min. Model A was LightGBM with embedded (linear) feature selection: shared-CV PR-AUC 0.924 ± 0.030. Test PR-AUC 0.920 [95% group-bootstrap 0.893, 0.943] and AUROC 0.981 [0.973, 0.988], against a no-skill PR-AUC of 0.095. That is inside the sanity band (≈ 0.91). The full run (100 trials) and any YelpChi run still need the group's go-ahead.
+- **2026-10-08 (M8 pilot, Amazon, `htune_trials=10`, CPU only, no GPU):** every check passed (counts, grouped split, df-analyze's split and column types). df-analyze took 19 min 41 s, of which tuning was 15 min and GANDALF 9 min of that. `select_model` took 4 min 27 s; the whole pilot took 24 min. Model A was LightGBM with embedded (linear) feature selection: shared-CV PR-AUC 0.924 ± 0.030. Test PR-AUC 0.920 [95% group-bootstrap 0.893, 0.943] and AUROC 0.981 [0.973, 0.988], against a no-skill PR-AUC of 0.095. That is inside the sanity band (≈ 0.91). The full run (100 trials) and any YelpChi run still need the group's go-ahead (given the same day; see next entry).
+- **2026-10-08 (decisions on §10.1–3, after the pilot):**
+  - **Amazon:** run the full Model 1 configuration (100 trials) next.
+  - **YelpChi:** use the full training set (≈ 27.6k nodes). YelpChi serves to validate the pipeline, so it should be run only a few times, not for every change. Plan v2 calls YelpChi the main dataset; whether Amazon takes that role in the ladder's contrasts is for the group to confirm.
+  - **Threshold:** max F1 on out-of-fold training predictions.
+  - **Split repeats:** stay at 1 for Model 1. Enable 3 for Amazon once Model 2 exists, so the compared rungs share the same splits.
+  - **Compute:** the long runs happen locally, on the group's GPU machine, in a new session (§12).
+
+---
+
+## 12. Status and next steps (hand-off, 2026-10-08)
+
+**State of this branch (`feat/review-fraud-pivot`).** M0–M9 are done. Every stage runs end to end, and the Amazon pilot passed on a CPU-only cloud machine (§11). Not yet done:
+- the full runs;
+- a run on a GPU;
+- testing on macOS and WSL2.
+
+**Next session (local, with the GPU).** Follow `AGENTS.md`.
+1. Setup:
+   - `git fetch origin && git checkout feat/review-fraud-pivot && uv sync`
+   - df-analyze at the pinned commit:
+     ```
+     git -C ../df-analyze fetch origin
+     git -C ../df-analyze checkout 199e5638620693c267dac715784f1fd0e33fa796
+     uv sync --locked --python '>=3.13.11,<3.14' --directory ../df-analyze
+     ```
+   - uv must be 0.9.16 or newer.
+2. `./download_dataset.sh`: about 45 MB of zips, checksum-verified.
+3. `uv run run.py --dataset amazon --to audit` (minutes). Check `outputs/amazon/reports/audit.md`:
+   - the counts match;
+   - the four shortcut flags reappear (`own__f13`, `own__f15`, `own__f18`, `own__f19`, AUROC 0.86–0.88).
+4. **Full Amazon run:** `uv run run.py --dataset amazon`.
+   - Estimated 1–3 h on an RTX 4060. The pilot took 24 min with 10 trials on a CPU.
+   - If it is interrupted: `uv run run.py --dataset amazon --resume`.
+   - Then check that `split_check.json` and `type_check.json` exist and the report has no sanity-band warning.
+   - Record the timings and the Model A result in §11.
+5. **YelpChi, once:**
+   - First `uv run run.py --dataset yelpchi --to audit` (minutes).
+   - Then the full run overnight: `uv run run.py --dataset yelpchi`. Estimated 5–8 h for df-analyze plus about 45 min for `select_model`; this is extrapolated, not measured. kNN and GANDALF are the likely bottlenecks.
+6. Share the outputs with `uv run pack_artifacts.py --dataset <name>`, outside git.
+
+**Still open** (§10.4–6): Model 6; the flagged Amazon features; the CFPB pilot's place in the report; and which dataset is the main one (see §11).
+
+**After that:** Model 2 (neighbour-aggregate blocks per relation, label-blind builders as in `tests/test_label_blindness.py`). Then switch Amazon to `split.n_repeats: 3` for the Model 1 vs Model 2 comparison.
