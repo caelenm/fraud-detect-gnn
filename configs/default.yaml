@@ -1,62 +1,116 @@
 # Pipeline configuration. Relative paths are resolved against the repo root.
 # After changing a value, rerun the affected stages with --force.
+# Research plan: docs/RESEARCH_PLAN.md (dataset facts in §2, splits in §4).
 
 seed: 555
 
+# Active dataset: yelpchi or amazon. Usually chosen with `run.py --dataset`.
+dataset: null
+
+# Active feature set (a rung of the model ladder; see feature_sets below).
+# Stages from df_analyze_input on run for this feature set only and write to
+# outputs/<dataset>/<feature_set>/. Change with --set feature_set=<name>.
+feature_set: m1_own
+
 gpu:
-  # Stop if df-analyze's environment cannot see a CUDA GPU when a GPU step runs
-  # (the embedding runner, and df-analyze with catboost/gandalf). Set to false
-  # to allow CPU fallback on machines without an NVIDIA GPU.
+  # Stop if df-analyze's environment cannot see a CUDA GPU when df-analyze runs
+  # catboost or gandalf (the only GPU users). Set to false to allow CPU
+  # fallback on machines without an NVIDIA GPU.
   require: true
 
 paths:
-  raw_dir: data/raw
-  interim_dir: data/interim
-  processed_dir: data/processed
-  outputs_dir: outputs
-  categories_file: configs/categories.yaml  # reviewed label rule and product filter
+  raw_dir: data/raw/care_gnn       # downloaded .zip and .mat files
+  processed_dir: data/processed    # + /<dataset>/
+  outputs_dir: outputs             # + /<dataset>/
 
-load:
-  # Extracted by ./download_dataset.sh into data/raw/<name>/
-  archives:
-    - CCDB_Export_2_May_2018_through_April_2021
-    - CCDB_Export_3_May_2021_through_October_2022
-    - CCDB_Export_4_November_2022_through_August_2023
-  date_min: "2018-05-01"  # fixed design decision (see README)
-  date_max: "2023-08-31"
-  chunksize: 200000
+download:
+  # The CARE-GNN repository (Dou et al., CIKM 2020; Apache-2.0) at a pinned
+  # commit, never `master`, so the files cannot change under us.
+  base_url: https://raw.githubusercontent.com/YingtongDou/CARE-GNN/a64ff7523e187a24251f7ca88435d2c9d8f7dcd9/data
 
-dedup:
-  shingle_words: 5          # word n-gram size for MinHash
-  jaccard_threshold: 0.85   # pairs at or above this are near-duplicates
-  num_perm: 128
+# Per-dataset facts. `expected` counts are checked on load (plan §2); edge
+# counts are undirected edges (half the .mat matrices' stored entries).
+datasets:
+  yelpchi:
+    archive: YelpChi.zip
+    archive_sha256: 3a31296b951e6c8158dddb783ff2c62709fa987d106bbe21e59f8e119053cec3
+    mat: YelpChi.mat
+    mat_sha256: fedb35a8fa539b27866244d3515a47a76b20080cdacb33112da3458fd2487b42
+    # Short relation name -> .mat key. Nodes are reviews.
+    relations:
+      rur: net_rur    # same user
+      rtr: net_rtr    # same product, same month (R-T-R)
+      rsr: net_rsr    # same product, same star rating (R-S-R)
+    # Nodes 0 .. unlabelled_prefix-1 are unlabelled (stored as label 0).
+    unlabelled_prefix: 0
+    # Split groups: connected components of this relation (= users), because
+    # labels are user-level (plan §2, gotcha 2).
+    groups: {rule: components, relation: rur}
+    expected:
+      n_nodes: 45954
+      n_labelled: 45954
+      n_positive: 6677
+      n_features: 32
+      n_edges: {rur: 49315, rtr: 573616, rsr: 3402743, homo: 3846979}
+    # Untuned HistGradientBoosting on own features, grouped split (plan §2).
+    # A Model A test PR-AUC more than report.sanity_margin below this is
+    # treated as a likely pipeline bug.
+    sanity_band: {pr_auc: 0.80, auroc: 0.94}
+  amazon:
+    archive: Amazon.zip
+    archive_sha256: c1b7a1f8cd8621467d5121b690fef61a7d398e4f582232bb3e8a154424f7a5b9
+    mat: Amazon.mat
+    mat_sha256: 4b7e3f9cccc62b736792707393ccd74332a1a0592dba128ac6b2989bf1ee9d63
+    # Nodes are users.
+    relations:
+      upu: net_upu    # reviewed at least one common product
+      usu: net_usu    # gave the same star rating within one week
+      uvu: net_uvu    # top-5% mutual review-text similarity
+    # The first 3,305 users are unlabelled but stored as label 0. CARE-GNN
+    # uses only range(3305, n); they are graph context only (plan §2, gotcha 1).
+    unlabelled_prefix: 3305
+    # Split groups: sets of labelled nodes with identical feature rows.
+    groups: {rule: duplicate_features}
+    expected:
+      n_nodes: 11944
+      n_labelled: 8639
+      n_positive: 821
+      n_features: 25
+      n_edges: {upu: 175608, usu: 3566479, uvu: 1036737, homo: 4398392}
+    sanity_band: {pr_auc: 0.91, auroc: 0.98}
 
-sample:
-  n_complaints: 30000       # final sample, natural fraud rate
-  # Near-duplicates are removed from a stratified pool of
-  # n_complaints * pool_factor complaints before the final sample is drawn.
-  pool_factor: 1.5
+# Feature sets = rungs of the model ladder: lists of feature blocks, each
+# data/processed/<dataset>/features/<block>.parquet with columns <block>__*.
+feature_sets:
+  m1_own: [own]
+  # later: m2_own_nbr: [own, nbr_rur, nbr_rtr, nbr_rsr]
+  #        m5_own_gnnssl: [own, gnnssl_rur, gnnssl_rtr, gnnssl_rsr]
 
 split:
-  test_size: 0.4            # stratified by label; the test set is frozen
+  # StratifiedGroupKFold over the labelled nodes: `test_folds` of `n_folds`
+  # folds form the test set (2 of 5 = 40%). The test set is frozen.
+  n_folds: 5
+  test_folds: 2
+  # Grouped, stratified CV folds on the training set, shared by select_model
+  # (and later by any out-of-fold feature).
+  cv_folds: 5
+  # Independently seeded grouped splits (split seed = seed + 1000 * repeat).
+  # With n_repeats > 1, run.py runs the pipeline once per repeat and writes
+  # Model A's mean ± SD across repeats to
+  # outputs/<dataset>/<feature_set>/repeats_summary.md. Repeat 0 uses the
+  # usual folders; repeat k uses data/processed/<dataset>_repeat<k>/ and
+  # outputs/<dataset>_repeat<k>/. Each repeat is a full df-analyze run, so
+  # 3 repeats take 3 times as long. Decided 2026-10-08: 1 for Model 1; 3 for
+  # Amazon once Model 2 exists, so the compared rungs share the same splits.
+  n_repeats: 1
+  # The repeat to run; set it (--set split.repeat=2) to run one repeat only.
+  repeat: 0
 
-embed:
-  # "gpu": scripts/dfa/embed_on_device.py, df-embed's own code run on the GPU
-  #        (CPU if no GPU and gpu.require is false). "df-embed": df-embed.py (CPU only).
-  runner: gpu
-  batch_size: 16            # df-embed.py default is 2 (slow)
-  # Rows also embedded with df-embed's unmodified CPU path and compared (GPU only).
-  verify_rows: 64
-
-pca:
-  n_components: 30
-
-features:
-  # Categorical levels with fewer training complaints than this (and levels
-  # seen only in test) are merged into one level, using training counts only.
-  # 20 matches df-analyze's own threshold, so df-analyze (which counts over
-  # train+test together) has nothing left to merge.
-  min_level_count: 20
+audit:
+  # A feature whose univariate AUROC (oriented to be >= 0.5) on training nodes
+  # reaches this is flagged as a possible label shortcut. Flagged features are
+  # reported, never dropped automatically (an open decision; plan §10).
+  shortcut_auroc: 0.85
 
 df_analyze:
   dir: null                 # null: $DF_ANALYZE_DIR, else ../df-analyze
@@ -69,36 +123,49 @@ df_analyze:
   python: ">=3.13.11,<3.14"
   # dummy is added by df-analyze automatically. catboost and gandalf train on
   # the GPU when df-analyze sees CUDA; the others run on the CPU.
-  # mlp is left out for now: df-analyze pins it to the CPU, where it uses up its
-  # 60-minute tuning limit on each of the 4 feature sets (~4 h per run).
+  # mlp is left out for now: df-analyze pins it to the CPU, where it used up its
+  # 60-minute tuning limit on each of the 4 feature selections (~4 h per run).
   classifiers: [lgbm, lr, catboost, gandalf, rf, knn]
   htune_trials: 100
   # Balanced accuracy (0.5 cut-off), the same for every model. Not accuracy
-  # (df-analyze's default): with ~30% positives (label rule v2), always
-  # predicting "not fraud" scores ~0.70. Not auroc: df-analyze silently tunes most models on balanced
-  # accuracy when asked for AUROC, but GANDALF on real AUROC, so models would
-  # be tuned toward different goals. Model A is NOT chosen by this score; see
-  # select_model below.
+  # (df-analyze's default): with 10-15% positives, always predicting "not
+  # fraud" scores 0.85-0.90. Not auroc: df-analyze silently tunes most models
+  # on balanced accuracy when asked for AUROC, but GANDALF on real AUROC, so
+  # models would be tuned toward different goals. Model A is NOT chosen by
+  # this score; see select_model below.
   htune_cls_metric: bal-acc
   # Passed through to df-analyze.py verbatim. The prediction-based feature
   # filter computes real AUROC from probabilities (the same features for every
-  # model); df-analyze's default there is accuracy.
+  # model); df-analyze's default there is accuracy. Never add
+  # --df-tests-method: it hits an enum bug in df-analyze 4.1.0.
   extra_args: ["--filter-pred-classify", "auroc"]
 
 select_model:
-  # Every tuned (model, feature set) is refit on the same stratified folds of
-  # the training set and scored from its probabilities; Model A is the one
-  # with the highest mean PR-AUC (the headline metric). The test set is not used.
-  n_folds: 5
+  # Every tuned (model, feature selection) is refit on the saved grouped CV
+  # folds of the training set (split.cv_folds) and scored from its
+  # probabilities; Model A is the one with the highest mean PR-AUC (the
+  # headline metric). The test set is not used.
   # Also score df-analyze's default hyperparameters (the before-tuning
   # baseline for the tuning gain). Never used to choose Model A.
   score_defaults: true
   # Watchdog: seconds one configuration (all folds) may take before the stage
   # prints stack traces and fails instead of hanging. The slowest (GANDALF)
-  # took ~6 min on an RTX 4060; 0 disables it.
+  # took ~6 min on 18k rows on an RTX 4060; 0 disables it.
   config_timeout_s: 1800
 
+report:
+  # Decision threshold for F1, precision, recall and the confusion matrix,
+  # chosen on Model A's out-of-fold TRAINING predictions, never on test.
+  # max_f1: the threshold that maximises F1 there (decided 2026-10-08).
+  # Test metrics are also reported at 0.5.
+  threshold_rule: max_f1
+  # Bootstrap 95% intervals for Model A's test PR-AUC and AUROC, resampling
+  # whole split groups (users / duplicate sets).
+  bootstrap_resamples: 1000
+  # Warn when Model A's test PR-AUC is this far below the dataset's sanity band.
+  sanity_margin: 0.05
+
 web_report:
-  # outputs/report/index.html. Contains narratives: never commit or post it.
-  n_samples: 25        # complaints per confidence card (most / least confident)
-  excerpt_chars: 600   # narrative characters shown per complaint
+  # outputs/<dataset>/<feature_set>/report/index.html
+  n_samples: 25        # test nodes per confidence card (most / least confident)
+  n_top_features: 5    # features shown per node, largest values first

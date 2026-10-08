@@ -1,6 +1,6 @@
-"""Stage 11: run only the 'df_analyze_report' stage.
+"""Stage 9: run only the 'df_analyze_report' stage for one dataset.
 
-Same as: uv run run.py --only df_analyze_report
+Same as: uv run run.py --dataset <yelpchi|amazon> --only df_analyze_report
 """
 
 import sys

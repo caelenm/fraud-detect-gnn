@@ -1,10 +1,10 @@
 """Unpack a bundle made by pack_artifacts.py into this repository.
 
-Put the fraud_artifacts_<time>.tgz file next to this script, then:
+Put the fraud_artifacts_<dataset>_<time>.tgz file next to this script, then:
 
-    uv run unpack_artifacts.py                 # newest bundle in this folder
-    uv run unpack_artifacts.py path/to/x.tgz   # a bundle somewhere else
-    uv run unpack_artifacts.py --force         # overwrite files that differ
+    uv run unpack_artifacts.py --dataset amazon          # newest Amazon bundle here
+    uv run unpack_artifacts.py --dataset amazon x.tgz    # a bundle elsewhere
+    uv run unpack_artifacts.py --dataset amazon --force  # overwrite files that differ
 
 Every file is checksum-verified and goes back to where it was on the machine
 that made the bundle, so `uv run run.py` then skips the finished stages.

@@ -1,57 +1,43 @@
 """Canonical column names used throughout the pipeline.
 
-Raw CFPB exports use human-readable headers ("Consumer complaint narrative")
-while the CFPB API uses snake_case names ("complaint_what_happened"). Both are
-mapped to the canonical names below when the raw files are loaded.
+Every dataset is a graph whose nodes are the examples (YelpChi: reviews;
+Amazon: users). The node table has one row per node, keyed by `node_id`, the
+node's row index in the source `.mat` file.
 """
 
 from __future__ import annotations
 
-COMPLAINT_ID = "complaint_id"
-DATE_RECEIVED = "date_received"
-PRODUCT = "product"
-SUB_PRODUCT = "sub_product"
-ISSUE = "issue"
-SUB_ISSUE = "sub_issue"
-NARRATIVE = "narrative"
-COMPANY = "company"
-STATE = "state"
-TAGS = "tags"
-SUBMITTED_VIA = "submitted_via"
-COMPANY_RESPONSE = "company_response"
-TIMELY_RESPONSE = "timely_response"
-LABEL = "label"
+NODE_ID = "node_id"
+LABEL = "label"  # nullable: null for unlabelled nodes (Amazon's first 3,305)
+IS_LABELLED = "is_labelled"
+GROUP_ID = "group_id"  # split group: a YelpChi user, an Amazon duplicate set
+SPLIT = "split"  # train / test / unlabelled
+CV_FOLD = "cv_fold"  # shared CV fold of a training node; null otherwise
 
-# Canonical name -> accepted raw header spellings. Only these columns are read
-# from the raw files; every other raw column (company public response, ZIP
-# code, consent, date sent to company, consumer disputed) is ignored.
-RAW_COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
-    COMPLAINT_ID: ("Complaint ID", "complaint_id"),
-    DATE_RECEIVED: ("Date received", "date_received"),
-    PRODUCT: ("Product", "product"),
-    SUB_PRODUCT: ("Sub-product", "sub_product"),
-    ISSUE: ("Issue", "issue"),
-    SUB_ISSUE: ("Sub-issue", "sub_issue"),
-    NARRATIVE: ("Consumer complaint narrative", "complaint_what_happened"),
-    COMPANY: ("Company", "company"),
-    STATE: ("State", "state"),
-    TAGS: ("Tags", "tags"),
-    SUBMITTED_VIA: ("Submitted via", "submitted_via"),
-    COMPANY_RESPONSE: ("Company response to consumer", "company_response"),
-    TIMELY_RESPONSE: ("Timely response?", "timely"),
-}
+TRAIN, TEST, UNLABELLED = "train", "test", "unlabelled"
 
-# Columns that define the label. They must never appear in any feature
-# matrix, node feature, or edge (AGENTS.md leakage invariant 1).
-LABEL_SOURCE_COLUMNS: tuple[str, ...] = (ISSUE, SUB_ISSUE)
+# The label column in the df-analyze input tables.
+TARGET = "target"
 
-# Per-complaint outcome columns. They are used only to build company-level
-# statistics from training complaints, never as per-complaint features.
-COMPANY_OUTCOME_COLUMNS: tuple[str, ...] = (COMPANY_RESPONSE, TIMELY_RESPONSE)
+# Feature columns are "<block>__<name>", e.g. own__f00 (see features/blocks.py).
+BLOCK_SEPARATOR = "__"
+OWN_BLOCK = "own"
+
+# Columns that identify, label or place a node. They must never appear in any
+# feature block or model input (AGENTS.md leakage invariant 7).
+FORBIDDEN_FEATURE_COLUMNS: tuple[str, ...] = (
+    NODE_ID,
+    LABEL,
+    IS_LABELLED,
+    GROUP_ID,
+    SPLIT,
+    CV_FOLD,
+    TARGET,
+)
 
 
-def is_label_derived(column: str) -> bool:
-    """Return True if a column name looks like Issue/Sub-issue or something built
-    from them. Used as a guard on every feature table."""
-    lowered = column.lower().replace("-", "_").replace(" ", "_")
-    return "issue" in lowered
+def feature_name(index: int, n_features: int) -> str:
+    """Anonymous feature name in .mat column order: f00, f01, ... (wide enough
+    that names sort in column order)."""
+    width = max(2, len(str(n_features - 1)))
+    return f"f{index:0{width}d}"

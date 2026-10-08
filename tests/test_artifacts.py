@@ -19,21 +19,25 @@ from fraud_detect.artifacts import (
     pack,
     unpack,
 )
-from fraud_detect.config import DEFAULT_CONFIG, get_paths, load_config
+from fraud_detect.config import DEFAULT_CONFIG, get_paths, load_config, with_dataset
 
 INCLUDED = [
-    "data/interim/complaints.parquet",
-    "data/processed/split.csv",
-    "data/processed/df_analyze/train.parquet",
-    "outputs/reports/df_analyze_split_check.json",
-    "outputs/df_analyze/latest.txt",
-    "outputs/df_analyze/20260102T000000Z/results.csv",
+    "data/processed/amazon/nodes.parquet",
+    "data/processed/amazon/split_summary.json",
+    "data/processed/amazon/df_analyze/m1_own/train.parquet",
+    "outputs/amazon/reports/audit.md",
+    "outputs/amazon/m1_own/reports/split_check.json",
+    "outputs/amazon/m1_own/df_analyze/latest.txt",
+    "outputs/amazon/m1_own/df_analyze/20260102T000000Z/results.csv",
 ]
 EXCLUDED = [
-    "data/raw/archive.csv",
-    "data/interim/embed/embed_output.parquet",
-    "outputs/runs/20260101T000000Z/run_info.json",
-    "outputs/df_analyze/20260101T000000Z/results.csv",  # not the latest run
+    "data/raw/care_gnn/Amazon.mat",
+    "data/processed/yelpchi/nodes.parquet",  # another dataset
+    "outputs/yelpchi/reports/audit.md",
+    "outputs/amazon/runs/20260101T000000Z/run_info.json",
+    "outputs/amazon/checkpoints/select_model/unit.json",
+    "outputs/amazon/pipeline_state.json",
+    "outputs/amazon/m1_own/df_analyze/20260101T000000Z/results.csv",  # not the latest
 ]
 
 
@@ -44,12 +48,14 @@ def make_repo(root: Path) -> Path:
         path = root / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(f"placeholder for {name}".encode())
-    (root / "outputs/df_analyze/latest.txt").write_text("20260102T000000Z\n")
+    (root / "outputs/amazon/m1_own/df_analyze/latest.txt").write_text(
+        "20260102T000000Z\n"
+    )
     return root
 
 
-def paths_for(root: Path):
-    return get_paths(load_config(DEFAULT_CONFIG), root=root)
+def paths_for(root: Path, dataset: str = "amazon"):
+    return get_paths(with_dataset(load_config(DEFAULT_CONFIG), dataset), root=root)
 
 
 def configs(root: Path) -> list[Path]:
@@ -77,6 +83,8 @@ def test_round_trip_restores_every_file(tmp_path):
     for name in INCLUDED:
         assert (dst / name).read_bytes() == (src / name).read_bytes()
     assert not (dst / "data/raw").exists()
+    with pytest.raises(ArtifactError, match="not 'yelpchi'"):
+        unpack(bundle, dst, configs(dst), dataset="yelpchi")
 
     again = unpack(bundle, dst, configs(dst))
     assert again.written == []
@@ -88,16 +96,16 @@ def test_conflicting_file_needs_force(tmp_path):
     bundle = tmp_path / "bundle.tgz"
     pack(paths_for(src), bundle, configs(src))
     dst = tmp_path / "b"
-    changed = dst / "data/processed/split.csv"
+    changed = dst / "data/processed/amazon/split_summary.json"
     changed.parent.mkdir(parents=True)
     changed.write_bytes(b"different")
 
     with pytest.raises(ArtifactError, match="--force"):
         unpack(bundle, dst, [])
-    assert not (dst / "data/interim/complaints.parquet").exists()  # nothing written
+    assert not (dst / "data/processed/amazon/nodes.parquet").exists()  # nothing written
 
     unpack(bundle, dst, [], force=True)
-    assert changed.read_bytes() == (src / "data/processed/split.csv").read_bytes()
+    assert changed.read_bytes() == (src / INCLUDED[1]).read_bytes()
 
 
 def test_changed_config_gives_warning(tmp_path):
@@ -135,7 +143,7 @@ def test_unsafe_paths_are_refused(tmp_path, name):
 
 def test_checksum_mismatch_leaves_no_file(tmp_path):
     bundle = tmp_path / "corrupt.tgz"
-    name = "data/processed/split.csv"
+    name = "data/processed/amazon/split_summary.json"
     write_bundle(bundle, {name: b"x"}, [{"path": name, "size": 1, "sha256": "0" * 64}])
     dst = tmp_path / "repo"
     with pytest.raises(ArtifactError, match="Checksum mismatch"):

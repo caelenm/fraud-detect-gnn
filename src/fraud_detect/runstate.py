@@ -25,10 +25,13 @@ import hashlib
 import json
 import os
 import shutil
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+import pandas as pd
 
 STATE_FILE = "pipeline_state.json"
 CHECKPOINT_DIR = "checkpoints"
@@ -36,10 +39,32 @@ CHECKPOINT_DIR = "checkpoints"
 
 def atomic_write_text(path: Path, text: str) -> None:
     """Write via a temporary file so a crash never leaves a half-written file."""
+    atomic_write(path, lambda tmp: tmp.write_text(text, encoding="utf-8"))
+
+
+def atomic_write(path: Path, write: Callable[[Path], object]) -> None:
+    """Call `write(tmp)` to write a temporary file next to `path`, then rename it
+    to `path`, so a crash never leaves a half-written file at `path`. The
+    temporary name keeps the suffix (some writers, like np.savez, add one)."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(text, encoding="utf-8")
-    os.replace(tmp, path)
+    tmp = path.with_name(f"{path.stem}.tmp{path.suffix}")
+    try:
+        write(tmp)
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def atomic_write_json(path: Path, data: Any) -> None:
+    atomic_write_text(path, json.dumps(data, indent=2, default=str) + "\n")
+
+
+def atomic_write_parquet(path: Path, frame: pd.DataFrame) -> None:
+    atomic_write(path, lambda tmp: frame.to_parquet(tmp, index=False))
+
+
+def atomic_write_csv(path: Path, frame: pd.DataFrame) -> None:
+    atomic_write(path, lambda tmp: frame.to_csv(tmp, index=False))
 
 
 def config_fingerprint(config: dict[str, Any]) -> str:

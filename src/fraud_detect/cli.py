@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import copy
+import json
 import sys
 import time
 from pathlib import Path
@@ -10,22 +12,41 @@ from pathlib import Path
 from fraud_detect.config import (
     DEFAULT_CONFIG,
     REPO_ROOT,
+    ConfigError,
     Paths,
     apply_overrides,
     get_paths,
     load_config,
+    with_dataset,
 )
-from fraud_detect.pipeline import STAGE_NAMES, STAGES, Context, StageError, get_stage
+from fraud_detect.models import repeats
+from fraud_detect.pipeline import (
+    MODEL_A_SUMMARY,
+    STAGE_NAMES,
+    STAGES,
+    Context,
+    StageError,
+    get_stage,
+)
 from fraud_detect.runlog import new_run_dir, set_seeds, write_run_info
-from fraud_detect.runstate import RunState, config_fingerprint
+from fraud_detect.runstate import (
+    RunState,
+    atomic_write_json,
+    atomic_write_text,
+    config_fingerprint,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run the fraud-detect pipeline stages in order.",
+        description="Run the fraud-detect pipeline stages in order for one dataset.",
         epilog="Stages: " + ", ".join(STAGE_NAMES),
     )
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    parser.add_argument(
+        "--dataset",
+        help="dataset to run: yelpchi or amazon (default: `dataset:` in the config)",
+    )
     parser.add_argument("--from", dest="start", choices=STAGE_NAMES, help="first stage")
     parser.add_argument("--to", dest="end", choices=STAGE_NAMES, help="last stage")
     parser.add_argument("--only", choices=STAGE_NAMES, help="run just this stage")
@@ -98,19 +119,52 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         config = apply_overrides(load_config(args.config), args.overrides)
-    except ValueError as e:
+        config = with_dataset(config, args.dataset)
+    except (ValueError, ConfigError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
+
+    # split.n_repeats > 1: run once per independently seeded split, unless one
+    # repeat was chosen with --set split.repeat=k.
+    n_repeats = int(config["split"]["n_repeats"])
+    pinned = any(o.startswith("split.repeat=") for o in args.overrides)
+    to_run = [config["split"]["repeat"]] if pinned else list(range(n_repeats))
+    for repeat in to_run:
+        cfg = copy.deepcopy(config)
+        cfg["split"]["repeat"] = int(repeat)
+        if n_repeats > 1:
+            print(f"\n######## Split repeat {repeat} of 0..{n_repeats - 1}", flush=True)
+        code = run_pipeline(cfg, names, args, argv, several=len(to_run) > 1)
+        if code != 0:
+            return code
+    if len(to_run) > 1:
+        write_repeat_summary(config, n_repeats)
+    return 0
+
+
+def run_pipeline(
+    config: dict,
+    names: list[str],
+    args: argparse.Namespace,
+    argv: list[str] | None,
+    several: bool = False,
+) -> int:
+    """Run the planned stages for one dataset, split repeat and feature set.
+    With `several` (a loop over repeats), --resume continues the repeats that
+    were interrupted and runs the others normally."""
     paths = get_paths(config)
-    for d in (paths.interim_dir, paths.processed_dir, paths.reports_dir):
+    for d in (paths.processed_dir, paths.reports_dir):
         d.mkdir(parents=True, exist_ok=True)
+    print(f"Dataset: {config['dataset']} · feature set: {config['feature_set']}")
 
     fingerprint = config_fingerprint(config)
     state = RunState.load(paths.outputs_dir)
-    if args.resume:
-        if state is None:
-            print("Nothing to resume: no interrupted run was found.")
-            return 0
+    resume = args.resume and state is not None
+    if args.resume and state is None and not several:
+        print("Nothing to resume: no interrupted run was found.")
+        return 0
+    if resume:
+        assert state is not None
         if state.config_sha256 != fingerprint:
             print(
                 "error: the config changed since the interrupted run started, so it "
@@ -123,9 +177,9 @@ def main(argv: list[str] | None = None) -> int:
     else:
         if state is not None and not args.force:
             print(
-                "error: an interrupted run has unfinished stages "
+                f"error: an interrupted {config['dataset']} run has unfinished stages "
                 f"({', '.join(state.pending)}). Continue it with `uv run run.py "
-                "--resume`, or start over with --force.",
+                f"--dataset {config['dataset']} --resume`, or start over with --force.",
                 file=sys.stderr,
             )
             return 2
@@ -154,7 +208,7 @@ def main(argv: list[str] | None = None) -> int:
         stage = get_stage(name)
         # Only the first stage of a resumed run was interrupted mid-way.
         ctx = Context(config=config, paths=paths, run_dir=run_dir,
-                      resume=args.resume and n == 1)  # fmt: skip
+                      resume=resume and n == 1, force=args.force)  # fmt: skip
         resumed = " (resuming)" if ctx.resume else ""
         print(f"\n== [{n}/{len(planned)}] {name}{resumed}: {stage.description}",
               flush=True)  # fmt: skip
@@ -163,11 +217,11 @@ def main(argv: list[str] | None = None) -> int:
             stage.run(ctx)
         except StageError as e:
             print(f"\nStage '{name}' stopped:\n{e}", file=sys.stderr)
-            print(RESUME_HINT, file=sys.stderr)
+            print(resume_hint(config), file=sys.stderr)
             return 2
         except KeyboardInterrupt:
             print(f"\n\nInterrupted during '{name}'. Every stage before it is saved.")
-            print(RESUME_HINT)
+            print(resume_hint(config))
             return 130
         assert state is not None
         state.mark_done(name, paths.outputs_dir)
@@ -178,4 +232,27 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-RESUME_HINT = "Continue later with: uv run run.py --resume"
+def write_repeat_summary(config: dict, n_repeats: int) -> None:
+    """Model A's mean ± SD over the split repeats, once every repeat has a
+    finished report; written next to repeat 0's feature-set outputs."""
+    found = []
+    for repeat in range(n_repeats):
+        cfg = copy.deepcopy(config)
+        cfg["split"]["repeat"] = repeat
+        path = get_paths(cfg).model_reports_dir / MODEL_A_SUMMARY
+        if not path.is_file():
+            print(f"Repeat summary skipped: {path} does not exist yet.")
+            return
+        found.append(json.loads(path.read_text(encoding="utf-8")))
+    summary = repeats.summarize(found)
+    base = copy.deepcopy(config)
+    base["split"]["repeat"] = 0
+    out = get_paths(base).feature_set_dir
+    text = repeats.markdown(summary, config["dataset"], config["feature_set"])
+    atomic_write_json(out / "repeats_summary.json", summary)
+    atomic_write_text(out / "repeats_summary.md", text)
+    print(f"\n{text}\nSaved {out / 'repeats_summary.md'}")
+
+
+def resume_hint(config: dict) -> str:
+    return f"Continue later with: uv run run.py --dataset {config['dataset']} --resume"

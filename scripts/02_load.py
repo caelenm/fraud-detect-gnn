@@ -1,4 +1,7 @@
-"""Stage 1: run only the 'load' stage (same as: uv run run.py --only load)."""
+"""Stage 2: run only the 'load' stage for one dataset.
+
+Same as: uv run run.py --dataset <yelpchi|amazon> --only load
+"""
 
 import sys
 

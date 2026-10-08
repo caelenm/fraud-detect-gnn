@@ -1,4 +1,7 @@
-"""Stage 4: run only the 'split' stage (same as: uv run run.py --only split)."""
+"""Stage 3: run only the 'split' stage for one dataset.
+
+Same as: uv run run.py --dataset <yelpchi|amazon> --only split
+"""
 
 import sys
 
