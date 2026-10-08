@@ -178,7 +178,7 @@ df-analyze's runtime grows with the number of classifiers, the trials and the nu
 - **Earlier runs:** the 18k-row CFPB run took about 4 h for df-analyze on an RTX 4060 laptop.
 - **YelpChi** (about 27.6k training rows) will take longer.
 - **Amazon** (about 5.2k) far less.
-- **Pilot timings:** see the decision log in [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md).
+- **Amazon pilot (10 trials per model, CPU only):** df-analyze 20 min (GANDALF alone 9 min), `select_model` 4.5 min. Details are in the decision log in [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md).
 
 Ask the group before any run expected to take more than about an hour.
 

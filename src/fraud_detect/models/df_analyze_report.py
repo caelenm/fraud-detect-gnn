@@ -341,8 +341,8 @@ def build_report(
         _markdown_table(pd.DataFrame([a[METRIC_COLUMNS]])),
         "",
         *_interval_lines(intervals),
-        f"Decision threshold {a['threshold']:.4f} ({info.get('threshold_rule', '')}, "
-        "chosen on Model A's out-of-fold training predictions). Confusion matrix on "
+        f"Decision threshold {a['threshold']:.4f} "
+        f"({info.get('threshold_rule', 'chosen on training data')}). Confusion matrix on "
         f"the test set at that threshold: TP {a['tp']:,}, FP {a['fp']:,}, "
         f"FN {a['fn']:,}, TN {a['tn']:,}.",
         "",
