@@ -417,6 +417,11 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
   - **Threshold:** max F1 on out-of-fold training predictions.
   - **Split repeats:** stay at 1 for Model 1. Enable 3 for Amazon once Model 2 exists, so the compared rungs share the same splits.
   - **Compute:** the long runs happen locally, on the group's GPU machine, in a new session (§12).
+- **2026-10-08 (YelpChi smoke test, CPU only):** a pipeline check, not a result: LightGBM and logistic regression only, 3 trials each.
+  - Every stage passed on the full YelpChi split (27,571 train / 18,383 test).
+  - df-analyze kept all 32 features with our types, so no high-cardinality column was taken for an identifier.
+  - Timings: 10 min in total (df-analyze 7.8 min, `select_model` 2 min).
+  - Model A (LightGBM): test PR-AUC 0.831 [0.817, 0.845], AUROC 0.950; no-skill 0.145. This is above the sanity band (≈ 0.80).
 
 ---
 
