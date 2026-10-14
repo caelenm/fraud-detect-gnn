@@ -172,23 +172,45 @@ def check_combination(
     predict: Callable[[Any], Any],
     saved_probs: Any,
     tolerance: float,
+    placeholders: int = 0,
+    predict_labels: Callable[[Any], Any] | None = None,
+    saved_labels: Any = None,
 ) -> dict[str, Any]:
-    """Whether one decoded combination is a fitted model (`decoded`) and
-    reproduces df-analyze's saved test probabilities (`ok`). `predict(model)`
-    returns its test probabilities (n_rows x 2)."""
+    """Whether one decoded combination is a fitted model (`decoded`), was
+    rebuilt completely (`intact`: none of its parts is a placeholder for
+    something that could not be decoded), and reproduces df-analyze's saved
+    test probabilities and, if given, its saved test labels. `ok` requires all
+    of these. `predict(model)` returns test probabilities (n_rows x 2);
+    `predict_labels(model)` the predicted labels."""
     if not is_fitted_model(model_obj):
         shown = repr(model_obj)[:80]
-        return {"decoded": False, "max_abs_diff": math.nan, "ok": False,
+        return {"decoded": False, "intact": False, "max_abs_diff": math.nan,
+                "labels_match": None, "ok": False,
                 "error": f"not a fitted model: {shown}"}  # fmt: skip
+    result: dict[str, Any] = {"decoded": True, "intact": placeholders == 0,
+                              "max_abs_diff": math.nan, "labels_match": None}  # fmt: skip
+    problems = []
+    if placeholders:
+        problems.append(f"{placeholders} part(s) could not be rebuilt from the file")
     try:
-        probs = predict(model_obj)
+        result["max_abs_diff"] = max_abs_diff(predict(model_obj), saved_probs)
+        if predict_labels is not None and saved_labels is not None:
+            labels = np.asarray(predict_labels(model_obj)).ravel()
+            saved = np.asarray(saved_labels).ravel()
+            result["labels_match"] = bool(
+                labels.shape == saved.shape and (labels == saved).all()
+            )
     except Exception as e:  # record the failure; the caller decides what to do
-        return {"decoded": True, "max_abs_diff": math.nan, "ok": False,
-                "error": f"{type(e).__name__}: {e}"[:300]}  # fmt: skip
-    diff = max_abs_diff(probs, saved_probs)
-    error = "" if diff <= tolerance else f"probabilities differ by up to {diff:.3g}"
-    return {"decoded": True, "max_abs_diff": diff, "ok": diff <= tolerance,
-            "error": error}  # fmt: skip
+        problems.append(f"{type(e).__name__}: {e}"[:300])
+    if result["max_abs_diff"] > tolerance:  # also when it is NaN or infinite
+        problems.append(f"probabilities differ by up to {result['max_abs_diff']:.3g}")
+    elif math.isnan(result["max_abs_diff"]) and not problems:
+        problems.append("no probabilities")
+    if result["labels_match"] is False:
+        problems.append("predicted labels differ from df-analyze's")
+    result["ok"] = not problems
+    result["error"] = "; ".join(problems)
+    return result
 
 
 def model_a_source(check: dict[str, Any]) -> str:

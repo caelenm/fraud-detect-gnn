@@ -9,14 +9,16 @@ df-analyze's results (they refer to df-analyze's classes).
 from __future__ import annotations
 
 import io
+import json
 import os
 import sys
 from pathlib import Path
 from typing import Any
 
 import joblib
-import jsonpickle
 import pandas as pd
+from jsonpickle import tags
+from jsonpickle.unpickler import Unpickler, _Proxy
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -80,16 +82,176 @@ def _load_tensors_on_cpu_without_cuda() -> None:
     torch.storage._load_from_bytes = load_on_cpu
 
 
+class Unrestorable:
+    """Stands in for a saved object that could not be rebuilt, or a reference
+    that cannot be trusted (see TolerantUnpickler)."""
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+
+    def __repr__(self) -> str:
+        return f"<not restorable: {self.reason}>"
+
+
+class TolerantUnpickler(Unpickler):
+    """jsonpickle's Unpickler, made safe for df-analyze's saved results.
+
+    jsonpickle numbers objects in the order it writes them, and a later
+    reference to an object (`{"py/id": n}`) is that number. On reading it
+    numbers objects as it rebuilds them, so the numbers only agree while
+    every object is rebuilt exactly as written. GANDALF's saved training
+    state cannot be: some objects cannot be created (torch.dtype) or fail in
+    `__setstate__` (the torch optimizer, Lightning internals). By default the
+    first failure stops the whole decode, so no model in the file loads; and
+    if failures are skipped, the numbering drifts and references in every
+    model saved after GANDALF point at the wrong objects, silently.
+
+    Here a failure does not stop the decode (the object becomes an
+    `Unrestorable` placeholder), and from the first failure on, the
+    numbering is no longer trusted: a reference to any object numbered from
+    the start of the saved result in which the first failure happened
+    becomes an `Unrestorable` placeholder instead of a possibly wrong object.
+    References to objects numbered before that point are exact. A model
+    holding a placeholder is reported as not intact; no model is used without
+    also reproducing df-analyze's saved test predictions.
+
+    In df-analyze's results the models are saved in alphabetical order, so
+    CatBoost and the dummy (before GANDALF) are unaffected, and later models
+    refer mostly to objects CatBoost and the dummy saved first (such as numpy
+    dtypes). A reference a later model makes to one of its own objects is not
+    trusted; _repair_lightgbm restores LightGBM's two known cases. This relies
+    on jsonpickle internals, pinned by df-analyze's lock file (4.1.1).
+    """
+
+    def __init__(self, result_nodes: list[Any]) -> None:
+        super().__init__()
+        self._result_starts = {id(node) for node in result_nodes}
+        self._current_start = 0  # objects numbered before the current result
+        self.trusted_below: int | None = None  # None: no failure yet
+        self.failures: list[str] = []
+        self._seen_errors: set[int] = set()
+
+    def _failed(self, reason: str) -> None:
+        self.failures.append(reason[:200])
+        if self.trusted_below is None:
+            self.trusted_below = self._current_start
+
+    def _restore(self, obj: Any, *args: Any) -> Any:
+        if id(obj) in self._result_starts:
+            self._current_start = len(self._objs)
+        try:
+            return super()._restore(obj, *args)
+        except Exception as e:  # recorded once, then handled by a caller
+            if id(e) not in self._seen_errors:
+                self._seen_errors.add(id(e))
+                self._failed(f"{type(e).__name__}: {e}")
+            raise
+
+    def _process_missing(self, class_name: str) -> None:
+        # jsonpickle keeps such an object as raw JSON and skips its contents.
+        self._failed(f"cannot create {class_name}")
+        super()._process_missing(class_name)
+
+    def _restore_id(self, obj: Any) -> Any:
+        number = obj[tags.ID]
+        if self.trusted_below is not None and number >= self.trusted_below:
+            return Unrestorable(f"reference {number} after a part that was not rebuilt")
+        return super()._restore_id(obj)
+
+    def _restore_reduce(self, obj: Any) -> Any:
+        index, depth = len(self._objs), len(self._namestack)
+        try:
+            return super()._restore_reduce(obj)
+        except Exception as e:
+            del self._namestack[depth:]  # the failed call may not have popped its names
+            self._failed(f"{type(e).__name__}: {e}")
+            placeholder = Unrestorable(f"{type(e).__name__}: {e}"[:200])
+            proxy = self._objs[index]  # numbered first by the call that failed
+            if isinstance(proxy, _Proxy):
+                proxy.reset(placeholder)
+                self._swapref(proxy, placeholder)
+            return placeholder
+
+    def _restore_state(self, obj: Any, instance: Any) -> Any:
+        depth = len(self._namestack)
+        try:
+            return super()._restore_state(obj, instance)
+        except Exception as e:
+            del self._namestack[depth:]
+            self._failed(f"{type(e).__name__}: {e}")
+            # The half-restored object is replaced, so the failure stays visible.
+            placeholder = Unrestorable(f"{type(e).__name__}: {e}"[:200])
+            index = self._obj_to_idx.pop(id(instance), None)
+            if index is not None:
+                self._objs[index] = placeholder
+                self._obj_to_idx[id(placeholder)] = index
+            return placeholder
+
+
+def _repair_lightgbm(result: Any) -> None:
+    """LightGBM's scikit-learn classifier holds two objects twice, by
+    construction in LGBMModel.fit / LGBMClassifier.fit: `self._classes =
+    self._le.classes_` and `self._best_score = self._Booster.best_score`.
+    jsonpickle saves the second copy of each as a reference; if that
+    reference could not be trusted, take the object from its first copy.
+    The export check then verifies the model's probabilities and predicted
+    labels against df-analyze's saved ones."""
+    estimator = getattr(getattr(result, "model", None), "tuned_model", None)
+    pairs = (
+        (getattr(estimator, "_le", None), "classes_", estimator, "_classes"),
+        (estimator, "_best_score", getattr(estimator, "_Booster", None), "best_score"),
+    )
+    for holder, name, source, source_name in pairs:
+        value = getattr(source, source_name, None)
+        if isinstance(getattr(holder, name, None), Unrestorable) and not isinstance(
+            value, Unrestorable | type(None)
+        ):
+            setattr(holder, name, value)
+
+
+def count_placeholders(obj: Any, _seen: set[int] | None = None, _depth: int = 0) -> int:
+    """How many Unrestorable placeholders or unresolved jsonpickle proxies an
+    object holds (in its attributes, lists and dicts, 12 levels deep)."""
+    seen = set() if _seen is None else _seen
+    if id(obj) in seen or _depth > 12:
+        return 0
+    seen.add(id(obj))
+    if isinstance(obj, Unrestorable | _Proxy):
+        return 1
+    if isinstance(obj, dict):
+        children = list(obj.values())
+    elif isinstance(obj, list | tuple):
+        children = list(obj)
+    elif hasattr(obj, "__dict__") and not isinstance(obj, type):
+        children = list(vars(obj).values())
+    else:
+        return 0
+    return sum(count_placeholders(c, seen, _depth + 1) for c in children)
+
+
 def decode_results(path: Path) -> list[Any]:
     """Every tuned combination (df-analyze HtuneResult objects, each holding
     its model refit on the full training set) from
     eval_htune_results_jsonpickle_00.json, in the order df-analyze saved them
-    (the same order as prediction_results_00.json)."""
+    (the same order as prediction_results_00.json). Parts that cannot be
+    rebuilt are placeholders (see TolerantUnpickler and count_placeholders)."""
     _load_tensors_on_cpu_without_cuda()
-    decoded = jsonpickle.decode(path.read_text(encoding="utf-8"))
-    if not isinstance(decoded, dict) or "results" not in decoded:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or not isinstance(data.get("results"), list):
         raise SystemExit(f"{path} does not hold df-analyze evaluation results")
-    return list(decoded["results"])
+    unpickler = TolerantUnpickler(data["results"])
+    results = list(unpickler.restore(data)["results"])
+    for result in results:
+        _repair_lightgbm(result)
+    if unpickler.failures:
+        kinds = sorted({f.split(":")[0] for f in unpickler.failures})
+        print(
+            f"Note: {len(unpickler.failures)} saved objects could not be rebuilt "
+            f"({', '.join(kinds[:4])}); references after the first one are not "
+            "trusted.",
+            flush=True,
+        )
+    return results
 
 
 def without_checkpoint_files(model: Any) -> Any:

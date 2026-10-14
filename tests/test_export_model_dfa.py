@@ -64,6 +64,20 @@ def exported(tmp_path):
     return config, p, deep / "results" / "test00"
 
 
+def test_decoding_tolerates_a_broken_object_and_distrusts_later_references(tmp_path):
+    # See scripts/dfa/model_io.TolerantUnpickler; the checks are in the script.
+    path, config = fake_dataset(tmp_path)
+    if not _df_analyze_ready(config):
+        pytest.skip("df-analyze (at the pinned commit) or uv is not available")
+    run_df_analyze_script(
+        find_df_analyze(config),
+        str(REPO_ROOT / "tests" / "dfa" / "tolerant_decoding.py"),
+        [],
+        tmp_path / "tolerant_decoding.log",
+        python=config["df_analyze"]["python"],
+    )
+
+
 def predict(config: dict, model_dir, table, out, *extra: str):
     """scripts/dfa/predict.py in df-analyze's environment, as a teammate runs it."""
     dfa = find_df_analyze(config)

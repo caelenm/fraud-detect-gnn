@@ -101,8 +101,34 @@ def test_a_placeholder_inside_the_model_triggers_the_refit_path():
 
 def test_a_model_that_reproduces_its_probabilities_is_used_as_decoded():
     result = check(FittedModel(SAVED.copy()))
-    assert result == {"decoded": True, "max_abs_diff": 0.0, "ok": True, "error": ""}
+    assert result == {"decoded": True, "intact": True, "max_abs_diff": 0.0,
+                      "labels_match": None, "ok": True, "error": ""}  # fmt: skip
     assert mx.model_a_source(result) == "decoded"
+
+
+def test_a_model_with_unrebuilt_parts_triggers_the_refit_path():
+    # Reproducing the probabilities is not enough if part of the model could
+    # not be rebuilt from the file (a placeholder somewhere inside it).
+    result = mx.check_combination(
+        FittedModel(SAVED.copy()), lambda m: m.predict_proba(None), SAVED, 1e-9,
+        placeholders=1,
+    )  # fmt: skip
+    assert result["decoded"] and not result["intact"] and not result["ok"]
+    assert result["max_abs_diff"] == 0.0 and "could not be rebuilt" in result["error"]
+    assert mx.model_a_source(result) == "refit"
+
+
+def test_labels_must_match_too():
+    def run(labels: list[int]) -> dict:
+        return mx.check_combination(
+            FittedModel(SAVED.copy()), lambda m: m.predict_proba(None), SAVED, 1e-9,
+            predict_labels=lambda m: np.array(labels), saved_labels=[0, 1],
+        )  # fmt: skip
+
+    assert run([0, 1])["ok"] and run([0, 1])["labels_match"] is True
+    wrong = run([1, 1])
+    assert wrong["labels_match"] is False and not wrong["ok"]
+    assert "labels differ" in wrong["error"]
 
 
 def test_different_probabilities_or_a_failing_model_trigger_the_refit_path():

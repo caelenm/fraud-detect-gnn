@@ -950,8 +950,8 @@ def run_export_model(ctx: Context) -> None:
     os.replace(staging, p.model_dir)
 
     check = pd.read_csv(p.model_dir / model_export.MODELS_CHECK, keep_default_na=False)
-    print(check[["model", "selection_label", "decoded", "max_abs_diff", "ok"]]
-          .to_string(index=False))  # fmt: skip
+    shown = ["model", "selection_label", "decoded", "intact", "max_abs_diff", "ok"]
+    print(check[shown].to_string(index=False))
     failed = check[check["ok"].astype(str) != "True"]
     for r in failed.itertuples():
         print(

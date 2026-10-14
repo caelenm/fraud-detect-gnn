@@ -42,6 +42,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from model_io import (
+    count_placeholders,
     decode_results,
     load_native,
     read_table,
@@ -82,6 +83,22 @@ def probabilities(model: Any, X: pd.DataFrame) -> np.ndarray:
     return np.asarray(without_checkpoint_files(model).predict_proba(X), dtype=float)
 
 
+def check_model(model: Any, entry: dict, X_test: pd.DataFrame, tolerance: float) -> dict:
+    """A df-analyze model against the test predictions df-analyze saved for it:
+    probabilities (to `tolerance`), predicted labels, and whether every part
+    of it could be rebuilt (model_io.count_placeholders)."""
+    cols = list(entry["selected_cols"])
+    return mx.check_combination(
+        model,
+        lambda m: probabilities(m, X_test[cols]),
+        entry["probs_test"],
+        tolerance,
+        placeholders=count_placeholders(getattr(model, "tuned_model", model)),
+        predict_labels=lambda m: without_checkpoint_files(m).tuned_predict(X_test[cols]),
+        saved_labels=entry.get("preds_test"),
+    )
+
+
 def check_all(
     entries: list[dict], results: list[Any], X_test: pd.DataFrame, thresholds: dict
 ) -> list[dict]:
@@ -100,13 +117,9 @@ def check_all(
         cols = list(entry["selected_cols"])
         embed = entry.get("embed_select_model") or ""
         tolerance = mx.tolerance_for(name)
+        model = getattr(result, "model", result)
         start = time.perf_counter()
-        check = mx.check_combination(
-            getattr(result, "model", result),
-            lambda m, cols=cols: probabilities(m, X_test[cols]),
-            entry["probs_test"],
-            tolerance,
-        )
+        check = check_model(model, entry, X_test, tolerance)
         row = {
             "model": name,
             "model_cls": entry["model_cls"],
@@ -115,8 +128,10 @@ def check_all(
             "selection_label": mx.selection_label(entry["selection"], embed),
             "n_features": len(cols),
             "decoded": "yes" if check["decoded"] else "no",
+            "intact": "yes" if check["intact"] else "no",
             "max_abs_diff": check["max_abs_diff"],
             "tolerance": tolerance,
+            "labels_match": check["labels_match"],
             "ok": check["ok"],
             "threshold": thresholds.get((name, str(entry["selection"])), np.nan),
             "error": check["error"],
@@ -196,29 +211,29 @@ def main() -> int:
     verification: dict[str, Any] = {
         "n_test_rows": len(X_test),
         "tolerance": tolerance,
-        "max_abs_diff_decoded": check["max_abs_diff"],
-    }
-    source = mx.model_a_source(check)
+        "decoded_check": {k: check[k] for k in ("decoded", "intact", "max_abs_diff",
+                                                "labels_match", "error")},
+    }  # fmt: skip
+    source = mx.model_a_source({**check, "decoded": check["decoded"] == "yes"})
     if source == "decoded":
         wrapper = results[i].model
     else:
         print(
-            f"Model A ({name}, {check['selection_label']}) did not decode to a model "
-            f"that reproduces its probabilities ({check['error']}); refitting it with "
-            "its tuned parameters on the full training set.",
+            f"Model A ({name}, {check['selection_label']}) cannot be used as decoded "
+            f"({check['error']}); refitting it with its tuned parameters on the full "
+            "training set, as df-analyze did after tuning.",
             flush=True,
         )
         X_train = read_table(export_dir / "X_train_00.csv")
         y_train = read_target(export_dir / "y_train_00.csv")
         wrapper = refit(entry, X_train, y_train, int(request["seed"]))
-        again = mx.check_combination(
-            wrapper, lambda m: probabilities(m, X_test[cols]), saved, tolerance
-        )
-        verification["max_abs_diff_refit"] = again["max_abs_diff"]
+        again = check_model(wrapper, entry, X_test, tolerance)
+        keys = ("max_abs_diff", "labels_match", "error")
+        verification["refit_check"] = {k: again[k] for k in keys}
         if not again["ok"]:
             print(
                 f"ERROR: the refit Model A does not reproduce df-analyze's test "
-                f"probabilities either ({again['error']}). Stop and ask.",
+                f"predictions either ({again['error']}). Stop and ask.",
                 file=sys.stderr,
             )
             return UNVERIFIED
@@ -228,11 +243,18 @@ def main() -> int:
     save_native(estimator, fmt, out_dir / model_file)
     reloaded = load_native(fmt, out_dir / model_file)
     diff = mx.max_abs_diff(probabilities(reloaded, X_test[cols]), saved)
+    labels = np.asarray(reloaded.predict(X_test[cols])).ravel()
+    saved_labels = np.asarray(entry.get("preds_test")).ravel()
+    labels_match = bool(
+        labels.shape == saved_labels.shape and (labels == saved_labels).all()
+    )
     verification["max_abs_diff_native"] = diff
-    if diff > tolerance:
+    verification["labels_match_native"] = labels_match
+    if diff > tolerance or not labels_match:
         print(
-            f"ERROR: Model A reloaded from {model_file} differs from df-analyze's test "
-            f"probabilities by up to {diff:.3g} (tolerance {tolerance}). Stop and ask.",
+            f"ERROR: Model A reloaded from {model_file} does not reproduce df-analyze's "
+            f"test predictions (probabilities differ by up to {diff:.3g}, tolerance "
+            f"{tolerance}; labels match: {labels_match}). Stop and ask.",
             file=sys.stderr,
         )
         return UNVERIFIED
