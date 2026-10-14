@@ -96,7 +96,8 @@ class Paths:
     data/raw/care_gnn/               downloaded .zip and .mat files (shared)
     data/processed/<dataset>/        node table, graph, split, feature blocks
     outputs/<dataset>/               dataset-level reports, run state, run logs
-    outputs/<dataset>/<feature_set>/ df-analyze runs, model reports, web report
+    outputs/<dataset>/<feature_set>/ df-analyze runs, model reports, web report,
+                                     exported Model A (model/)
     """
 
     root: Path
@@ -177,6 +178,11 @@ class Paths:
     @property
     def web_report(self) -> Path:
         return self.feature_set_dir / "report" / "index.html"
+
+    @property
+    def model_dir(self) -> Path:
+        """Model A saved in its native format, with model_a.json."""
+        return self.feature_set_dir / "model"
 
 
 def _resolve(root: Path, value: str) -> Path:

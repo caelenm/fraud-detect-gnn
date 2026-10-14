@@ -9,6 +9,8 @@ as they are implemented.
 from __future__ import annotations
 
 import json
+import os
+import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -23,7 +25,13 @@ from fraud_detect.config import REPO_ROOT, Paths, dataset_config, df_analyze_dir
 from fraud_detect.data import audit, care_gnn, download, split
 from fraud_detect.external import ExternalToolError, run_df_analyze_script
 from fraud_detect.features import blocks, own
-from fraud_detect.models import df_analyze, df_analyze_report, evaluation, selection
+from fraud_detect.models import (
+    df_analyze,
+    df_analyze_report,
+    evaluation,
+    model_export,
+    selection,
+)
 from fraud_detect.report import web
 from fraud_detect.runlog import git_commit
 from fraud_detect.runstate import (
@@ -86,12 +94,32 @@ class Stage:
     description: str
     run: Callable[[Context], None]
     outputs: Callable[[Paths], list[Path]]
+    # Optional: other files whose presence also means the stage has nothing
+    # left to do (see the download stage).
+    skip_when: Callable[[Paths], list[Path]] | None = None
+
+    def is_done(self, paths: Paths) -> bool:
+        """True when every output exists (or every `skip_when` file does)."""
+        if all(o.exists() for o in self.outputs(paths)):
+            return True
+        return self.skip_when is not None and all(
+            p.exists() for p in self.skip_when(paths)
+        )
 
 
 def _require(*paths: Path) -> None:
     for p in paths:
         if not p.exists():
             raise StageError(f"Missing input {p}. Run the earlier stages first.")
+
+
+def _require_mat(ctx: Context) -> None:
+    """The raw .mat; a clone that only unpacked a bundle has not downloaded it."""
+    if not ctx.paths.mat.exists():
+        raise StageError(
+            f"Missing {ctx.paths.mat}. Download it with `uv run run.py --dataset "
+            f"{ctx.dataset} --only download --force`."
+        )
 
 
 # --------------------------------------------------------------------------
@@ -111,7 +139,7 @@ def run_download(ctx: Context) -> None:
 # --------------------------------------------------------------------------
 def run_load(ctx: Context) -> None:
     p, data = ctx.paths, ctx.data
-    _require(p.mat)
+    _require_mat(ctx)
     print(f"Reading {p.mat}", flush=True)
     try:
         graph = care_gnn.read_mat(p.mat, data["relations"])
@@ -233,7 +261,8 @@ def run_split(ctx: Context) -> None:
 # --------------------------------------------------------------------------
 def run_features(ctx: Context) -> None:
     p = ctx.paths
-    _require(p.mat, p.train_ids)
+    _require_mat(ctx)
+    _require(p.train_ids)
     nodes = read_nodes(p)
     features = care_gnn.read_features(p.mat)
     if len(features) != len(nodes):
@@ -840,9 +869,107 @@ def run_web_report(ctx: Context) -> None:
     print(f"Saved the web report to {p.web_report}")
 
 
+# --------------------------------------------------------------------------
+# Stage 11: Model A in its native format; check every model df-analyze saved
+# --------------------------------------------------------------------------
+# Last in STAGES on purpose: run.py reruns every stage after the first one
+# with missing outputs, so an earlier position would rerun df-analyze.
+EXPORT_RUNNER = REPO_ROOT / "scripts" / "dfa" / "export_model.py"
+EXPORT_REQUEST = "request.json"
+
+
+def export_outputs(p: Paths) -> list[Path]:
+    """export_model's outputs: models_check.csv, model_a.json and the model
+    file model_a.json names. The stage moves its finished folder into place in
+    one step, so they appear together."""
+    outputs = [p.model_dir / model_export.MODELS_CHECK,
+               p.model_dir / model_export.MODEL_A_META]  # fmt: skip
+    try:
+        meta = model_export.read_metadata(outputs[1])
+    except (model_export.MetadataError, ValueError):  # missing or unreadable
+        return outputs
+    return [*outputs, p.model_dir / meta["model_file"]]
+
+
+def _repo_relative(path: Path, root: Path) -> str:
+    """`path` relative to the repository root (so it holds in another clone
+    that unpacked a bundle), or absolute if it lies outside."""
+    try:
+        return path.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return path.resolve().as_posix()
+
+
+def run_export_model(ctx: Context) -> None:
+    """Check that every tuned model df-analyze saved decodes and reproduces its
+    saved test probabilities, and save Model A (as chosen by df_analyze_report)
+    in its native format with model_a.json, so nobody has to retrain it (see
+    scripts/dfa/export_model.py). Nothing is chosen or tuned here."""
+    p = ctx.paths
+    summary_path = p.model_reports_dir / MODEL_A_SUMMARY
+    thresholds_path = p.model_reports_dir / THRESHOLDS
+    _require(summary_path, thresholds_path)
+    summary = _read_json(summary_path)
+    stamp, outdir = _latest_verified_run(p)
+    if summary["run"] != stamp:
+        raise StageError(
+            f"{summary_path} describes df-analyze run {summary['run']}, but the latest "
+            f"run is {stamp}. Rerun `uv run run.py --dataset {ctx.dataset} "
+            "--from select_model`."
+        )
+    a = summary["model_a"]
+    staging = p.model_dir.with_name(p.model_dir.name + ".tmp")
+    shutil.rmtree(staging, ignore_errors=True)
+    staging.mkdir(parents=True)
+    request = {
+        "export_dir": str(df_analyze.find_export_dir(outdir).resolve()),
+        "out_dir": str(staging.resolve()),
+        "results_dir": _repo_relative(df_analyze.find_export_dir(outdir), p.root),
+        "dataset": ctx.dataset,
+        "feature_set": ctx.config["feature_set"],
+        "run": stamp,
+        "model_a": {k: a[k] for k in ("model", "selection", "embed_selector")},
+        "threshold": a["threshold"],
+        "threshold_rule": summary["threshold_rule"],
+        "thresholds": pd.read_csv(thresholds_path).to_dict("records"),
+        "seed": ctx.seed,
+        "df_analyze_commit": ctx.config["df_analyze"].get("commit"),
+    }
+    atomic_write_json(staging / EXPORT_REQUEST, request)
+    args = ["--request", str((staging / EXPORT_REQUEST).resolve())]
+    _run_dfa(ctx, str(EXPORT_RUNNER), args, outdir / "export_model.log")
+    (staging / EXPORT_REQUEST).unlink()
+    try:
+        meta = model_export.read_metadata(staging / model_export.MODEL_A_META)
+    except model_export.MetadataError as e:
+        raise StageError(str(e)) from e
+    _require(staging / meta["model_file"], staging / model_export.MODELS_CHECK)
+    # Replace the previous export in one step: the stage's outputs appear only
+    # when all of them are complete.
+    shutil.rmtree(p.model_dir, ignore_errors=True)
+    os.replace(staging, p.model_dir)
+
+    check = pd.read_csv(p.model_dir / model_export.MODELS_CHECK, keep_default_na=False)
+    print(check[["model", "selection_label", "decoded", "max_abs_diff", "ok"]]
+          .to_string(index=False))  # fmt: skip
+    failed = check[check["ok"].astype(str) != "True"]
+    for r in failed.itertuples():
+        print(
+            f"WARNING: {r.model} ({r.selection_label}) cannot be loaded from "
+            f"df-analyze's saved results: {r.error}. It was not refit."
+        )
+    print(
+        f"Model A ({meta['model']}, {meta['selection_label']}, {meta['source']}) saved "
+        f"to {p.model_dir / meta['model_file']}; {len(check) - len(failed)} of "
+        f"{len(check)} tuned models load and reproduce their test probabilities."
+    )
+
+
 STAGES: list[Stage] = [
+    # A clone that unpacked a bundle has the load stage's outputs but no raw
+    # files; it has nothing left to download.
     Stage("download", "Fetch and checksum the CARE-GNN .mat file", run_download,
-          lambda p: [p.mat]),
+          lambda p: [p.mat], skip_when=lambda p: [p.nodes, p.graph_manifest]),
     Stage("load", "Node table, relation edge lists, count checks", run_load,
           lambda p: [p.nodes, p.graph_manifest]),
     Stage("split", "Grouped stratified train/test split and CV folds", run_split,
@@ -869,6 +996,8 @@ STAGES: list[Stage] = [
                      p.model_reports_dir / MODEL_A_SUMMARY]),
     Stage("web_report", "HTML report: parameters, results, confidence cards",
           run_web_report, lambda p: [p.web_report]),
+    Stage("export_model", "Save Model A natively; check every saved model",
+          run_export_model, export_outputs),
 ]  # fmt: skip
 
 STAGE_NAMES = [s.name for s in STAGES]

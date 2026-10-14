@@ -18,11 +18,13 @@ import yaml
 from synthetic import (
     fake_care_gnn_mat,
     fake_df_analyze_results,
+    fake_model_a_metadata,
     fake_oof_predictions,
     fake_shared_cv,
 )
 
 from fraud_detect.config import DEFAULT_CONFIG, load_config, with_dataset
+from fraud_detect.models import model_export
 
 
 def sha256(path: Path) -> str:
@@ -111,12 +113,30 @@ def fake_df_analyze_run(paths, cv_scores: dict[tuple[str, str], float]) -> None:
     )
     pd.DataFrame({"0": [0, 1]}).to_parquet(deep / "prepared/labels.parquet")
     (deep / "options.json").write_text(json.dumps({"htune_trials": 3, "seed": 555}))
+    paths.model_reports_dir.mkdir(parents=True, exist_ok=True)
     for check in ("split_check.json", "type_check.json"):
         (run / check).write_text("{}")
-    fake_shared_cv(cv_scores).to_csv(run / "model_selection_cv.csv", index=False)
+        (paths.model_reports_dir / check).write_text(json.dumps({"run": FAKE_RUN}))
+    for directory in (run, paths.model_reports_dir):
+        fake_shared_cv(cv_scores).to_csv(
+            directory / "model_selection_cv.csv", index=False
+        )
     folds = pd.read_csv(paths.cv_folds).set_index("node_id")["fold"]
     train_ids = pd.read_csv(paths.train_ids)["node_id"]
     fake_oof_predictions(
         list(cv_scores), train["target"].to_numpy(), folds.loc[train_ids].to_numpy()
     ).to_parquet(run / "oof_predictions.parquet", index=False)
     (paths.df_analyze_output_dir / "latest.txt").write_text(FAKE_RUN + "\n")
+
+
+def fake_export_outputs(paths) -> None:
+    """Write placeholder export_model outputs (model_a.json, models_check.csv
+    and a model file of placeholder bytes), as if the stage had run."""
+    paths.model_dir.mkdir(parents=True, exist_ok=True)
+    meta = fake_model_a_metadata()
+    model_export.write_metadata(paths.model_dir / model_export.MODEL_A_META, meta)
+    (paths.model_dir / model_export.MODELS_CHECK).write_text(
+        "model,selection,decoded,max_abs_diff,ok\nlgbm,none,yes,0.0,True\n",
+        encoding="utf-8",
+    )
+    (paths.model_dir / meta["model_file"]).write_bytes(b"placeholder model")

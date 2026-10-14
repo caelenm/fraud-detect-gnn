@@ -22,7 +22,8 @@ from fraud_detect import columns as C
 
 # (config name, df-analyze estimator class) for fake df-analyze results.
 FAKE_DFA_MODELS = [("dummy", "DummyClassifier"), ("lgbm", "LightGBMClassifier"),
-                   ("catboost", "CatBoostClassifier")]  # fmt: skip
+                   ("catboost", "CatBoostClassifier"),
+                   ("lr", "LRClassifier")]  # fmt: skip
 
 
 def fake_df_analyze_results(
@@ -219,6 +220,35 @@ def fake_inferred_types(kinds: dict[str, str]) -> pd.DataFrame:
         index=pd.Index(list(kinds), name="feature_name"),
     )
     return frame
+
+
+def fake_model_a_metadata(model_file: str = "model_a.joblib") -> dict:
+    """Invented model_a.json contents (export_model stage); describes no real
+    model."""
+    return {
+        "format_version": 1,
+        "dataset": "fake",
+        "feature_set": "m1_own",
+        "run": "20260101T000000Z",
+        "results_dir": "outputs/fake/m1_own/df_analyze/run/results/test00",
+        "model": "lgbm",
+        "model_cls": "LightGBMClassifier",
+        "selection": "none",
+        "embed_selector": "",
+        "selection_label": "none",
+        "input_columns": ["own_f00", "own_f01"],
+        "prepared_columns": ["own_f00", "own_f01", "own_f02"],
+        "tuned_params": {"n_estimators": 50},
+        "threshold": 0.3,
+        "threshold_rule": "max_f1 on out-of-fold training predictions",
+        "seed": 555,
+        "df_analyze_commit": "0" * 40,
+        "source": "decoded",
+        "model_file": model_file,
+        "model_format": "joblib",
+        "verification": {"max_abs_diff_native": 0.0, "tolerance": 1e-9},
+        "package_versions": {"python": "3.13.0", "lightgbm": "4.6.0"},
+    }
 
 
 def fake_oof_predictions(

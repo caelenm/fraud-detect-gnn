@@ -29,7 +29,8 @@ def finished_run(tmp_path):
 
 def test_report_and_web_report_render_from_synthetic_outputs(finished_run):
     path, p = finished_run
-    assert main(["--config", str(path), "--from", "df_analyze_report"]) == 0
+    args = ["--config", str(path), "--from", "df_analyze_report", "--to", "web_report"]
+    assert main(args) == 0
     summary = json.loads((p.model_reports_dir / "model_a.json").read_text())
     a = summary["model_a"]
     assert a["model"] == "catboost"  # highest shared-CV PR-AUC

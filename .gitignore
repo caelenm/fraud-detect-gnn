@@ -17,6 +17,8 @@
 *.pt
 *.pth
 *.ckpt
+*.joblib
+*.cbm
 *.mat
 
 # Draft PR text for the user (never committed)

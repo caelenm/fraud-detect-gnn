@@ -44,17 +44,9 @@ from sklearn.metrics import (
     roc_auc_score,
 )
 
-# df-analyze estimator classes -> the classifier names used in the config.
-MODEL_NAMES = {
-    "CatBoostClassifier": "catboost",
-    "DummyClassifier": "dummy",
-    "GandalfEstimator": "gandalf",
-    "KNNClassifier": "knn",
-    "LRClassifier": "lr",
-    "LightGBMClassifier": "lgbm",
-    "LightGBMRFClassifier": "rf",
-    "MLPEstimator": "mlp",
-}
+# df-analyze estimator class -> config name; re-exported for the other stages.
+from fraud_detect.models.model_export import MODEL_NAMES as MODEL_NAMES
+
 # Tie-break order for equal CV scores (fixed in advance, never test-based).
 SELECTION_ORDER = ("none", "assoc", "pred", "embed")
 # Shared-CV columns (from scripts/dfa/cv_select.py) -> report column names.

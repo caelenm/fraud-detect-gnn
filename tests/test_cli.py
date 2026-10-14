@@ -19,7 +19,14 @@ def test_stage_order_matches_the_plan():
     assert STAGE_NAMES == [
         "download", "load", "split", "features", "audit", "df_analyze_input",
         "df_analyze", "select_model", "df_analyze_report", "web_report",
+        "export_model",
     ]  # fmt: skip
+
+
+def test_export_model_is_the_last_stage():
+    # run.py reruns every stage after the first one with missing outputs, so
+    # export_model must come last or adding it would rerun df-analyze.
+    assert STAGE_NAMES[-1] == "export_model"
 
 
 def test_select_all_by_default():

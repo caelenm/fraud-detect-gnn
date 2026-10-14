@@ -90,7 +90,7 @@ def plan_stages(names: list[str], force: bool, paths: Paths) -> list[str]:
     """Stages that will run: from the first one that is forced or has missing
     outputs, through the end (later stages rerun because their inputs change)."""
     for i, name in enumerate(names):
-        if force or not all(o.exists() for o in get_stage(name).outputs(paths)):
+        if force or not get_stage(name).is_done(paths):
             return names[i:]
     return []
 
