@@ -86,22 +86,44 @@ def _latest_df_analyze_run(dfa_dir: Path) -> Path | None:
     return dfa_dir / stamp if stamp and (dfa_dir / stamp).is_dir() else None
 
 
+# Cache folders that tools write next to their results; nothing reads them
+# back, and they can be large. df-analyze defines __JOBLIB_CACHE__ inside its
+# run directory (saving.py at the pinned commit).
+CACHE_DIRS = frozenset({"__JOBLIB_CACHE__", "__pycache__", "lightning_logs"})
+
+
+def _is_scratch(path: Path, root: Path) -> bool:
+    """A cache folder's file, or a temporary file or folder left by an
+    interrupted write (`*.tmp`, `*.part`, `name.tmp.ext`; e.g. the
+    export_model stage's model.tmp/)."""
+    for part in path.relative_to(root).parts:
+        if part in CACHE_DIRS or part.endswith((".tmp", ".part")) or ".tmp." in part:
+            return True
+    return False
+
+
 def collect_files(paths: Paths) -> list[Path]:
     """Every file of the active dataset that goes into a bundle.
 
     Included: data/processed/<dataset>/ and outputs/<dataset>/, except the
-    per-invocation run logs (outputs/<dataset>/runs) and the resume
-    bookkeeping. Of each feature set's df-analyze runs, only the latest
-    finished one (named in its df_analyze/latest.txt) is included. The raw
-    downloads are never included: everyone fetches them with the download
-    stage, which verifies their checksums.
+    per-invocation run logs (outputs/<dataset>/runs), the resume bookkeeping,
+    caches and temporary files. Of each feature set's df-analyze runs, only
+    the latest finished one (named in its df_analyze/latest.txt) is included;
+    it holds every tuned model df-analyze saved. The raw downloads are never
+    included: everyone fetches them with the download stage, which verifies
+    their checksums.
     """
-    files = _files_under(paths.processed_dir)
+    files = [
+        p for p in _files_under(paths.processed_dir)
+        if not _is_scratch(p, paths.processed_dir)
+    ]  # fmt: skip
     # Resume bookkeeping belongs to one machine's interrupted run; never share it.
     skip = (paths.runs_dir, paths.outputs_dir / CHECKPOINT_DIR)
     state = paths.outputs_dir / STATE_FILE
     for p in _files_under(paths.outputs_dir):
         if p == state or any(p.is_relative_to(d) for d in skip):
+            continue
+        if _is_scratch(p, paths.outputs_dir):
             continue
         run_dir = _df_analyze_run_dir(p)
         if run_dir is not None and run_dir != _latest_df_analyze_run(run_dir.parent):
@@ -324,7 +346,7 @@ def print_stage_status(paths: Paths) -> None:
     from fraud_detect.pipeline import STAGES  # noqa: PLC0415  (heavy imports)
 
     for n, stage in enumerate(STAGES, start=1):
-        done = all(o.exists() for o in stage.outputs(paths))
+        done = stage.is_done(paths)
         print(f"  {n:>2}. {stage.name:<18} {'done (skipped)' if done else 'will run'}")
 
 

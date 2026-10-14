@@ -29,8 +29,20 @@ INCLUDED = [
     "outputs/amazon/m1_own/reports/split_check.json",
     "outputs/amazon/m1_own/df_analyze/latest.txt",
     "outputs/amazon/m1_own/df_analyze/20260102T000000Z/results.csv",
+    # every tuned model df-analyze saved, and the exported Model A
+    "outputs/amazon/m1_own/df_analyze/20260102T000000Z/train/h/results/test00/"
+    "eval_htune_results_jsonpickle_00.json",
+    "outputs/amazon/m1_own/model/model_a.json",
+    "outputs/amazon/m1_own/model/model_a.joblib",
+    "outputs/amazon/m1_own/model/models_check.csv",
 ]
 EXCLUDED = [
+    # caches and scratch files (nothing reads them back)
+    "outputs/amazon/m1_own/df_analyze/20260102T000000Z/train/h/__JOBLIB_CACHE__/x.pkl",
+    "outputs/amazon/m1_own/model.tmp/model_a.json",
+    "outputs/amazon/m1_own/df_analyze/20260102T000000Z/model_selection_cv.csv.tmp",
+    "data/processed/amazon/nodes.tmp.parquet",
+    "data/processed/amazon/__pycache__/x.pyc",
     "data/raw/care_gnn/Amazon.mat",
     "data/processed/yelpchi/nodes.parquet",  # another dataset
     "outputs/yelpchi/reports/audit.md",
