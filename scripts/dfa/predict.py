@@ -37,7 +37,14 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from model_io import REPO_ROOT, decode_results, load_native, read_table, setup_paths
+from model_io import (
+    REPO_ROOT,
+    decode_results,
+    load_native,
+    read_table,
+    setup_paths,
+    without_checkpoint_files,
+)
 
 setup_paths()
 
@@ -86,7 +93,9 @@ def other_combination(
         raise SystemExit("models_check.csv and df-analyze's results are out of order")
     threshold = float(row["threshold"]) if row["threshold"] != "" else 0.5
     label = f"{model} ({row['selection_label']}), decoded from df-analyze's results"
-    return result.model, list(result.selected_cols), threshold, label
+    # As in the export check: never read checkpoint files outside the bundle.
+    model_obj = without_checkpoint_files(result.model)
+    return model_obj, list(result.selected_cols), threshold, label
 
 
 def main() -> int:

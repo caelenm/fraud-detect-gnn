@@ -48,6 +48,7 @@ from model_io import (
     read_target,
     save_native,
     setup_paths,
+    without_checkpoint_files,
 )
 
 setup_paths()
@@ -76,7 +77,9 @@ def matches(result: Any, entry: dict) -> bool:
 
 
 def probabilities(model: Any, X: pd.DataFrame) -> np.ndarray:
-    return np.asarray(model.predict_proba(X), dtype=float)
+    """Test probabilities as anyone with the bundle gets them (no GANDALF
+    checkpoint files; see model_io.without_checkpoint_files)."""
+    return np.asarray(without_checkpoint_files(model).predict_proba(X), dtype=float)
 
 
 def check_all(

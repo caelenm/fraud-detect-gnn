@@ -8,6 +8,7 @@ df-analyze's results (they refer to df-analyze's classes).
 
 from __future__ import annotations
 
+import io
 import os
 import sys
 from pathlib import Path
@@ -62,15 +63,48 @@ def read_target(path: Path) -> pd.Series:
     return frame.iloc[:, 0].astype(int).reset_index(drop=True).rename("target")
 
 
+def _load_tensors_on_cpu_without_cuda() -> None:
+    """jsonpickle stores torch tensors (GANDALF's weights) as torch.save bytes,
+    restored with torch.storage._load_from_bytes. Weights saved from a GPU
+    cannot be restored that way on a machine without CUDA (e.g. a Mac), and
+    one such tensor stops the whole file from decoding, so map them to the
+    CPU there."""
+    import torch  # noqa: PLC0415  (heavy; only needed here)
+
+    if torch.cuda.is_available():
+        return
+
+    def load_on_cpu(data: bytes) -> Any:
+        return torch.load(io.BytesIO(data), map_location="cpu", weights_only=False)
+
+    torch.storage._load_from_bytes = load_on_cpu
+
+
 def decode_results(path: Path) -> list[Any]:
     """Every tuned combination (df-analyze HtuneResult objects, each holding
     its model refit on the full training set) from
     eval_htune_results_jsonpickle_00.json, in the order df-analyze saved them
     (the same order as prediction_results_00.json)."""
+    _load_tensors_on_cpu_without_cuda()
     decoded = jsonpickle.decode(path.read_text(encoding="utf-8"))
     if not isinstance(decoded, dict) or "results" not in decoded:
         raise SystemExit(f"{path} does not hold df-analyze evaluation results")
     return list(decoded["results"])
+
+
+def without_checkpoint_files(model: Any) -> Any:
+    """Make a decoded df-analyze model predict only from what it holds.
+
+    df-analyze's GANDALF predicts from its best checkpoint file when that file
+    exists (in the df-analyze clone's __GANDALF_INTERNAL_LOGS__, which no
+    bundle contains), and silently from the weights it holds otherwise. This
+    forces the second, so a check on this machine gives what anyone else gets.
+    Other models are returned unchanged."""
+    trainer = getattr(model, "tuned_trainer", None)
+    callback = getattr(trainer, "checkpoint_callback", None)
+    if callback is not None and getattr(callback, "best_model_path", ""):
+        callback.best_model_path = ""
+    return model
 
 
 def save_native(estimator: Any, fmt: str, path: Path) -> None:
