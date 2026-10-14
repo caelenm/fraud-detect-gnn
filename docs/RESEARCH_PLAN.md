@@ -27,7 +27,7 @@ The data-model changes in this plan exist so those later pieces fit. Do not impl
 **Git (overrides `AGENTS.md`'s "push and open a PR" step for this plan).**
 - Create one local branch from an up-to-date `main`: `feat/review-fraud-pivot`.
 - Make small commits, one or more per milestone, each with a clear message.
-- **Do not push the branch or open a PR until the user explicitly says so.** The repository is public.
+- **Do not push the branch or open a PR until the user explicitly says so.** The repository is public. **Update 2026-10-13:** the user decided to push the branch and open its PR to `main` at the end of phase 1 ([`PHASE1_AMAZON_PLAN.md`](PHASE1_AMAZON_PLAN.md), decision 7). The branch has now been pushed and its PR opened; it is never merged by an agent.
 - Everything else in `AGENTS.md`'s git section still applies: never commit to `main`, never merge, never force-push, never tag.
 - At the end, write the PR description (what, why, how tested, leakage checklist) to `PR_DESCRIPTION.md` in the repo root. Do **not** commit that file; the user will use it when they open the PR.
 
@@ -422,17 +422,29 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
   - df-analyze kept all 32 features with our types, so no high-cardinality column was taken for an identifier.
   - Timings: 10 min in total (df-analyze 7.8 min, `select_model` 2 min).
   - Model A (LightGBM): test PR-AUC 0.831 [0.817, 0.845], AUROC 0.950; no-skill 0.145. This is above the sanity band (≈ 0.80).
+- **2026-10-13 (phase 1 decisions, [`PHASE1_AMAZON_PLAN.md`](PHASE1_AMAZON_PLAN.md)):** Amazon only; split unchanged (`n_repeats: 1`); all 25 features kept pending [#36](https://github.com/caelenm/fraud-detect-gnn/issues/36); bundles keep every tuned model and drop caches; an `export_model` stage and `scripts/dfa/predict.py` added; the branch goes to `main` through a PR (never merged by an agent).
+- **2026-10-13/14 (full Amazon run, Model 1, phase 1).** WSL2 (Debian) on a Windows laptop with an NVIDIA GeForce RTX 4060 Laptop GPU (8 GB, driver 571.96); torch 2.9.1+cu128 in df-analyze's environment; df-analyze `199e563`; seed 555; 100 trials; classifiers `lgbm, lr, catboost, gandalf, rf, knn` + dummy; `bal-acc`; `--filter-pred-classify auroc`; no wrapper selection.
+  - **Checks:** download checksums matched (`Amazon.zip` c1b7a1f8…a5b9, `Amazon.mat` 4b7e3f9c…9d63). Every §2 count matched (11,944 nodes, 8,639 labelled, 821 positive, 25 features, U-P-U 175,608 / U-S-U 3,566,479 / U-V-U 1,036,737 edges; nodes 0–3,304 unlabelled). Split 5,183 train / 3,456 test (5,008 / 3,338 groups); no group crosses train/test or folds; 293 duplicate rows (175 within train, 118 within test, 0 across). The four shortcut flags reappeared (#36). df-analyze's exported split matched ours row by row, and it kept all 25 features with our types (none dropped or coerced). `model_selection_cv.csv` scored all 28 tuned combinations (and their default settings). No sanity-band warning.
+  - **Wall-clock:** load 19 s, split 1 s, features and audit < 1 s each; df-analyze **1 h 57 min** (tuning 111.6 min: CatBoost 47.0, GANDALF 46.1, LightGBM RF 7.4, LightGBM 5.0, logistic regression 4.5, kNN 1.5, dummy 0.2); `select_model` 8 min 15 s; report and web report 4 s; `export_model` 15 s. Whole run 2 h 05 min. CatBoost and GANDALF stopped early after 51–66 trials; no search hit its time limit.
+  - **Model A: LightGBM, feature selection `none`** (all 25 features). Shared-CV PR-AUC **0.9254 ± 0.0286** (5 grouped folds). Test PR-AUC **0.9188** [95% group-bootstrap 0.8902, 0.9421], AUROC **0.9765** [0.9665, 0.9855]; no-skill PR-AUC 0.0949 (dummy 0.0957). At the out-of-fold max-F1 threshold 0.4299: F1 0.871, precision 0.913, recall 0.832 (TP 273, FP 26, FN 55, TN 3,102). The runner-up by shared CV, CatBoost with embedded selection (0.9214 ± 0.0332), is within one SD. The 10-trial CPU pilot had chosen LightGBM with embedded selection (test PR-AUC 0.920); Model A's test PR-AUC is essentially unchanged.
+  - **Saved models (`export_model`).** df-analyze's `eval_htune_results_jsonpickle_00.json` does not decode with jsonpickle as written: GANDALF's training state cannot be rebuilt (a `torch.dtype` cannot be created; the torch optimizer and Lightning internals fail in `__setstate__`), which stops the whole decode. Skipping those failures makes jsonpickle's object numbering drift, so references in every model saved after GANDALF (kNN, LightGBM, LR, RF) point at wrong objects. `scripts/dfa/model_io.py` now decodes with a tolerant unpickler that turns such references into explicit placeholders, and restores LightGBM's two shared references from their first copies. **17 of 28 combinations** load intact and reproduce df-analyze's saved test probabilities and labels exactly (max difference 0): CatBoost ×4, kNN ×4, LightGBM ×4, LightGBM RF ×4, logistic regression (`none`). Not usable from the file: GANDALF ×4 (cannot be rebuilt), dummy ×4 (random strategy: its predictions differ on every call), logistic regression ×3 (`n_iter_` cannot be rebuilt). None of these was refit. Model A decoded intact and was saved as `model_a.joblib`; reloaded, it reproduces the test probabilities to 0 and the labels exactly.
+  - **Bundle.** `pack_artifacts.py --dataset amazon`: 89 files, 54 MB, **25 MB** compressed. The largest files: `eval_htune_results_jsonpickle_00.json` 23 MB (every tuned model), `prediction_results_00.json` 8.7 MB, the graph edge lists 15 MB (`homo` 7.2 MB, `usu` 5.9 MB, `uvu` 1.9 MB, `upu` 0.3 MB), `oof_predictions.parquet` 1.9 MB, `df_analyze.log` 1.0 MB; everything else is under 1 MB (Model A's `model_a.joblib` 59 KB). df-analyze 4.1.0 wrote no `__JOBLIB_CACHE__` in this run (its use is commented out at the pinned commit), so leaving out caches and temporary files changed nothing here: the bundle was 25 MB before and after.
+  - **Round trip as a teammate (Task 6).** A fresh clone in WSL2 that only unpacked the bundle: all 89 checksums verified; `uv run run.py --dataset amazon` skipped every stage, `download` included, with no raw data present; `predict.py` reproduced Model A's saved test probabilities (max difference 1.1e-16) and CatBoost (`embed_linear`) via `--model`, also with the GPU hidden (`CUDA_VISIBLE_DEVICES=''`).
 
 ---
 
-## 12. Status and next steps (hand-off, 2026-10-08)
+## 12. Status and next steps (hand-off, 2026-10-14)
 
-**State of this branch (`feat/review-fraud-pivot`).** M0–M9 are done. Every stage runs end to end, and the Amazon pilot passed on a CPU-only cloud machine (§11). Not yet done:
-- the full runs;
-- a run on a GPU;
-- testing on macOS and WSL2.
+**State of this branch (`feat/review-fraud-pivot`).** M0–M9 are done, and phase 1 is done: the full Amazon Model 1 run on the GPU (§11), the `export_model` stage, `predict.py`, and a bundle a teammate can use without retraining. The branch has been pushed and opened as a PR to `main`. Tested on Linux (WSL2, Debian) with an NVIDIA GPU; not tested on macOS (the CPU-only decode was simulated by hiding the GPU).
 
-**Next session (local, with the GPU).** Follow `AGENTS.md`.
+**Next steps.**
+1. **One YelpChi validation run** (overnight): `uv run run.py --dataset yelpchi`. Estimated 5–8 h for df-analyze plus about 45 min for `select_model` (extrapolated). Then `export_model` and a bundle.
+2. **Model 2** (neighbour-aggregate blocks per relation, label-blind builders as in `tests/test_label_blindness.py`). Then switch Amazon to `split.n_repeats: 3` for the Model 1 vs Model 2 comparison.
+3. **#36:** the group decides whether to keep, drop, or report both ways the four Amazon features that may encode the label.
+
+The setup steps below are kept for reference.
+
+**Setup (local, with the GPU).** Follow `AGENTS.md`.
 1. Setup:
    - `git fetch origin && git checkout feat/review-fraud-pivot && uv sync`
    - df-analyze at the pinned commit:
@@ -446,7 +458,7 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
 3. `uv run run.py --dataset amazon --to audit` (minutes). Check `outputs/amazon/reports/audit.md`:
    - the counts match;
    - the four shortcut flags reappear (`own__f13`, `own__f15`, `own__f18`, `own__f19`, AUROC 0.86–0.88).
-4. **Full Amazon run:** `uv run run.py --dataset amazon`.
+4. **Full Amazon run:** `uv run run.py --dataset amazon` (done 2026-10-13: 2 h 05 min on an RTX 4060 laptop; §11).
    - Estimated 1–3 h on an RTX 4060. The pilot took 24 min with 10 trials on a CPU.
    - If it is interrupted: `uv run run.py --dataset amazon --resume`.
    - Then check that `split_check.json` and `type_check.json` exist and the report has no sanity-band warning.
@@ -454,7 +466,7 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
 5. **YelpChi, once:**
    - First `uv run run.py --dataset yelpchi --to audit` (minutes).
    - Then the full run overnight: `uv run run.py --dataset yelpchi`. Estimated 5–8 h for df-analyze plus about 45 min for `select_model`; this is extrapolated, not measured. kNN and GANDALF are the likely bottlenecks.
-6. Share the outputs with `uv run pack_artifacts.py --dataset <name>`, outside git.
+6. Share the outputs with `uv run pack_artifacts.py --dataset <name>`, outside git. The bundle includes every tuned model and the exported Model A (README, "Sharing outputs with the group").
 
 **Still open** (§10.4–6): Model 6; the flagged Amazon features; the CFPB pilot's place in the report; and which dataset is the main one (see §11).
 

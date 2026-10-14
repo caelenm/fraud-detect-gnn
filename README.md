@@ -4,7 +4,7 @@
 
 Course project for CS555: Data Mining and Machine Learning, St. Francis Xavier University (StFX).
 
-> **Status:** Model 1 (df-analyze on each node's own features) is implemented end to end for both datasets: download, load, grouped split, features, audit, df-analyze, grouped shared-CV model choice, test report with bootstrap intervals, and an HTML report. The node table, relation edge lists and feature-block interfaces that the graph models need are in place; the graph models themselves (Models 2–6) are not built yet. The working plan is [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md); its §12 lists the next steps (the full Amazon run, then one full YelpChi run, on a local GPU machine). An earlier version of this project used CFPB complaint narratives; that state is preserved at commit `3336d87` on `main`.
+> **Status:** Model 1 (df-analyze on each node's own features) is implemented end to end for both datasets: download, load, grouped split, features, audit, df-analyze, grouped shared-CV model choice, test report with bootstrap intervals, an HTML report, and a verified export of Model A. **Phase 1 (Amazon) is done:** the full run is below ([Results](#results-phase-1-amazon)), and its outputs, including every tuned model, are shared as a bundle that needs no retraining. The node table, relation edge lists and feature-block interfaces that the graph models need are in place; the graph models themselves (Models 2–6) are not built yet. The working plan is [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md); its §12 lists the next steps (one YelpChi validation run, then Model 2). An earlier version of this project used CFPB complaint narratives; that state is preserved at commit `3336d87` on `main`.
 
 ---
 
@@ -81,6 +81,22 @@ df-analyze runs six classifiers: LightGBM, logistic regression, CatBoost, GANDAL
 - **95% intervals** for Model A's test PR-AUC and AUROC come from 1,000 bootstrap resamples of **whole groups** (users or duplicate sets), seeded. The same function computes paired differences between two models on the same test nodes, which the ladder's contrasts need later. The intervals cover test-set sampling, not variation across splits (use `split.n_repeats` for that).
 - **Sanity band:** an untuned gradient-boosting model reaches a test PR-AUC of about 0.80 on YelpChi and 0.91 on Amazon. If Model A lands more than 0.05 below this, the report prints a prominent warning: assume a pipeline bug before reporting anything.
 
+## Results (phase 1, Amazon)
+
+One full Model 1 run (2026-10-13; seed 555, 100 tuning trials per model, one grouped split; details and timings in [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md) §11).
+
+| | Test PR-AUC [95% CI] | Test AUROC [95% CI] |
+|---|---|---|
+| **Model A: LightGBM, all 25 features** | **0.919** [0.890, 0.942] | **0.977** [0.967, 0.986] |
+| No-skill (test fraud rate) | 0.095 | 0.500 |
+| df-analyze's dummy baseline | 0.096 | 0.504 |
+
+- **Model A was chosen by shared, grouped 5-fold CV on the training set** (PR-AUC 0.925 ± 0.029), never by test results. CatBoost with embedded feature selection came second (0.921 ± 0.033), within one standard deviation, so the choice between the two is not decisive.
+- At the decision threshold chosen on out-of-fold training predictions (0.430), Model A flags 299 of 3,456 test users: precision 0.913, recall 0.832, F1 0.871.
+- The intervals resample whole test groups and cover test-set sampling only, not other splits or seeds. Amazon is small (3,456 test users, 328 fraudulent), and this is one split.
+- **Read these numbers with [#36](https://github.com/caelenm/fraud-detect-gnn/issues/36) in mind:** four features alone reach a univariate AUROC of 0.86–0.88 and may encode the helpfulness votes the labels come from. All 25 features are in the model until the group decides.
+- The result is inside the sanity band (≈ 0.91 for untuned gradient boosting), and the 10-trial CPU pilot gave almost the same test PR-AUC (0.920).
+
 ## Prepared for the graph models
 
 Nothing on this branch trains a GNN, but the data model is ready for one:
@@ -88,7 +104,7 @@ Nothing on this branch trains a GNN, but the data model is ready for one:
 - **Node table** `data/processed/<dataset>/nodes.parquet`: `node_id`, `label` (null when unlabelled), `is_labelled`, `group_id`, `split` (train/test/unlabelled), `cv_fold`.
 - **Relations** `data/processed/<dataset>/graph/<relation>.npz` (plus `homo`): undirected int32 edge lists with `src < dst`, no self-loops, deduplicated; `graph/manifest.json` records counts and the source checksum.
 - **Feature blocks** `data/processed/<dataset>/features/<block>.parquet` keyed by `node_id`, with columns prefixed `<block>__`. Only `own` exists so far; later blocks are e.g. `nbr_rur` and `gnnssl_rur`.
-- **Feature sets** in the config (`feature_sets:`; for example `m1_own: [own]`) are the ladder's rungs. `--set feature_set=<name>` runs stages 6–10 for one set, writing to `outputs/<dataset>/<feature_set>/`.
+- **Feature sets** in the config (`feature_sets:`; for example `m1_own: [own]`) are the ladder's rungs. `--set feature_set=<name>` runs stages 6–11 for one set, writing to `outputs/<dataset>/<feature_set>/`.
 - **Label blindness:** graph feature builders take `(features, edges)` and never labels. [`tests/test_label_blindness.py`](tests/test_label_blindness.py) holds the check every builder must pass: identical output after permuting all labels. Graph features may use the features (never labels) of all nodes, test and unlabelled ones included.
 
 ## Setup
@@ -157,8 +173,9 @@ uv run run.py --dataset yelpchi --only audit           # one stage
 | 8 | `select_model` | Refits every tuned combination on the grouped CV folds; out-of-fold probabilities; tuning budget | `model_selection_cv.csv`, `oof_predictions.parquet`, `tuning_budget.csv` |
 | 9 | `df_analyze_report` | Model A, thresholds, test metrics, bootstrap intervals, sanity band | `model_a_report.md`, `model_a_metrics.csv`, `model_a.json` |
 | 10 | `web_report` | One self-contained HTML page | `outputs/<dataset>/<feature_set>/report/index.html` |
+| 11 | `export_model` | Checks that every tuned model df-analyze saved loads and reproduces its test probabilities; saves Model A in its native format | `outputs/<dataset>/<feature_set>/model/`: `model_a.joblib` (or `.cbm`), `model_a.json`, `models_check.csv` |
 
-Paths in the table are relative to `data/processed/<dataset>/` or `outputs/<dataset>/<feature_set>/reports/` unless shown in full. Each stage can also be run on its own with `uv run scripts/NN_<stage>.py --dataset <name>`. Every invocation writes its config, seed, git commit and package versions to `outputs/<dataset>/runs/<timestamp>/`.
+Paths in the table are relative to `data/processed/<dataset>/` or `outputs/<dataset>/<feature_set>/reports/` unless shown in full. `export_model` is last on purpose: `run.py` reruns every stage after the first one with missing outputs, so adding it earlier would rerun df-analyze. Each stage can also be run on its own with `uv run scripts/NN_<stage>.py --dataset <name>`. Every invocation writes its config, seed, git commit and package versions to `outputs/<dataset>/runs/<timestamp>/`.
 
 **The web report** needs no server: open the file in a browser (from WSL: `explorer.exe outputs/amazon/m1_own/report/index.html`). It shows Model A's configuration, tuned hyperparameters, test metrics with intervals, the confusion matrix at the chosen threshold, every tuned model, the tuning budget and the run configuration. It also has two scrollable cards of the most and least confident test nodes, each with its highest-ranked features (value and training percentile). It contains row-level test data: share it only within the group, never commit or post it.
 
@@ -178,6 +195,7 @@ df-analyze's runtime grows with the number of classifiers, the trials and the nu
 - **Earlier runs:** the 18k-row CFPB run took about 4 h for df-analyze on an RTX 4060 laptop.
 - **YelpChi** (about 27.6k training rows) will take longer.
 - **Amazon** (about 5.2k) far less.
+- **Amazon full run (100 trials, RTX 4060 laptop GPU, WSL2):** 2 h 05 min in total: df-analyze 1 h 57 min (CatBoost 47 min and GANDALF 46 min of tuning; every other model under 8 min), `select_model` 8 min, `export_model` 15 s.
 - **Amazon pilot (10 trials per model, CPU only):** df-analyze 20 min (GANDALF alone 9 min), `select_model` 4.5 min. Details are in the decision log in [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md).
 
 Ask the group before any run expected to take more than about an hour.
@@ -192,7 +210,25 @@ uv run pack_artifacts.py --dataset amazon        # fraud_artifacts_amazon_<time>
 uv run unpack_artifacts.py --dataset amazon      # verifies checksums; run.py then skips finished stages
 ```
 
-A bundle holds `data/processed/<dataset>/` and `outputs/<dataset>/` (only the latest df-analyze run of each feature set), never the raw downloads or the per-invocation logs. Every file is checked against a SHA-256 manifest. If a file already exists with different contents, nothing is written unless you pass `--force`. Share bundles through OneDrive or Teams, never through the repository.
+A bundle holds `data/processed/<dataset>/` and `outputs/<dataset>/` (only the latest df-analyze run of each feature set), never the raw downloads, the per-invocation logs, caches (`__JOBLIB_CACHE__`, `lightning_logs`) or temporary files. Every file is checked against a SHA-256 manifest. If a file already exists with different contents, nothing is written unless you pass `--force`. Share bundles through OneDrive or Teams, never through the repository: they contain row-level data.
+
+**Nothing has to be retrained.** After unpacking, `uv run run.py --dataset amazon` skips every stage, `download` included (the bundle has no raw data, and none is needed). The bundle contains:
+- **every tuned model** df-analyze saved, each refit on the full training set: `eval_htune_results_jsonpickle_00.json` in the df-analyze run's `results/test00/` folder, with df-analyze's prepared feature tables (`X_train_00.csv`, `X_test_00.csv`) next to it;
+- **Model A, exported and verified** by the `export_model` stage: `outputs/<dataset>/m1_own/model/` holds the model in its library's own format (`model_a.joblib`, or `model_a.cbm` for CatBoost), `model_a.json` (input columns in order, tuned parameters, decision threshold, seed, df-analyze commit, package versions), and `models_check.csv`, which says for every tuned combination whether it loads and reproduces the test probabilities df-analyze saved.
+
+**Which saved models load.** df-analyze saves its models with jsonpickle, which cannot rebuild GANDALF's training state, and as written the whole file fails to load. `scripts/dfa/model_io.py` reads it anyway: anything it cannot rebuild, or cannot trust after the first failure, becomes an explicit placeholder, never a silently wrong object. `models_check.csv` then lists, for every tuned combination, whether it loaded intact and reproduces the test probabilities and labels df-analyze saved. On the Amazon run, 17 of 28 do (all CatBoost, kNN, LightGBM and LightGBM random forest combinations, and logistic regression without feature selection). GANDALF (cannot be rebuilt), the dummy (random strategy) and three logistic regressions (one attribute cannot be rebuilt) do not, and were not refit. Model A loads intact.
+
+Loading the models needs **df-analyze's environment** (Setup, step 2), not this project's: they were saved with its package versions. No GPU is needed: weights saved on a GPU are mapped to the CPU when there is none. `scripts/dfa/predict.py` predicts without retraining. Run it from this repository's root:
+
+```bash
+uv run --project ../df-analyze --python '>=3.13.11,<3.14' python scripts/dfa/predict.py \
+    --dataset amazon --input <run>/train/<hash>/results/test00/X_test_00.csv --out preds.csv
+# any other tuned combination that models_check.csv marks ok:
+uv run --project ../df-analyze --python '>=3.13.11,<3.14' python scripts/dfa/predict.py \
+    --dataset amazon --input <same X_test_00.csv> --out preds_rf.csv --model rf --selection pred
+```
+
+Here `<run>` is `outputs/amazon/m1_own/df_analyze/<time>`, the run named in `df_analyze/latest.txt`. `--project` uses df-analyze's environment without changing directory, so relative paths work. The input must be df-analyze's **prepared** features (its `X_train_00.csv`/`X_test_00.csv` exports, or a table with exactly Model A's input columns in order): df-analyze rescales continuous columns and encodes binary ones before modelling, so our raw `train.parquet`/`test.parquet` are not valid input. Column names and order are checked, and a mismatch stops the script. The output has `prob_fraud` and `label` (at the saved threshold, chosen on out-of-fold training predictions). The script warns if your package versions differ from those the model was saved with.
 
 ## Development
 
@@ -212,6 +248,7 @@ fraud-detect-gnn/
 ├── AGENTS.md            # rules for AI coding agents working in this repo
 ├── CLAUDE.md            # points Claude Code at AGENTS.md
 ├── docs/RESEARCH_PLAN.md
+├── docs/PHASE1_AMAZON_PLAN.md  # phase 1: Amazon Model A end to end, shareable bundle
 ├── download_dataset.sh  # runs the download stage for both datasets
 ├── run.py               # runs the pipeline stages in order
 ├── pack_artifacts.py / unpack_artifacts.py
@@ -224,13 +261,14 @@ fraud-detect-gnn/
 │   ├── columns.py       # node-table column names
 │   ├── data/            # download, .mat loading, grouped split, audit
 │   ├── features/        # own block, column types, feature blocks and sets
-│   ├── models/          # df-analyze (Model A), model choice, evaluation, repeats
+│   ├── models/          # df-analyze (Model A), model choice, evaluation, repeats, export
 │   ├── report/          # static HTML report (web.py, report.css)
 │   ├── external.py      # runs df-analyze scripts in their own environment
 │   ├── artifacts.py     # packing and unpacking output bundles
 │   ├── runstate.py      # stop/resume, atomic writes
 │   └── runlog.py        # seeds and run metadata
-├── scripts/             # NN_<stage>.py: run one stage; dfa/: scripts run in df-analyze's env
+├── scripts/             # NN_<stage>.py: run one stage
+│   └── dfa/             # run in df-analyze's env: cv_select, export_model, predict
 ├── tests/
 ├── data/                # local only, git-ignored
 └── outputs/             # local only, git-ignored
@@ -239,7 +277,7 @@ fraud-detect-gnn/
 ## Limitations
 
 - **The features are precomputed and anonymous.** We cannot inspect or change how they were built. Some relations (same product and star rating, same month, text similarity) are themselves derived from review attributes, so part of the graph is constructed rather than observed.
-- **Possible label shortcut on Amazon.** Labels come from helpfulness votes, and several features reach a univariate AUROC near 0.88. If a feature is derived from the same votes, Amazon results overstate what can be detected from behaviour. The audit flags these features; the decision on them is open.
+- **Possible label shortcut on Amazon** ([#36](https://github.com/caelenm/fraud-detect-gnn/issues/36)). Labels come from helpfulness votes, and four features (`own__f13`, `own__f15`, `own__f18`, `own__f19`) reach a univariate AUROC of 0.86–0.88 on their own. If they are derived from the same votes, Amazon results overstate what can be detected from behaviour. All 25 features are kept until the group decides, so the phase 1 results include them.
 - **df-analyze's internal CV is not grouped.** Its tuning and feature-selection folds are random, so a YelpChi user's reviews can sit on both sides of them. This makes its tuning scores optimistic, which is one more reason Model A is chosen by our grouped CV. The test set is grouped, so final scores are not affected; the tuned hyperparameters may still be slightly over-fitted to user-level leakage.
 - **df-analyze scales continuous features over train and test together,** and infers types on both. No labels are used, but test rows influence the clip points. Our own type decisions use training nodes only.
 - **Single split by default.** Bootstrap intervals cover test-set sampling only. Amazon is small, and its scores vary across splits; `split.n_repeats` measures this at the cost of one df-analyze run per repeat.

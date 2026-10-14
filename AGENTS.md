@@ -23,7 +23,7 @@ This is a **public** repository. Everything pushed is visible to anyone.
 
 - **Never commit to `main`.** Never push to `main`.
 - For every task, create a branch from an up-to-date `main`, named `feat/<short-name>`, `fix/<short-name>`, `exp/<short-name>`, or `docs/<short-name>`.
-- Push the branch and open a pull request with `gh pr create`. **All changes reach `main` through a PR.** If the user or the active plan says not to push yet (plan §0 does for `feat/review-fraud-pivot`), commit locally and wait until the user says so.
+- Push the branch and open a pull request with `gh pr create`. **All changes reach `main` through a PR.** If the user or the active plan says not to push yet, commit locally and wait until the user says so. (`feat/review-fraud-pivot` was held back by plan §0 until the 2026-10-13 decision to open its PR.)
 - **Never merge PRs** (including your own), never force-push, never rewrite published history, never delete remote branches, and never create tags or releases.
 - Keep PRs small and focused on one stage or concern.
 - The PR description must include: what changed, why, how it was tested, and the [leakage checklist](#leakage-checklist-include-in-every-pr-that-touches-data-features-or-models) if the PR touches data, features, or models.
@@ -33,7 +33,7 @@ This is a **public** repository. Everything pushed is visible to anyone.
 
 - Anything under `data/` or `outputs/` (raw `.zip`/`.mat` files, node tables, edge lists, feature blocks, df-analyze results, reports, checkpoints)
 - Row-level data from any dataset (node features, labels, IDs with their labels), including in tests, fixtures, notebooks, logs, or PR descriptions. Tests use small synthetic data built in memory (see [Required tests](#required-tests)).
-- Model weights (`*.pt`, `*.pth`, `*.ckpt`), `*.mat`, `*.parquet`, `*.npy`, `*.npz`, `*.pkl`, or large CSVs
+- Model weights and saved models (`*.pt`, `*.pth`, `*.ckpt`, `*.joblib`, `*.cbm`), `*.mat`, `*.parquet`, `*.npy`, `*.npz`, `*.pkl`, or large CSVs
 - `.env` files, API keys, tokens, or credentials
 - Notebook outputs (clear outputs before committing)
 - Any file larger than about 1 MB without asking first
@@ -49,7 +49,7 @@ There are two separate environments. Do not try to merge them.
 | Environment | Location | Python | Used for |
 |---|---|---|---|
 | Project | this repo, managed by `uv` | 3.13 pinned in `.python-version`; `requires-python >=3.11` | download, loading, splits, features, audit, reports (later: graph features and GNNs) |
-| df-analyze | separate clone at the commit in `configs/default.yaml` (`df_analyze.commit`; path in `DF_ANALYZE_DIR`, default `../df-analyze`) | **3.13 only** (`>=3.13.11,<3.14`; its locked catboost has no 3.14 wheels), via df-analyze's own `uv sync --locked` | `df-analyze.py` and `scripts/dfa/cv_select.py` only |
+| df-analyze | separate clone at the commit in `configs/default.yaml` (`df_analyze.commit`; path in `DF_ANALYZE_DIR`, default `../df-analyze`) | **3.13 only** (`>=3.13.11,<3.14`; its locked catboost has no 3.14 wheels), via df-analyze's own `uv sync --locked` | `df-analyze.py` and `scripts/dfa/*.py` only (`cv_select.py`, `export_model.py`, `predict.py`, `cuda_info.py`); loading any saved model |
 
 - uv 0.9.16 or newer is required (older releases cannot download Python 3.13.11 for df-analyze); `fraud_detect.external` enforces this before calling df-analyze.
 - Run project code with `uv run ...`. Add dependencies with `uv add`, never with plain `pip install`. Commit `uv.lock`.
@@ -80,7 +80,7 @@ These are hard invariants. If a change would violate one, stop and ask.
 
 ## Pipeline stages
 
-`run.py` is the single entry point and runs the stages in order for one dataset: `uv run run.py --dataset yelpchi` (or `dataset:` in the config); `uv run run.py --list` shows the stages. Stages are defined in `src/fraud_detect/pipeline.py` (`STAGES`), and each also has a thin wrapper `scripts/NN_<stage>.py`. Each stage reads from and writes to `data/` or `outputs/` under the dataset's subfolder and must not depend on in-memory state from a previous stage. **Add every new stage to `STAGES` (and a matching script) so `run.py` stays the throughline.** Stages 6–10 run for one feature set (`--set feature_set=m1_own`, the default) and write under `outputs/<dataset>/<feature_set>/`.
+`run.py` is the single entry point and runs the stages in order for one dataset: `uv run run.py --dataset yelpchi` (or `dataset:` in the config); `uv run run.py --list` shows the stages. Stages are defined in `src/fraud_detect/pipeline.py` (`STAGES`), and each also has a thin wrapper `scripts/NN_<stage>.py`. Each stage reads from and writes to `data/` or `outputs/` under the dataset's subfolder and must not depend on in-memory state from a previous stage. **Add every new stage to `STAGES` (and a matching script) so `run.py` stays the throughline.** Stages 6–11 run for one feature set (`--set feature_set=m1_own`, the default) and write under `outputs/<dataset>/<feature_set>/`.
 
 **Every stage must be safe to stop at any moment** (Ctrl+C, crash, shutdown), so runs can continue with `uv run run.py --dataset <name> --resume` (see `src/fraud_detect/runstate.py`; the run state is per dataset):
 - **Write outputs atomically:** write to a temporary file, then rename, so a half-written file never counts as a finished stage. A stage's declared outputs must appear only when it has fully succeeded.
@@ -100,6 +100,9 @@ Stages (plan §7):
 8. **`select_model`:** in df-analyze's environment (`scripts/dfa/cv_select.py`), refit every tuned combination on the saved grouped folds and score the held-out folds from probabilities (PR-AUC, AUROC, balanced accuracy, Brier), with tuned and default settings; save out-of-fold probabilities and the tuning budget. Stops if any tuned model cannot be scored.
 9. **`df_analyze_report`:** choose Model A by shared-CV PR-AUC only; its decision threshold from its out-of-fold training predictions (max F1 by default); test metrics for every tuned combination at that threshold and at 0.5; group-bootstrap 95% intervals for Model A; a warning if Model A falls more than 0.05 PR-AUC below the sanity band (plan §2).
 10. **`web_report`:** `outputs/<dataset>/<feature_set>/report/index.html`, a self-contained static page (no scripts, no external requests) built by `src/fraud_detect/report/web.py`. Its confidence cards show only **test** nodes (ID, label, score, top features by value). Every value inserted into the page must be HTML-escaped.
+11. **`export_model`:** in df-analyze's environment (`scripts/dfa/export_model.py`), decode every tuned model df-analyze saved (`eval_htune_results_jsonpickle_00.json`, each refit on the full training set) and record in `models_check.csv` whether it is a fitted model and reproduces df-analyze's saved test probabilities. Save Model A (as chosen by `df_analyze_report`) in its native format with `model_a.json` under `outputs/<dataset>/<feature_set>/model/`; if it did not decode, refit it with `refit_tuned` and its tuned parameters, and stop and ask if it still does not reproduce its probabilities. Never refit any other combination. Decode only with `scripts/dfa/model_io.decode_results`, never plain `jsonpickle.decode`: GANDALF's saved state cannot be rebuilt, and after the first failure jsonpickle's references drift silently, so that decoder turns untrusted references into placeholders and a combination counts as usable only if it is intact and reproduces df-analyze's saved test probabilities and labels. **It stays last in `STAGES`**: `run.py` reruns every stage after the first one with missing outputs, so an earlier position would rerun df-analyze. `scripts/dfa/predict.py` loads the export (or any combination that passed the check) without retraining.
+
+A clone that only unpacked a bundle has no raw data; the `download` stage counts as done when the `load` stage's outputs exist, so such a clone skips every stage.
 
 Still to do (later branches; tracked as GitHub issues):
 
@@ -115,7 +118,7 @@ Ask before implementing anything that commits to one of these (plan §10):
 
 - **Model 6:** amending invariant 1 to allow supervised out-of-fold GNN features.
 - **Which dataset is the main one.** Plan v2 calls YelpChi the main dataset. On 2026-10-08 YelpChi was described as being for pipeline validation, so whether Amazon takes the main role in the ladder's contrasts is for the group to confirm.
-- **Features flagged by the audit as possible shortcuts:** keep, drop, or report results both ways. Never drop a feature without asking.
+- **Features flagged by the audit as possible shortcuts:** keep, drop, or report results both ways ([#36](https://github.com/caelenm/fraud-detect-gnn/issues/36) for Amazon). Never drop a feature without asking.
 - **The earlier pilot's place in the final report** (the state at `main@3336d87`, see the decision log): omit it, or mention it as the motivating pilot.
 - Adding any architecture beyond GraphSAGE and its graph-free control, any dataset beyond YelpChi and Amazon, or any text data.
 
@@ -133,6 +136,13 @@ Also ask before changing the metrics, the split proportions or grouping rule, th
   - The **decision threshold** is **max F1 on out-of-fold training predictions** (`report.threshold_rule: max_f1`).
   - **`split.n_repeats` stays 1 for Model 1.** Set it to 3 for Amazon once Model 2 exists, so compared rungs share the same splits.
   - Long runs happen on the group's local GPU machine (plan §12).
+- **2026-10-13 (phase 1, [`docs/PHASE1_AMAZON_PLAN.md`](docs/PHASE1_AMAZON_PLAN.md)):**
+  - Phase 1 is **Amazon only**, on this branch: the full Model 1 run, then a shareable bundle. YelpChi code stays but is not run in phase 1.
+  - The **split stays as it is** (seeded, stratified, grouped by duplicate rows; 60/40; 5 grouped CV folds), with `split.n_repeats: 1`.
+  - **All 25 Amazon features are kept** pending issue [#36](https://github.com/caelenm/fraud-detect-gnn/issues/36) (`own__f13`, `own__f15`, `own__f18`, `own__f19` reach a univariate AUROC of 0.86–0.88). Do not drop or change a feature without the group.
+  - **Bundles keep every tuned model** (the latest df-analyze run, with its jsonpickle results) plus the exported Model A, and **drop caches and temporary files** (`__JOBLIB_CACHE__`, `lightning_logs`, `__pycache__`, `*.tmp`, `*.part`).
+  - The **`export_model` stage and `scripts/dfa/predict.py`** were added, so teammates load and use the models in df-analyze's environment without retraining.
+  - The branch **goes to `main` through a PR** (this overrides plan §0's "do not push"); never merge it.
 - **Kept from earlier work:** Model A uses df-analyze classifiers **`lgbm`, `lr`, `catboost`, `gandalf`, `rf`, `knn`** (plus the automatic dummy; `mlp` is left out because it is CPU-only in df-analyze and adds about 4 h per run), 100 tuning trials, tuned on **balanced accuracy** for every model (`htune_cls_metric: bal-acc`; not `acc`, which suits imbalanced classes poorly; not `auroc`, which df-analyze applies inconsistently across models), with `--filter-pred-classify auroc` for the prediction-based feature filter; Model A is **chosen by shared 5-fold CV PR-AUC on the training set** (`select_model`), not by df-analyze's tuning score; CatBoost and GANDALF run on the GPU; `--df-tests-method` is never passed (it hits an enum bug in df-analyze 4.1.0).
 
 ## Code conventions
