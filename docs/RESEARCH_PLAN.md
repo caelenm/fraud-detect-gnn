@@ -488,6 +488,20 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
     - Without the #36 features, own features fall to 0.524, and both graph rungs add 0.15–0.19 with intervals well above 0. There, untuned DGI embeddings are worse than neighbour means.
     - The #36 features account for about 0.39 of Model 1's test PR-AUC. At each side's own threshold the differences are small and mixed: gains come from ranking, not from more frauds caught.
     - The pilot `m1` (0.917) is close to the 100-trial `m1_own` (0.919). Never compare a pilot rung with the 100-trial run.
+- **2026-10-19 (progress-report runs: decision rules written BEFORE the runs).** The user approved a plan of under 3 h for defensible initial results. Fixed in advance; nothing here is chosen from test results.
+  - **Runs:** the six pilot rungs (`pilot_m1_own`, `pilot_m2_own_nbr`, `pilot_m5_own_gnnssl` and their `_no36` versions) on split repeats 1 and 2 (`split.n_repeats: 3`; split seed = 555 + 1000 × repeat), with the same pilot budget and settings as repeat 0. The two repeats run in parallel on the same machine; no tuning search came near df-analyze's time limit.
+  - **Embedding settings stay at the plan's defaults,** which were fixed before any result. A settings grid is run only as a training-CV sensitivity check and changes nothing.
+  - **Contrasts:** m2 − m1, m5 − m1 and m5 − m2, for both variants.
+  - **Verdict rule:** a gain is **supported** if all three hold:
+    1. test ΔPR-AUC > 0 on all 3 splits;
+    2. the mean Δ across splits exceeds its SD across splits;
+    3. the Nadeau–Bengio corrected paired t-test over the 15 CV folds (3 splits × 5 grouped folds; training data only; per-fold PR-AUC of each side's Model A from its out-of-fold predictions) gives two-sided p < 0.05.
+
+    Otherwise a positive mean Δ is reported as **not distinguishable from zero**, and a negative one as **worse**.
+  - **Controls (training CV only, the probe):**
+    - **Random-graph control:** each relation's edges are rewired at random, keeping degrees approximately, and nbr/gnnssl are rebuilt from them. If the graph gain comes from real structure, it should mostly vanish.
+    - **Single-feature #36 check:** how well each of `own__f13`, `own__f15`, `own__f18`, `own__f19` alone separates the training classes.
+  - **Reporting:** both variants always side by side. Model A choice, thresholds and every setting come from training data only.
 
 ---
 
