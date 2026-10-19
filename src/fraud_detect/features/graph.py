@@ -61,11 +61,13 @@ def build_nbr_block(
     features: pd.DataFrame,
     edges_by_relation: Mapping[str, np.ndarray],
     log1p_degree: bool = True,
+    name: str = C.NBR_BLOCK,
 ) -> pd.DataFrame:
-    """The `nbr` block: for each relation in order, the mean of every own
-    feature over a node's neighbours (0 without neighbours) and, if
-    `log1p_degree`, log1p of its degree. One row per node."""
-    x, names = own_matrix(features)
+    """The `nbr` block (or `name`, e.g. nbr_no36 when built from fewer own
+    features): for each relation in order, the mean of every own feature over
+    a node's neighbours (0 without neighbours) and, if `log1p_degree`, log1p of
+    its degree. One row per node."""
+    x, features_used = own_matrix(features)
     n = len(x)
     sep = C.BLOCK_SEPARATOR
     out: dict[str, np.ndarray] = {C.NODE_ID: np.arange(n, dtype=np.int64)}
@@ -76,8 +78,8 @@ def build_nbr_block(
         means = np.divide(
             sums, degree[:, None], out=np.zeros_like(sums), where=degree[:, None] > 0
         )
-        for j, name in enumerate(names):
-            out[f"{C.NBR_BLOCK}{sep}{relation}_mean_{name}"] = means[:, j]
+        for j, feature in enumerate(features_used):
+            out[f"{name}{sep}{relation}_mean_{feature}"] = means[:, j]
         if log1p_degree:
-            out[f"{C.NBR_BLOCK}{sep}{relation}_log1p_degree"] = np.log1p(degree)
+            out[f"{name}{sep}{relation}_log1p_degree"] = np.log1p(degree)
     return pd.DataFrame(out)

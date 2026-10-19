@@ -41,6 +41,7 @@ from sklearn.preprocessing import StandardScaler
 
 from fraud_detect import columns as C
 from fraud_detect.config import REPO_ROOT, Paths, get_paths
+from fraud_detect.features import blocks
 from fraud_detect.features.graph import adjacency
 from fraud_detect.models import df_analyze_report, evaluation
 from fraud_detect.report import web
@@ -876,14 +877,20 @@ def build(
 def _embedding_section(
     a: Side, b: Side, p: Paths, relations: list[str], seed: int
 ) -> str:
-    uses = [s.feature_set for s in (a, b) if C.GNNSSL_BLOCK in s.blocks]
-    raw_path = p.raw_embedding(relations[0])
+    # The side using GNN embeddings (B if both do), its gnnssl block and the own
+    # columns that block was built from (all, or fewer for a variant).
+    users = [s for s in (b, a) if blocks.blocks_of_kind(s.blocks, C.GNNSSL_BLOCK)]
     intro = '<section><h2>Embedding view</h2><p class="lede">A picture, not evidence. '
-    if not uses or not raw_path.is_file():
+    block = blocks.blocks_of_kind(users[0].blocks, C.GNNSSL_BLOCK)[0] if users else ""
+    raw_path = p.raw_embedding(relations[0], block) if users else None
+    if raw_path is None or not raw_path.is_file():
         return (
             intro + "Neither feature set uses the self-supervised GNN embeddings "
             "(gnnssl), so there is nothing to show here.</p></section>"
         )
+    side = users[0]
+    uses = [f"{side.feature_set} ({block})"]
+    own_cols = [c for c in side.train.columns if c.startswith(C.OWN_BLOCK + "__")]
     nodes = pd.read_parquet(p.nodes).sort_values(C.NODE_ID)
     split = nodes[C.SPLIT].astype("string").fillna("").to_numpy(dtype=str)
     labelled = np.isin(split, [C.TRAIN, C.TEST])
@@ -892,15 +899,16 @@ def _embedding_section(
     fit = split == C.TRAIN
     raw = np.load(raw_path)
     own_block = pd.read_parquet(p.block_file(C.OWN_BLOCK)).sort_values(C.NODE_ID)
-    own_x = own_block.drop(columns=C.NODE_ID).to_numpy(dtype=float)
+    own_x = own_block[own_cols].to_numpy(dtype=float)
     rel = relation_label(relations[0])
     emb = projection_2d(raw, fit, seed, scale=False)[labelled]
     own_xy = projection_2d(own_x, fit, seed, scale=True)[labelled]
     return (
         intro + f"Every labelled node in two 2-D projections, each a PCA fit on the "
         f"training nodes only: left, the {escape(rel)} DGI embedding "
-        f"(gnn_embed/{escape(raw_path.name)}, before the PCA that compresses it for "
-        "df-analyze); right, the own features (standardised on training nodes). "
+        f"({escape(raw_path.parent.name)}/{escape(raw_path.name)}, before the PCA "
+        f"that compresses it for df-analyze); right, the {len(own_cols)} own features "
+        "it was built from (standardised on training nodes). "
         "Filled: training nodes; hollow: test nodes; red: fraud; blue: not fraud. "
         "Unlabelled nodes are left out; points beyond the central 98% are drawn on "
         f"the edge. Used by: {escape(', '.join(uses))}.</p>"

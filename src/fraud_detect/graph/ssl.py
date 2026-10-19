@@ -308,10 +308,15 @@ def standardized_features(own_features: pd.DataFrame, fit_mask: np.ndarray) -> n
 # PCA per relation -> the gnnssl block
 # --------------------------------------------------------------------------
 def pca_block(
-    embeddings: Mapping[str, np.ndarray], fit_mask: np.ndarray, k: int, seed: int
+    embeddings: Mapping[str, np.ndarray],
+    fit_mask: np.ndarray,
+    k: int,
+    seed: int,
+    name: str = C.GNNSSL_BLOCK,
 ) -> tuple[pd.DataFrame, dict[str, dict[str, Any]]]:
-    """gnnssl__<relation>_pc01..pcK for each relation in order, from a PCA fit
-    on the training nodes' embeddings, and each PCA's explained variance."""
+    """<name>__<relation>_pc01..pcK (name gnnssl, or e.g. gnnssl_no36) for each
+    relation in order, from a PCA fit on the training nodes' embeddings, and
+    each PCA's explained variance."""
     n = len(fit_mask)
     out: dict[str, np.ndarray] = {C.NODE_ID: np.arange(n, dtype=np.int64)}
     info = {}
@@ -322,8 +327,8 @@ def pca_block(
         pca = fit_pca(z, fit_mask, k, seed)
         scores = pca.transform(z)
         for j in range(k):
-            name = f"{C.GNNSSL_BLOCK}{C.BLOCK_SEPARATOR}{relation}_pc{j + 1:0{width}d}"
-            out[name] = scores[:, j].astype(np.float64)
+            column = f"{name}{C.BLOCK_SEPARATOR}{relation}_pc{j + 1:0{width}d}"
+            out[column] = scores[:, j].astype(np.float64)
         ratio = pca.explained_variance_ratio_
         info[relation] = {
             "explained_variance_ratio": [float(v) for v in ratio],

@@ -7,12 +7,19 @@ import json
 import numpy as np
 import pandas as pd
 import pytest
+import yaml
 from helpers import assert_label_blind, fake_dataset
 from synthetic import fake_feature_graph
 
 from fraud_detect import columns as C
 from fraud_detect.cli import main
-from fraud_detect.config import get_paths
+from fraud_detect.config import (
+    DEFAULT_CONFIG,
+    ConfigError,
+    get_paths,
+    load_config,
+    with_dataset,
+)
 from fraud_detect.features import blocks
 from fraud_detect.features.graph import build_nbr_block
 from fraud_detect.models.df_analyze import df_analyze_names
@@ -91,6 +98,56 @@ def test_graph_block_names_reach_df_analyze_without_collisions():
         r = relations[0]
         assert renamed[f"nbr__{r}_mean_f00"] == f"nbr_{r}_mean_f00"
         assert renamed[f"gnnssl__{r}_pc01"] == f"gnnssl_{r}_pc01"
+
+
+def with_variant(path, config) -> dict:
+    """The fake dataset's config plus a variant x01 (without own__f01) and
+    feature sets using it, written back to `path`."""
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["feature_variants"]["x01"] = ["own__f01"]
+    raw["feature_sets"]["t1_x01"] = ["own_x01"]
+    raw["feature_sets"]["t2_x01"] = ["own_x01", "nbr_x01"]
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    return {**config, "feature_variants": raw["feature_variants"],
+            "feature_sets": raw["feature_sets"]}  # fmt: skip
+
+
+def test_a_variant_leaves_its_columns_out_of_own_and_graph_inputs(tmp_path):
+    path, config = fake_dataset(tmp_path, n_nodes=120)
+    config = with_variant(path, config)
+    args = ["--config", str(path), "--to", "df_analyze_input", "--set"]
+    assert main([*args, "feature_set=m2_own_nbr"]) == 0
+    assert main([*args, "feature_set=t2_x01"]) == 0
+    p = get_paths({**config, "feature_set": "t2_x01"})
+    full = pd.read_parquet(p.block_file("nbr"))
+    reduced = pd.read_parquet(p.block_file("nbr_x01"))
+    assert "nbr_x01__aaa_mean_f01" not in reduced.columns
+    assert reduced.shape[1] == full.shape[1] - 2  # one mean per relation fewer
+    assert np.allclose(reduced["nbr_x01__aaa_mean_f00"], full["nbr__aaa_mean_f00"])
+    train = pd.read_parquet(p.df_analyze_input_dir / "train.parquet")
+    assert "own_f01" not in train.columns and "own_f00" in train.columns
+    assert not [c for c in train.columns if c.endswith("_f01")]
+    info = json.loads((p.df_analyze_input_dir / "feature_set.json").read_text())
+    assert info["blocks"] == ["own_x01", "nbr_x01"]
+    # own_x01 alone: own's columns and types, minus the variant's.
+    assert main([*args, "feature_set=t1_x01"]) == 0
+    t1 = get_paths({**config, "feature_set": "t1_x01"})
+    assert pd.read_parquet(t1.df_analyze_input_dir / "test.parquet").shape[1] == 5
+
+
+def test_unknown_blocks_and_variants_are_refused():
+    with pytest.raises(blocks.BlockError, match="Unknown block"):
+        blocks.parse_block("xyz_no36")
+    assert blocks.parse_block("gnnssl_no36") == ("gnnssl", "no36")
+    with pytest.raises(blocks.BlockError, match="feature_variants"):
+        blocks.excluded_columns("own_zz", {"no36": ["own__f13"]})
+    own, _ = five_nodes()
+    with pytest.raises(blocks.BlockError, match="lacks"):
+        blocks.own_view(own, "own_no36", {"no36": ["own__f13"]})
+    config = load_config(DEFAULT_CONFIG)
+    config["feature_sets"]["bad"] = ["own_nope"]
+    with pytest.raises(ConfigError, match="feature_variants"):
+        with_dataset(config, "amazon")
 
 
 def test_neighbour_agg_stage_builds_the_block_only_when_used(tmp_path):

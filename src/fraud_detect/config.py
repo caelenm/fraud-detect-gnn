@@ -81,7 +81,27 @@ def with_dataset(config: dict[str, Any], dataset: str | None) -> dict[str, Any]:
             f"Unknown feature set {feature_set!r}; choose from "
             + ", ".join(out["feature_sets"])
         )
+    check_feature_sets(out)
     return out
+
+
+BLOCK_KINDS = ("own", "nbr", "gnnssl")  # see features/blocks.py
+
+
+def check_feature_sets(config: dict[str, Any]) -> None:
+    """Every block of every feature set is a known kind, optionally with a
+    variant listed in feature_variants (e.g. own_no36, gnnssl_no36)."""
+    variants = config.get("feature_variants") or {}
+    for name, block_names in config["feature_sets"].items():
+        for block in block_names:
+            kind, _, variant = block.partition("_")
+            if kind not in BLOCK_KINDS:
+                raise ConfigError(f"Feature set {name}: unknown block {block!r}")
+            if variant and variant not in variants:
+                raise ConfigError(
+                    f"Feature set {name}: block {block!r} needs feature_variants."
+                    f"{variant}"
+                )
 
 
 def dataset_config(config: dict[str, Any]) -> dict[str, Any]:
@@ -171,11 +191,16 @@ class Paths:
     @property
     def gnn_embed_dir(self) -> Path:
         """Raw self-supervised embeddings and their training log (gnn_embed)."""
-        return self.outputs_dir / "gnn_embed"
+        return self.embed_dir("gnnssl")
 
-    def raw_embedding(self, relation: str) -> Path:
+    def embed_dir(self, block: str) -> Path:
+        """gnn_embed's folder for one gnnssl block: gnn_embed/ for `gnnssl`,
+        gnn_embed_<variant>/ for `gnnssl_<variant>`."""
+        return self.outputs_dir / ("gnn_embed" + block.removeprefix("gnnssl"))
+
+    def raw_embedding(self, relation: str, block: str = "gnnssl") -> Path:
         """One relation's raw (n_nodes, out_dim) DGI embedding, before PCA."""
-        return self.gnn_embed_dir / f"raw_{relation}.npy"
+        return self.embed_dir(block) / f"raw_{relation}.npy"
 
     @property
     def probe_dir(self) -> Path:

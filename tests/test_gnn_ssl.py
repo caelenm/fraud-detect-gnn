@@ -13,6 +13,7 @@ from dataclasses import replace
 import numpy as np
 import pandas as pd
 import pytest
+import yaml
 from helpers import assert_label_blind, fake_dataset
 from synthetic import fake_feature_graph
 
@@ -132,6 +133,30 @@ def test_gnn_embed_stage_writes_block_spec_meta_and_raw_embeddings(tmp_path):
     assert np.load(p.raw_embedding("aaa")).shape == (120, 8)
     train = pd.read_parquet(p.df_analyze_input_dir / "train.parquet")
     assert "gnnssl_bbb_pc03" in train.columns
+
+
+def test_a_variant_block_never_sees_the_left_out_columns(tmp_path):
+    path, config = fake_dataset(tmp_path, n_nodes=120)
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["feature_variants"]["x01"] = ["own__f01"]
+    raw["feature_sets"]["t5_x01"] = ["own_x01", "gnnssl_x01"]
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    base = ["--config", str(path), *SMALL, "--to", "gnn_embed", "--set"]
+    assert main([*base, "feature_set=m5_own_gnnssl"]) == 0
+    assert main([*base, "feature_set=t5_x01"]) == 0
+    p = get_paths({**config, "feature_sets": raw["feature_sets"],
+                   "feature_set": "t5_x01"})  # fmt: skip
+    meta = json.loads((p.embed_dir("gnnssl_x01") / "meta.json").read_text())
+    assert meta["own_columns_left_out"] == ["own__f01"]
+    assert (
+        "own__f01" not in meta["own_columns_used"] and len(meta["own_columns_used"]) == 4
+    )
+    block = pd.read_parquet(p.block_file("gnnssl_x01"))
+    assert list(block.columns)[1] == "gnnssl_x01__aaa_pc01"
+    assert p.raw_embedding("aaa", "gnnssl_x01").parent.name == "gnn_embed_x01"
+    # The all-features embeddings are separate and differ.
+    full = np.load(p.raw_embedding("aaa"))
+    assert not np.array_equal(full, np.load(p.raw_embedding("aaa", "gnnssl_x01")))
 
 
 def test_gnn_embed_resumes_after_an_interruption(tmp_path, monkeypatch):

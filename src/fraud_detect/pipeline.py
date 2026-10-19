@@ -367,31 +367,48 @@ def run_audit(ctx: Context) -> None:
 GNN_EMBED_META = "meta.json"
 
 
-def block_outputs(block: str) -> Callable[[Paths], list[Path]]:
-    """A block stage's outputs: the block and its column types (written last),
-    or nothing when the active feature set does not use the block."""
+def block_outputs(kind: str) -> Callable[[Paths], list[Path]]:
+    """A block stage's outputs: each block of this kind that the active feature
+    set uses (e.g. nbr, nbr_no36) and its column types (written last); nothing
+    when the feature set uses none."""
 
     def outputs(p: Paths) -> list[Path]:
-        if block not in p.blocks:
-            return []
-        return [p.block_file(block), p.block_spec(block)]
+        names = blocks.blocks_of_kind(p.blocks, kind)
+        return [f for b in names for f in (p.block_file(b), p.block_spec(b))]
 
     return outputs
 
 
 def gnn_embed_outputs(p: Paths) -> list[Path]:
-    found = block_outputs(C.GNNSSL_BLOCK)(p)
-    return [*found, p.gnn_embed_dir / GNN_EMBED_META] if found else []
+    names = blocks.blocks_of_kind(p.blocks, C.GNNSSL_BLOCK)
+    meta = [p.embed_dir(b) / GNN_EMBED_META for b in names]
+    return [*block_outputs(C.GNNSSL_BLOCK)(p), *meta]
 
 
-def _uses_block(ctx: Context, block: str) -> bool:
-    if block in ctx.paths.blocks:
-        return True
-    print(
-        f"Feature set {ctx.config['feature_set']} does not use the {block!r} block, "
-        f"so there is nothing to build (run with --set feature_set=<a set using it>)."
-    )
-    return False
+def _blocks_to_build(ctx: Context, kind: str) -> list[str]:
+    names = blocks.blocks_of_kind(ctx.paths.blocks, kind)
+    if not names:
+        print(
+            f"Feature set {ctx.config['feature_set']} uses no {kind!r} block, so there "
+            "is nothing to build (run with --set feature_set=<a set using it>)."
+        )
+    return names
+
+
+def _variants(ctx: Context) -> dict[str, list[str]]:
+    return dict(ctx.config.get("feature_variants") or {})
+
+
+def _own_input(ctx: Context, block: str) -> pd.DataFrame:
+    """The own features a graph block is built from: all of them, or without
+    the columns its variant leaves out (e.g. issue #36 for *_no36)."""
+    p = ctx.paths
+    _require(p.block_file(C.OWN_BLOCK), p.train_ids)
+    try:
+        return blocks.own_view(pd.read_parquet(p.block_file(C.OWN_BLOCK)), block,
+                               _variants(ctx))  # fmt: skip
+    except blocks.BlockError as e:
+        raise StageError(str(e)) from e
 
 
 def _relation_edges(ctx: Context) -> dict[str, np.ndarray]:
@@ -428,28 +445,30 @@ def _type_counts(spec: dict[str, Any]) -> str:
 
 
 def run_neighbour_agg(ctx: Context) -> None:
-    if not _uses_block(ctx, C.NBR_BLOCK):
-        return
     p, cfg = ctx.paths, ctx.config["neighbour_agg"]
     if list(cfg["statistics"]) != ["mean"]:
         raise StageError(
             f"neighbour_agg.statistics is {cfg['statistics']}; only [mean] is "
             "implemented (1-hop max and 2-hop means are later ablations)."
         )
-    _require(p.block_file(C.OWN_BLOCK), p.train_ids)
-    own_block = pd.read_parquet(p.block_file(C.OWN_BLOCK))
+    names = _blocks_to_build(ctx, C.NBR_BLOCK)
+    if not names:
+        return
     edges = _relation_edges(ctx)
-    try:
-        block = graph.build_nbr_block(
-            own_block, edges, log1p_degree=bool(cfg["log1p_degree"])
+    for name in names:
+        own_input = _own_input(ctx, name)
+        try:
+            block = graph.build_nbr_block(
+                own_input, edges, log1p_degree=bool(cfg["log1p_degree"]), name=name
+            )
+        except ValueError as e:
+            raise StageError(str(e)) from e
+        spec = _write_block(p, name, block)
+        print(
+            f"{name} block: {block.shape[1] - 1} features from {own_input.shape[1] - 1} "
+            f"own features for {len(block):,} nodes over relations {', '.join(edges)}; "
+            f"types from training nodes: {_type_counts(spec)}"
         )
-    except ValueError as e:
-        raise StageError(str(e)) from e
-    spec = _write_block(p, C.NBR_BLOCK, block)
-    print(
-        f"nbr block: {block.shape[1] - 1} features for {len(block):,} nodes over "
-        f"relations {', '.join(edges)}; types from training nodes: {_type_counts(spec)}"
-    )
 
 
 def split_masks(nodes: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
@@ -466,23 +485,31 @@ def split_masks(nodes: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
     return split == C.TRAIN, split != C.TEST
 
 
-def gnn_embed_fingerprint(ctx: Context) -> str:
-    """What the gnnssl block depends on besides the data: its settings, the
-    seed and the relations. Recorded in meta.json and checked before use."""
-    return config_fingerprint(
-        {
-            "gnn_embed": ctx.config["gnn_embed"],
-            "seed": ctx.seed,
-            "relations": list(ctx.data["relations"]),
-        }
-    )
+def gnn_embed_fingerprint(ctx: Context, block: str = C.GNNSSL_BLOCK) -> str:
+    """What a gnnssl block depends on besides the data: its settings, the seed,
+    the relations and the own columns its variant leaves out. Recorded in
+    meta.json and checked before use."""
+    try:
+        excluded = blocks.excluded_columns(block, _variants(ctx))
+    except blocks.BlockError as e:
+        raise StageError(str(e)) from e
+    fields = {
+        "gnn_embed": ctx.config["gnn_embed"],
+        "seed": ctx.seed,
+        "relations": list(ctx.data["relations"]),
+    }
+    if excluded:  # keeps the fingerprint of the all-features block unchanged
+        fields["excluded_own_columns"] = excluded
+    return config_fingerprint(fields)
 
 
 def run_gnn_embed(ctx: Context) -> None:
-    """Self-supervised DGI embeddings, one unit per relation (graph/ssl.py),
-    then PCA per relation into the gnnssl block. The raw embeddings stay in
-    outputs/<dataset>/gnn_embed/ for the comparison page."""
-    if not _uses_block(ctx, C.GNNSSL_BLOCK):
+    """Self-supervised DGI embeddings for each gnnssl block the feature set
+    uses (graph/ssl.py): one unit per (block, relation), then PCA per
+    relation. The raw embeddings stay in outputs/<dataset>/gnn_embed[_variant]/
+    for the comparison page."""
+    names = _blocks_to_build(ctx, C.GNNSSL_BLOCK)
+    if not names:
         return
     try:
         from fraud_detect.graph import ssl  # noqa: PLC0415  (needs the gnn extra)
@@ -497,27 +524,43 @@ def run_gnn_embed(ctx: Context) -> None:
         device = ssl.resolve_device(cfg.device)
     except (TypeError, ValueError) as e:
         raise StageError(f"gnn_embed settings: {e}") from e
-    _require(p.block_file(C.OWN_BLOCK), p.train_ids)
     fit_mask, loss_mask = split_masks(read_nodes(p))
-    own_block = pd.read_parquet(p.block_file(C.OWN_BLOCK))
     edges = _relation_edges(ctx)
+    store = ctx.unit_store("gnn_embed")
+    for name in names:
+        _embed_block(ctx, ssl, cfg, device, name, store, fit_mask, loss_mask, edges)
+
+
+def _embed_block(
+    ctx: Context,
+    ssl: Any,
+    cfg: Any,
+    device: str,
+    name: str,
+    store: UnitStore,
+    fit_mask: np.ndarray,
+    loss_mask: np.ndarray,
+    edges: dict[str, np.ndarray],
+) -> None:
+    """One gnnssl block: DGI per relation (a saved unit each), PCA, meta.json,
+    then the block and its spec."""
+    p = ctx.paths
+    own_input = _own_input(ctx, name)
     try:
-        x = ssl.standardized_features(own_block, fit_mask)
+        x = ssl.standardized_features(own_input, fit_mask)
         ssl.check_masks(len(x), fit_mask, loss_mask)
     except ValueError as e:
         raise StageError(str(e)) from e
     print(
-        f"DGI per relation on {device}: {len(x):,} nodes; loss over "
-        f"{int(loss_mask.sum()):,} non-test nodes; scaler and PCA fit on "
-        f"{int(fit_mask.sum()):,} training nodes",
+        f"{name}: DGI per relation on {device} from {x.shape[1]} own features; "
+        f"{len(x):,} nodes; loss over {int(loss_mask.sum()):,} non-test nodes; "
+        f"scaler and PCA fit on {int(fit_mask.sum()):,} training nodes",
         flush=True,
     )
-
-    store = ctx.unit_store("gnn_embed")
     embeddings: dict[str, np.ndarray] = {}
     logs: dict[str, dict[str, Any]] = {}
     for relation, rel_edges in edges.items():
-        unit, path = f"relation/{relation}", p.raw_embedding(relation)
+        unit, path = f"{name}/{relation}", p.raw_embedding(relation, name)
         if store.done(unit) and path.is_file():
             logs[relation] = store.load(unit)["log"]
             embeddings[relation] = np.load(path)
@@ -537,13 +580,15 @@ def run_gnn_embed(ctx: Context) -> None:
 
     try:
         block, pca_info = ssl.pca_block(
-            embeddings, fit_mask, cfg.pca_components, cfg.seed
+            embeddings, fit_mask, cfg.pca_components, cfg.seed, name=name
         )
     except ValueError as e:
         raise StageError(str(e)) from e
     versions = package_versions()
     meta = {
-        "block": C.GNNSSL_BLOCK,
+        "block": name,
+        "own_columns_used": [c for c in own_input.columns if c != C.NODE_ID],
+        "own_columns_left_out": blocks.excluded_columns(name, _variants(ctx)),
         "method": "Deep Graph Infomax (torch_geometric.nn.DeepGraphInfomax), one "
         "model per relation, no labels",
         "encoder": f"{cfg.layers} rounds of GCN-normalised propagation over A + I, "
@@ -556,38 +601,38 @@ def run_gnn_embed(ctx: Context) -> None:
         "n_fit_nodes": int(fit_mask.sum()),
         "n_loss_nodes": int(loss_mask.sum()),
         "config": asdict(cfg),
-        "config_sha256": gnn_embed_fingerprint(ctx),
+        "config_sha256": gnn_embed_fingerprint(ctx, name),
         "versions": {
             k: versions[k] for k in ("torch", "torch-geometric") if k in versions
         },
         "cuda_device": ssl.device_name(device),
         "relations": {r: {**logs[r], **pca_info[r]} for r in edges},
-        "raw_embeddings": {r: p.raw_embedding(r).name for r in edges},
+        "raw_embeddings": {r: p.raw_embedding(r, name).name for r in edges},
         "columns": [c for c in block.columns if c != C.NODE_ID],
         "created_utc": datetime.now(UTC).isoformat(timespec="seconds"),
     }
-    atomic_write_json(p.gnn_embed_dir / GNN_EMBED_META, meta)
-    spec = _write_block(p, C.GNNSSL_BLOCK, block)
+    atomic_write_json(p.embed_dir(name) / GNN_EMBED_META, meta)
+    spec = _write_block(p, name, block)
     explained = ", ".join(
         f"{r} {pca_info[r]['explained_variance_total']:.0%}" for r in edges
     )
     print(
-        f"gnnssl block: {block.shape[1] - 1} features for {len(block):,} nodes; PCA "
+        f"{name} block: {block.shape[1] - 1} features for {len(block):,} nodes; PCA "
         f"variance kept per relation: {explained}; types from training nodes: "
         f"{_type_counts(spec)}"
     )
 
 
-def check_gnn_embed_settings(ctx: Context) -> None:
-    """Warn when the gnnssl block was built with other gnn_embed settings, seed
-    or relations than the current config (rerun gnn_embed with --force)."""
-    meta_path = ctx.paths.gnn_embed_dir / GNN_EMBED_META
+def check_gnn_embed_settings(ctx: Context, block: str) -> None:
+    """Warn when a gnnssl block was built with other gnn_embed settings, seed,
+    relations or left-out columns than the current config."""
+    meta_path = ctx.paths.embed_dir(block) / GNN_EMBED_META
     _require(meta_path)
-    if _read_json(meta_path).get("config_sha256") != gnn_embed_fingerprint(ctx):
+    if _read_json(meta_path).get("config_sha256") != gnn_embed_fingerprint(ctx, block):
         print(
-            "WARNING: the gnnssl block was built with different gnn_embed settings, "
-            "seed or relations than the current config. Rebuild it with "
-            f"`uv run run.py --dataset {ctx.dataset} --only gnn_embed --force "
+            f"WARNING: the {block} block was built with different gnn_embed settings, "
+            "seed, relations or left-out columns than the current config. Rebuild it "
+            f"with `uv run run.py --dataset {ctx.dataset} --only gnn_embed --force "
             f"--set feature_set={ctx.config['feature_set']}` if that was not intended."
         )
 
@@ -608,7 +653,7 @@ def column_types(p: Paths, block_names: list[str]) -> dict[str, dict[str, Any]]:
     _require(p.column_spec)
     types = dict(_read_json(p.column_spec)["columns"])
     for name in block_names:
-        if name != C.OWN_BLOCK:
+        if blocks.parse_block(name)[0] != C.OWN_BLOCK:  # own_<variant>: own's types
             _require(p.block_spec(name))
             types.update(_read_json(p.block_spec(name))["columns"])
     return types
@@ -619,10 +664,10 @@ def run_df_analyze_input(ctx: Context) -> None:
     _require(p.train_ids, p.test_ids, p.column_spec)
     nodes = read_nodes(p)
     names = feature_set_blocks(ctx)
-    if C.GNNSSL_BLOCK in names:
-        check_gnn_embed_settings(ctx)
+    for name in blocks.blocks_of_kind(names, C.GNNSSL_BLOCK):
+        check_gnn_embed_settings(ctx, name)
     try:
-        features = blocks.load_feature_set(p.features_dir, names)
+        features = blocks.load_feature_set(p.features_dir, names, _variants(ctx))
         train_ids, test_ids = pd.read_csv(p.train_ids), pd.read_csv(p.test_ids)
         train, test = blocks.model_tables(features, train_ids, test_ids)
     except blocks.BlockError as e:

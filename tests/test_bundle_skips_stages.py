@@ -79,3 +79,6 @@ def test_a_new_feature_set_runs_only_its_block_and_the_model_stages(tmp_path):
     assert planned("m2_own_nbr") == ["neighbour_agg", "gnn_embed", *model_stages]
     # The same blocks under another name: only the model stages.
     assert planned("pilot_m1_own") == model_stages
+    # own_no36 is a view of own: nothing to build either.
+    assert planned("m1_own_no36") == model_stages
+    assert planned("m5_own_gnnssl_no36") == ["gnn_embed", *model_stages]

@@ -96,6 +96,23 @@ feature_sets:
   pilot_m1_own: [own]
   pilot_m2_own_nbr: [own, nbr]
   pilot_m5_own_gnnssl: [own, gnnssl]
+  # Issue #36, decided 2026-10-19: report every rung both ways. The _no36 sets
+  # leave out the four possible label-shortcut features everywhere: own_no36 is
+  # the own block without them, and nbr_no36 / gnnssl_no36 are built from that
+  # reduced input (so the GNN never sees them either).
+  m1_own_no36: [own_no36]
+  m2_own_nbr_no36: [own_no36, nbr_no36]
+  m5_own_gnnssl_no36: [own_no36, gnnssl_no36]
+  pilot_m1_own_no36: [own_no36]
+  pilot_m2_own_nbr_no36: [own_no36, nbr_no36]
+  pilot_m5_own_gnnssl_no36: [own_no36, gnnssl_no36]
+
+# Input variants: a block named <kind>_<variant> (own_no36, nbr_no36,
+# gnnssl_no36) is built from the own features without these columns.
+feature_variants:
+  # Amazon only: univariate AUROC 0.86-0.88 on its training nodes; they may
+  # encode the helpfulness votes the labels come from (issue #36).
+  no36: [own__f13, own__f15, own__f18, own__f19]
 
 neighbour_agg:
   # Model 2's `nbr` block. For each relation of the dataset (not homo): the
@@ -126,8 +143,10 @@ gnn_embed:
   patience: 20
   # PCA of each relation's 64-d embedding: 3 x 8 = 24 columns on Amazon.
   pca_components: 8
-  # auto: CUDA if torch can use it, else the CPU. Or cpu / cuda.
-  device: auto
+  # cpu (decided 2026-10-19): bit-identical embeddings for a given seed, and
+  # under a minute on Amazon. CUDA's sparse products differ by ~1e-7 between
+  # runs. auto: CUDA if torch can use it, else the CPU; or cuda.
+  device: cpu
   # Fraction of U-S-U edges kept (about 7.1M directed; sampled once, seeded);
   # 1.0 keeps all. If CUDA runs out of memory, that relation is retried on the
   # CPU (logged in meta.json); lower this only if the CPU is too slow.
