@@ -515,6 +515,13 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
   A direct helpful-ratio column would reach AUROC ≈ 1.0 on labelled users, so none of the four is the ratio itself.
 
   **Recommended reading** (not yet decided by the group): don't headline 0.919 (likely leakage-inflated); report 0.518 as a conservative interim figure; the headline should be a run without every column shown to be vote-derived, which keeps the rating features. The checks that settle it are in §12. Published Amazon results built on these 25 features would inherit the same issue; the research cites CARE-GNN's own AUCs (Dou et al. 2020, Table 3) as an example, not verified here.
+- **2026-10-19 (issue #36: how published work handles these features; second research pass, not exhaustive).**
+  - **All 25 features everywhere:** every paper found uses all 25 features (CARE-GNN, DIGNN, HA-GNN, a generative semi-supervised GAD paper; DGL and GADBench list 25). None drops columns or raises leakage. One noise-robustness paper (arXiv:2505.00946) lists Amazon with 24 dimensions; typo or dropped column, unverified.
+  - **Fraud rate convention:** 6.87% = 821/11,944, counting unlabelled users as non-fraud; 9.5% = 821/8,639, labelled users only, which is our convention.
+  - **Features vs graph:** BWGNN notes that an SVM beats many GNNs on Amazon, and another paper says Amazon's anomalies show mainly in raw features, with low correlation to the graph. Both fit a feature shortcut, though neither gives a reason. A CS224W blog post reports the opposite.
+  - **What the label means:** GADBench describes the label as users paid to write fake reviews; CARE-GNN and DGL define it by helpfulness votes. So "fraud" here means "downvoted".
+  - **Consequence:** published Amazon numbers (e.g. PC-GNN's AUROC 95.86) come from all 25 features and are comparable only to our all-features runs, not to the without-#36 ones.
+  - **Recommended reporting:** the all-features result for comparability with the literature; a leak-controlled result as the one we trust, once the vote columns are identified (§12, step 0).
 - **2026-10-19 (random-graph control, training CV only, split 0; `probe/random_graph_control.csv`).** Each relation's edges were rewired at random, keeping degrees approximately (85–92% of edges kept after dropping self-loops and repeats); nbr and gnnssl were rebuilt and probed.
   - **All features:** own 0.907; + nbr: real graph 0.935, random 0.932; + gnnssl: real 0.934, random 0.927. The small gain mostly does not need the real edges.
   - **Without #36:** own 0.500; + nbr: real 0.704, random 0.613; + gnnssl: real 0.672, random 0.590. About half the gain needs the real edges; the rest comes from degree and the extra columns alone.
