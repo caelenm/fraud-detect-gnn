@@ -499,6 +499,22 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
   - `export_model`: 17 of 28 combinations load and reproduce their test probabilities (the same pattern as `m1_own`: GANDALF, the dummy and three logistic regressions do not). Model A loads.
   - **Training-only single-feature check** (`probe/shortcut_check.csv`): best single-threshold balanced accuracy `f13` 0.835, `f15` 0.842, `f18` 0.844, `f19` 0.893. `f19` alone reaches PR-AUC 0.80; it is a 0–199 integer, higher means fraud.
   - **Still open for #36:** what the four features are (Zhang et al., SIGIR 2020; the CARE-GNN preprocessing).
+- **2026-10-19 (issue #36: literature check of what the four features are).** A separate research session read the primary sources. **Sources state:**
+  - the label rule (> 80% helpful votes = benign, < 20% = fraudulent; CARE-GNN §4.1.1);
+  - that the 25 features come from Zhang et al. (SIGIR 2020, arXiv:2005.10150), whose Table 1 lists feature *groups*, among them 12 helpful/unhelpful-vote statistics (totals, ratios, means, median/min/max). Expanded literally the groups give 36 scalars, so CARE-GNN used a subset and the table cannot give the column order;
+  - that Zhang et al. used Movies & TV (labels at 0.7 / 0.3, ≥ 20 votes), not Musical Instruments, so CARE-GNN recomputed the features itself;
+  - that no column order is published: CARE-GNN's README and paper, issue #2 (asked, unanswered for Amazon), DGL and GADBench all say only "25 handcrafted features". The repository's `amazon_preprocess.py` could not be opened from that session.
+
+  **Inferred from our distribution statistics** (confidence in brackets):
+  - `f19`: a helpfulness-vote count, most likely total unhelpful votes (medium) → leakage by construction;
+  - `f15`: median rating, since 9 distinct values = {1, 1.5, …, 5} (medium-high);
+  - `f18`: mean rating (medium);
+  - `f13`: share of 4–5 star ratings (medium-low);
+  - other 21 columns: unidentified, and more vote-derived columns are likely among them.
+
+  A direct helpful-ratio column would reach AUROC ≈ 1.0 on labelled users, so none of the four is the ratio itself.
+
+  **Recommended reading** (not yet decided by the group): don't headline 0.919 (likely leakage-inflated); report 0.518 as a conservative interim figure; the headline should be a run without every column shown to be vote-derived, which keeps the rating features. The checks that settle it are in §12. Published Amazon results built on these 25 features would inherit the same issue; the research cites CARE-GNN's own AUCs (Dou et al. 2020, Table 3) as an example, not verified here.
 - **2026-10-19 (random-graph control, training CV only, split 0; `probe/random_graph_control.csv`).** Each relation's edges were rewired at random, keeping degrees approximately (85–92% of edges kept after dropping self-loops and repeats); nbr and gnnssl were rebuilt and probed.
   - **All features:** own 0.907; + nbr: real graph 0.935, random 0.932; + gnnssl: real 0.934, random 0.927. The small gain mostly does not need the real edges.
   - **Without #36:** own 0.500; + nbr: real 0.704, random 0.613; + gnnssl: real 0.672, random 0.590. About half the gain needs the real edges; the rest comes from degree and the extra columns alone.
@@ -525,6 +541,14 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
 **Phase 2 (2026-10-19, branch `feat/gnn-embeddings`, local commits, not pushed).** Models 2 (`nbr`) and 5 (`gnnssl`) are implemented as feature blocks, each also without the four #36 features (`_no36`), with the comparison page (`scripts/compare_report.py`) and a CV probe. The Amazon pilot (six runs: three rungs × two variants, 10 trials, 3 classifiers) and its comparison pages are in §11. Tested on Linux (WSL2) with an NVIDIA GPU; 173 tests pass with the `gnn` extra, and without it the GNN tests are skipped.
 
 **Next steps (phase 3; ask before starting):**
+0. **Settle issue #36 locally first** (training/labelled rows, aggregates only, minutes of CPU; scripts in `scripts/`, outputs under `outputs/amazon/`):
+    - (a) for every non-negative column c, does c / (c + f19) give < 0.2 for every fraud user and > 0.8 for every benign one? If so, c = helpful votes and f19 = unhelpful votes: leakage proven. Also check whether min(c + f19) ≥ 20, a minimum-vote filter;
+    - (b) f15 ∈ {1, 1.5, …, 5}, f18 ∈ [1, 5], Spearman(f15, f18) > 0.8, and f18 / f13 against any five rating-level count columns (f18 = Σk·n_k / Σn_k, f13 = (n_4 + n_5) / Σn_k);
+    - (c) sort all 25 columns into rating / vote / time / text families by such identities;
+    - (d) read CARE-GNN's `amazon_preprocess.py` at `a64ff75` in a clone outside this repo;
+    - (e) optionally rebuild the per-user statistics from McAuley & Leskovec's 2013 Musical Instruments reviews (SNAP, about 20 MB) and compare the distributions; that is distribution-level evidence only, since IDs are anonymised.
+
+    Then, with the group, add a variant without every vote-family column (likely keeping f13, f15, f18) and run all rungs on it. That is the candidate Amazon headline.
 1. Choose the embedding settings on training data only: a small grid (dim 16/32/64, epochs 100/300, PCA k 4/8/16), scored by the probe on the grouped CV folds. Two relations hit the 300-epoch cap.
 2. Full-budget runs of `m2_own_nbr`, `m5_own_gnnssl` and the three `_no36` rungs, on the same machine as `m1_own`; about 2 h each.
 3. `split.n_repeats: 3` for every compared rung, with the scaler and PCA refit per split. Report the per-repeat Δ and the Nadeau–Bengio corrected t-test over the 15 paired CV folds.

@@ -98,7 +98,7 @@ One full Model 1 run (2026-10-13; seed 555, 100 tuning trials per model, one gro
 - **Read these numbers with [#36](https://github.com/caelenm/fraud-detect-gnn/issues/36) in mind:** four features alone reach a univariate AUROC of 0.86–0.88 and may encode the helpfulness votes the labels come from.
   - The same full Model A without them scores 0.518, a paired difference of **−0.401** [−0.450, −0.347] on the same test users.
   - On training users only, `own__f19` alone separates the classes with 0.89 balanced accuracy (PR-AUC 0.80).
-  - Results are reported both ways. Which way is "right" depends on what the four features are, which is not yet confirmed from the paper.
+  - Results are reported both ways. A literature check (2026-10-19; [Limitations](#limitations)) found no public column list. The best-supported reading: `f19` is a helpfulness-vote count, which would leak part of the label, while `f13`, `f15`, `f18` are star-rating statistics. So 0.919 is likely inflated by leakage, and 0.518 is a conservative interim figure.
 - The result is inside the sanity band (≈ 0.91 for untuned gradient boosting), and the 10-trial CPU pilot gave almost the same test PR-AUC (0.920).
 
 ## Results (phase 2 pilot, Amazon)
@@ -371,6 +371,17 @@ fraud-detect-gnn/
 
 - **The features are precomputed and anonymous.** We cannot inspect or change how they were built. Some relations (same product and star rating, same month, text similarity) are themselves derived from review attributes, so part of the graph is constructed rather than observed.
 - **Possible label shortcut on Amazon** ([#36](https://github.com/caelenm/fraud-detect-gnn/issues/36)). Labels come from helpfulness votes, and four features (`own__f13`, `own__f15`, `own__f18`, `own__f19`) reach a univariate AUROC of 0.86–0.88 on their own. If they are derived from the same votes, Amazon results overstate what can be detected from behaviour. Phase 1 used all 25. From phase 2 on, every rung is reported both ways (decided 2026-10-19): with all 25 features, and without the four (`_no36`, also left out of the GNN input).
+  - **What the four probably are** (literature check, 2026-10-19). Neither CARE-GNN (Dou et al. 2020), its repository and issues, DGL nor GADBench documents the column order of `Amazon.mat`. The features come from Zhang et al. (SIGIR 2020), Table 1, which lists feature *groups*, including 12 helpful/unhelpful-vote statistics, and expands to more than 25 scalars. CARE-GNN recomputed them on Musical Instruments themselves (Zhang et al. used Movies & TV). Inferred from the distributions, **not documented**:
+    - `f19`: a vote count, most likely total unhelpful votes. It is part of the ratio that defines the label, so it would be leakage by construction.
+    - `f15`: median star rating (9 values = 1, 1.5, …, 5).
+    - `f18`: mean star rating.
+    - `f13`: share of 4–5 star ratings.
+
+    The three rating features are not computed from votes. Rating extremity predicts downvotes, which is what "fraud" means here.
+  - **Consequences:**
+    - 0.919 is likely inflated by leakage; so are published Amazon results that use all 25 features.
+    - 0.518 drops three probably legitimate features, and may keep other vote-derived columns with weaker individual signal.
+    - The defensible headline is a run without every column shown to come from votes. Local checks that settle this, starting with "is some column c such that c / (c + f19) reproduces the label rule?", are listed in `docs/RESEARCH_PLAN.md` §12.
 - **GNN embedding settings are untuned** (64-d, up to 300 epochs, 8 PCA components per relation, the plan's defaults). Some relations were still improving at 300 epochs. Choosing them, on training CV only, is phase 3.
 - **The comparison is one split and one seed,** and the pilot uses a reduced budget (10 trials, 3 classifiers); see the pilot section.
 - **df-analyze's internal CV is not grouped.** Its tuning and feature-selection folds are random, so a YelpChi user's reviews can sit on both sides of them. This makes its tuning scores optimistic, which is one more reason Model A is chosen by our grouped CV. The test set is grouped, so final scores are not affected; the tuned hyperparameters may still be slightly over-fitted to user-level leakage.

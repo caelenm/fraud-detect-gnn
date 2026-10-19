@@ -122,7 +122,7 @@ Ask before implementing anything that commits to one of these (plan §10):
 
 - **Model 6:** amending invariant 1 to allow supervised out-of-fold GNN features.
 - **Which dataset is the main one.** Plan v2 calls YelpChi the main dataset. On 2026-10-08 YelpChi was described as being for pipeline validation, so whether Amazon takes the main role in the ladder's contrasts is for the group to confirm.
-- **Features flagged by the audit as possible shortcuts:** for Amazon ([#36](https://github.com/caelenm/fraud-detect-gnn/issues/36)) the user decided on 2026-10-19 to **report both ways** (see the decision log); keep #36 open until the group has seen both. Never drop a feature without asking.
+- **Features flagged by the audit as possible shortcuts:** for Amazon ([#36](https://github.com/caelenm/fraud-detect-gnn/issues/36)) the user decided on 2026-10-19 to **report both ways** (see the decision log); keep #36 open until the group has seen both. A literature check (`docs/RESEARCH_PLAN.md` §11, 2026-10-19) suggests, without documentation, that `f19` is a helpfulness-vote count (leakage) and `f13`/`f15`/`f18` are rating statistics. Which variant is the headline, and whether to add a variant without every vote-derived column, is for the group after the local checks in §12. Never drop a feature without asking.
 - **The earlier pilot's place in the final report** (the state at `main@3336d87`, see the decision log): omit it, or mention it as the motivating pilot.
 - Adding any architecture beyond GraphSAGE and its graph-free control, any dataset beyond YelpChi and Amazon, or any text data.
 
