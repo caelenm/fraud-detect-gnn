@@ -61,6 +61,39 @@ def training_rows(
     return x, y, fold_of.loc[ids].to_numpy(dtype=int), columns
 
 
+def single_feature_check(
+    own: pd.DataFrame, train_ids: pd.DataFrame, columns: Sequence[str]
+) -> pd.DataFrame:
+    """How well each column alone separates the TRAINING classes: AUROC and
+    PR-AUC of the column oriented so that higher means fraud, and the best
+    balanced accuracy of a single threshold on it (issue #36)."""
+    table = own.set_index(C.NODE_ID).loc[train_ids[C.NODE_ID].to_numpy()]
+    y = train_ids[C.LABEL].to_numpy(dtype=int)
+    rows = []
+    for col in columns:
+        v = table[col].to_numpy(dtype=float)
+        sign = 1.0 if roc_auc_score(y, v) >= 0.5 else -1.0
+        score = sign * v
+        best = 0.0
+        for t in np.unique(score):
+            pred = score >= t
+            tpr = pred[y == 1].mean()
+            tnr = (~pred[y == 0]).mean()
+            best = max(best, (tpr + tnr) / 2)
+        rows.append(
+            {
+                "column": col,
+                "direction": "higher = fraud" if sign > 0 else "lower = fraud",
+                "auroc": float(roc_auc_score(y, score)),
+                "pr_auc": float(average_precision_score(y, score)),
+                "best_threshold_balanced_accuracy": float(best),
+                "n_unique": int(len(np.unique(v))),
+                "n_train": len(y),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def cv_scores(x: np.ndarray, y: np.ndarray, fold: np.ndarray, seed: int) -> dict:
     """Mean and SD (ddof=1, as select_model) of the held-out folds' PR-AUC and
     AUROC for one fixed HistGradientBoostingClassifier per fold."""

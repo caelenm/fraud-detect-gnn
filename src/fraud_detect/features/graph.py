@@ -43,6 +43,25 @@ def adjacency(edges: np.ndarray, n_nodes: int) -> sp.csr_matrix:
     return a
 
 
+def rewire_edges(edges: np.ndarray, n_nodes: int, seed: int) -> np.ndarray:
+    """A random graph with (nearly) the same degrees, for a negative control.
+
+    Every edge end ("stub") is shuffled and consecutive stubs are paired, so
+    each node keeps its degree; self-loops and repeated pairs are then dropped,
+    which loses a few edges on dense relations. Returns an edge list in the
+    load stage's format (src < dst, int32)."""
+    stubs = np.concatenate([edges[0], edges[1]]).astype(np.int64)
+    rng = np.random.default_rng(seed)
+    stubs = stubs[rng.permutation(len(stubs))]
+    pairs = stubs[: len(stubs) // 2 * 2].reshape(-1, 2).T
+    pairs = np.sort(pairs, axis=0)
+    pairs = pairs[:, pairs[0] != pairs[1]]
+    out = np.unique(pairs, axis=1).astype(np.int32)
+    if out.size and out.max() >= n_nodes:
+        raise ValueError("Rewired edges refer to nodes outside the graph")
+    return out
+
+
 def own_matrix(features: pd.DataFrame) -> tuple[np.ndarray, list[str]]:
     """The own block as a matrix in node order (row i = node i), and its
     feature names without the block prefix (f00, f01, ...)."""

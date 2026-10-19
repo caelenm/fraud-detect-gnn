@@ -21,7 +21,9 @@ from fraud_detect.config import (
     with_dataset,
 )
 from fraud_detect.features import blocks
+from fraud_detect.features import graph as graph_module
 from fraud_detect.features.graph import build_nbr_block
+from fraud_detect.models import probe
 from fraud_detect.models.df_analyze import df_analyze_names
 
 
@@ -83,6 +85,28 @@ def test_nbr_block_is_label_blind_valid_and_complete():
     blocks.validate_block(C.NBR_BLOCK, block)  # prefixed, numeric, no nulls
     assert len(block) == len(own) and block[C.NODE_ID].is_unique
     assert block.shape[1] == 1 + 2 * (3 + 1)
+
+
+def test_rewiring_keeps_degrees_roughly_and_changes_partners():
+    _, _, edges = fake_feature_graph(n=300, width=2, seed=3)
+    e = edges["aaa"]
+    r = graph_module.rewire_edges(e, 300, seed=1)
+    assert np.array_equal(r, graph_module.rewire_edges(e, 300, seed=1))  # seeded
+    assert (r[0] < r[1]).all() and r.dtype == np.int32
+    assert r.shape[1] >= 0.95 * e.shape[1]  # few lost to self-loops / repeats
+    deg = np.bincount(e.ravel(), minlength=300)
+    deg_r = np.bincount(r.ravel(), minlength=300)
+    assert np.abs(deg - deg_r).sum() <= 2 * (e.shape[1] - r.shape[1])
+    shared = {tuple(p) for p in e.T} & {tuple(p) for p in r.T}
+    assert len(shared) < 0.1 * e.shape[1]
+
+
+def test_single_feature_check_uses_training_rows_only():
+    own = pd.DataFrame({C.NODE_ID: range(6), "own__f00": [0, 1, 5, 6, 100, -100.0]})
+    train = pd.DataFrame({C.NODE_ID: [0, 1, 2, 3], C.LABEL: [0, 0, 1, 1]})
+    out = probe.single_feature_check(own, train, ["own__f00"]).iloc[0]
+    assert out["auroc"] == 1.0 and out["best_threshold_balanced_accuracy"] == 1.0
+    assert out["n_train"] == 4 and out["direction"] == "higher = fraud"
 
 
 def test_graph_block_names_reach_df_analyze_without_collisions():

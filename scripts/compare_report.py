@@ -41,6 +41,12 @@ def main(argv: list[str] | None = None) -> int:
         help="group-bootstrap resamples (default %(default)s)",
     )
     parser.add_argument(
+        "--repeat",
+        type=int,
+        default=0,
+        help="split repeat (0 = the usual folders; k = <dataset>_repeat<k>)",
+    )
+    parser.add_argument(
         "--random-cards",
         type=int,
         default=compare.N_RANDOM_CARDS,
@@ -53,7 +59,11 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     start = time.monotonic()
     try:
-        config = with_dataset(load_config(args.config), args.dataset)
+        config = load_config(args.config)
+        config["split"]["n_repeats"] = max(int(config["split"]["n_repeats"]),
+                                           args.repeat + 1)  # fmt: skip
+        config["split"]["repeat"] = args.repeat
+        config = with_dataset(config, args.dataset)
         result = compare.build(
             config, args.a, args.b, n_resamples=args.resamples,
             n_random_cards=args.random_cards,
