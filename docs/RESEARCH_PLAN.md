@@ -488,6 +488,21 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
     - Without the #36 features, own features fall to 0.524, and both graph rungs add 0.15–0.19 with intervals well above 0. There, untuned DGI embeddings are worse than neighbour means.
     - The #36 features account for about 0.39 of Model 1's test PR-AUC. At each side's own threshold the differences are small and mixed: gains come from ranking, not from more frauds caught.
     - The pilot `m1` (0.917) is close to the 100-trial `m1_own` (0.919). Never compare a pilot rung with the 100-trial run.
+- **2026-10-19 (issue #36: the full Model A without the four features).** The issue asks for Model A rerun "on the same split" without the four features. This is that run: `m1_own_no36`, the same configuration as `m1_own` (6 classifiers, 100 trials, `bal-acc`, seed 555, split 0), on the same machine, run alone.
+  - **Checks:** df-analyze's exported split matched ours row by row; it kept all 21 features with our types. No search hit its time limit (24 "early stop", 4 "all trials").
+  - **Wall-clock:** df-analyze 1 h 02 min, `select_model` 6 min; 1 h 09 min in total. The 25-feature run took 2 h 05 min, mostly because CatBoost tuned faster here.
+  - **Model A:** LightGBM, embedded (linear) selection. Shared-CV PR-AUC 0.570 ± 0.043.
+  - **Test:** PR-AUC **0.518** [0.465, 0.576] and AUROC 0.889 [0.868, 0.907]. At the out-of-fold threshold 0.234: precision 0.471, recall 0.677, F1 0.556 (TP 222, FP 249, FN 106).
+  - **Versus `m1_own` (0.919)** on the same test users: paired ΔPR-AUC **−0.401** [−0.450, −0.347]; 0% of 2,000 group resamples had the 21-feature model ahead (`compare/m1_own__vs__m1_own_no36/`).
+  - The pilot-budget version gave 0.524, so the budget barely matters here.
+  - The sanity-band warning is expected; the band describes all 25 features.
+  - `export_model`: 17 of 28 combinations load and reproduce their test probabilities (the same pattern as `m1_own`: GANDALF, the dummy and three logistic regressions do not). Model A loads.
+  - **Training-only single-feature check** (`probe/shortcut_check.csv`): best single-threshold balanced accuracy `f13` 0.835, `f15` 0.842, `f18` 0.844, `f19` 0.893. `f19` alone reaches PR-AUC 0.80; it is a 0–199 integer, higher means fraud.
+  - **Still open for #36:** what the four features are (Zhang et al., SIGIR 2020; the CARE-GNN preprocessing).
+- **2026-10-19 (random-graph control, training CV only, split 0; `probe/random_graph_control.csv`).** Each relation's edges were rewired at random, keeping degrees approximately (85–92% of edges kept after dropping self-loops and repeats); nbr and gnnssl were rebuilt and probed.
+  - **All features:** own 0.907; + nbr: real graph 0.935, random 0.932; + gnnssl: real 0.934, random 0.927. The small gain mostly does not need the real edges.
+  - **Without #36:** own 0.500; + nbr: real 0.704, random 0.613; + gnnssl: real 0.672, random 0.590. About half the gain needs the real edges; the rest comes from degree and the extra columns alone.
+  - The embedding sensitivity grid was stopped to free the CPU for the runs and was not completed. Split repeats 1–2 were paused after one finished run (`pilot_m1_own`, split 1) and remain "later"; they can be continued with `--resume`.
 - **2026-10-19 (progress-report runs: decision rules written BEFORE the runs).** The user approved a plan of under 3 h for defensible initial results. Fixed in advance; nothing here is chosen from test results.
   - **Runs:** the six pilot rungs (`pilot_m1_own`, `pilot_m2_own_nbr`, `pilot_m5_own_gnnssl` and their `_no36` versions) on split repeats 1 and 2 (`split.n_repeats: 3`; split seed = 555 + 1000 × repeat), with the same pilot budget and settings as repeat 0. The two repeats run in parallel on the same machine; no tuning search came near df-analyze's time limit.
   - **Embedding settings stay at the plan's defaults,** which were fixed before any result. A settings grid is run only as a training-CV sensitivity check and changes nothing.

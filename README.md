@@ -88,13 +88,17 @@ One full Model 1 run (2026-10-13; seed 555, 100 tuning trials per model, one gro
 | | Test PR-AUC [95% CI] | Test AUROC [95% CI] |
 |---|---|---|
 | **Model A: LightGBM, all 25 features** | **0.919** [0.890, 0.942] | **0.977** [0.967, 0.986] |
+| Model A without the four #36 features (21 features; LightGBM, embedded selection; run 2026-10-19 with the same configuration and split) | 0.518 [0.465, 0.576] | 0.889 [0.868, 0.907] |
 | No-skill (test fraud rate) | 0.095 | 0.500 |
 | df-analyze's dummy baseline | 0.096 | 0.504 |
 
 - **Model A was chosen by shared, grouped 5-fold CV on the training set** (PR-AUC 0.925 ± 0.029), never by test results. CatBoost with embedded feature selection came second (0.921 ± 0.033), within one standard deviation, so the choice between the two is not decisive.
 - At the decision threshold chosen on out-of-fold training predictions (0.430), Model A flags 299 of 3,456 test users: precision 0.913, recall 0.832, F1 0.871.
 - The intervals resample whole test groups and cover test-set sampling only, not other splits or seeds. Amazon is small (3,456 test users, 328 fraudulent), and this is one split.
-- **Read these numbers with [#36](https://github.com/caelenm/fraud-detect-gnn/issues/36) in mind:** four features alone reach a univariate AUROC of 0.86–0.88 and may encode the helpfulness votes the labels come from. All 25 features are in the model until the group decides.
+- **Read these numbers with [#36](https://github.com/caelenm/fraud-detect-gnn/issues/36) in mind:** four features alone reach a univariate AUROC of 0.86–0.88 and may encode the helpfulness votes the labels come from.
+  - The same full Model A without them scores 0.518, a paired difference of **−0.401** [−0.450, −0.347] on the same test users.
+  - On training users only, `own__f19` alone separates the classes with 0.89 balanced accuracy (PR-AUC 0.80).
+  - Results are reported both ways. Which way is "right" depends on what the four features are, which is not yet confirmed from the paper.
 - The result is inside the sanity band (≈ 0.91 for untuned gradient boosting), and the 10-trial CPU pilot gave almost the same test PR-AUC (0.920).
 
 ## Results (phase 2 pilot, Amazon)
@@ -126,6 +130,7 @@ Paired differences on the same test nodes (B − A, 2,000 resamples of whole tes
 - **Without the four #36 features, the graph helps a lot:** own features alone drop to 0.524. Neighbour means add 0.19 and the GNN embeddings 0.15, with intervals well above 0. Here the untuned DGI embeddings are *worse* than simple neighbour means (−0.033, interval below 0).
 - **The four #36 features carry much of the score:** 0.917 with them, 0.524 without. With them the task is close to saturated, which leaves the graph little room; this is the caveat of [#36](https://github.com/caelenm/fraud-detect-gnn/issues/36).
 - **At a fixed threshold the picture is mixed:** with all features, m5 rescues 6 frauds that m1 misses but misses 12 that m1 catches, and removes 12 of m1's false alarms (each side at its own out-of-fold threshold). The gain is in the ranking, not in more frauds caught at the threshold.
+- **Random-graph control** (training CV only, untuned gradient boosting; `scripts/progress_checks.py`): with every relation rewired at random but degrees kept, the all-features gain barely changes (+ nbr 0.935 real vs 0.932 random). So the small gain there is not evidence of real graph structure. Without #36, about half the gain needs the real edges (+ nbr 0.704 real vs 0.613 random; own alone 0.500).
 - The `_no36` runs print the sanity-band warning (0.91 is the band for all features); that is expected, not a bug.
 - **What these numbers do not show:** variation across splits and seeds, or the effect of tuning the embeddings or the full df-analyze budget. That is phase 3.
 
