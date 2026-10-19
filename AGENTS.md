@@ -4,7 +4,7 @@ Instructions for AI coding agents (primarily Claude Code) working in this reposi
 
 ## Project in one paragraph
 
-We ask: **does using a graph improve fraud classification over the same kind of model without one, and can a GNN's representations improve a tabular AutoML pipeline (df-analyze)?** The datasets are two graph fraud benchmarks with tabular node features: **YelpChi** (main; nodes are hotel and restaurant reviews, labelled spam by Yelp's filter, three review–review relations) and **Amazon** (replication; nodes are users, labelled fraudulent or not, three user–user relations). Both come from the preprocessed `.mat` files of the CARE-GNN repository. The model ladder (plan §1) is: (1) df-analyze on each node's own features (Model A); (2) df-analyze plus label-free neighbour aggregates per relation; (3) GraphSAGE with all edges removed; (4) heterogeneous GraphSAGE over all relations; (5) df-analyze plus self-supervised GNN embeddings; (6) df-analyze plus supervised, out-of-fold GNN features (needs a rule change). Every model on a dataset is trained on the same split and scored on the same frozen, grouped test set. The headline metric is PR-AUC, always reported next to the no-skill baseline (the test positive rate). Model 1 and the interfaces the later rungs need (node table, relation edge lists, feature blocks, feature sets) are implemented first; GNN code comes later.
+We ask: **does using a graph improve fraud classification over the same kind of model without one, and can a GNN's representations improve a tabular AutoML pipeline (df-analyze)?** The datasets are two graph fraud benchmarks with tabular node features: **YelpChi** (main; nodes are hotel and restaurant reviews, labelled spam by Yelp's filter, three review–review relations) and **Amazon** (replication; nodes are users, labelled fraudulent or not, three user–user relations). Both come from the preprocessed `.mat` files of the CARE-GNN repository. The model ladder (plan §1) is: (1) df-analyze on each node's own features (Model A); (2) df-analyze plus label-free neighbour aggregates per relation; (3) GraphSAGE with all edges removed; (4) heterogeneous GraphSAGE over all relations; (5) df-analyze plus self-supervised GNN embeddings; (6) df-analyze plus supervised, out-of-fold GNN features (needs a rule change). Every model on a dataset is trained on the same split and scored on the same frozen, grouped test set. The headline metric is PR-AUC, always reported next to the no-skill baseline (the test positive rate). Model 1 and the interfaces the later rungs need (node table, relation edge lists, feature blocks, feature sets) were implemented first. Phase 2 ([`docs/PHASE2_GNN_PLAN.md`](docs/PHASE2_GNN_PLAN.md)) adds Models 2 and 5 as feature blocks (`nbr`, `gnnssl`) and a comparison page; GraphSAGE (Models 3–4) comes later.
 
 ## Datasets
 
@@ -48,7 +48,7 @@ There are two separate environments. Do not try to merge them.
 
 | Environment | Location | Python | Used for |
 |---|---|---|---|
-| Project | this repo, managed by `uv` | 3.13 pinned in `.python-version`; `requires-python >=3.11` | download, loading, splits, features, audit, reports (later: graph features and GNNs) |
+| Project | this repo, managed by `uv` | 3.13 pinned in `.python-version`; `requires-python >=3.11` | download, loading, splits, features, audit, graph feature blocks, reports; GNN embeddings with the optional `gnn` extra (`uv sync --extra gnn`: torch 2.9, PyG; plain PyG, no compiled scatter extensions) |
 | df-analyze | separate clone at the commit in `configs/default.yaml` (`df_analyze.commit`; path in `DF_ANALYZE_DIR`, default `../df-analyze`) | **3.13 only** (`>=3.13.11,<3.14`; its locked catboost has no 3.14 wheels), via df-analyze's own `uv sync --locked` | `df-analyze.py` and `scripts/dfa/*.py` only (`cv_select.py`, `export_model.py`, `predict.py`, `cuda_info.py`); loading any saved model |
 
 - uv 0.9.16 or newer is required (older releases cannot download Python 3.13.11 for df-analyze); `fraud_detect.external` enforces this before calling df-analyze.
@@ -110,11 +110,11 @@ A clone that only unpacked a bundle has no raw data; the `download` stage counts
 
 Still to do (later branches; tracked as GitHub issues):
 
-- **Model 2, neighbour features:** label-free aggregates of each node's neighbours' own features, one block per relation (`nbr_rur`, …), run through the same df-analyze pipeline as a new feature set.
+- **Done in phase 2 (branch `feat/gnn-embeddings`):** Model 2 (`nbr` block) and Model 5 (`gnnssl` block), one block per kind covering every relation, their `_no36` variants, and the comparison page with paired group-bootstrap contrasts. Amazon pilot runs only.
+- **Phase 3 (ask before starting):** embedding settings chosen on training CV only; full-budget runs; `split.n_repeats: 3` for every compared rung; YelpChi; ablations.
 - **Models 3 and 4:** GraphSAGE with all edges removed and heterogeneous GraphSAGE over all relations, the same code path, at least 5 seeds, one unit per (model, seed), early stopping on the saved CV folds.
-- **Model 5:** self-supervised GNN embeddings per relation, PCA-compressed (fit on training nodes), as feature blocks (`gnnssl_rur`, …).
 - **Model 6:** supervised out-of-fold GNN features, only if the group amends invariant 1.
-- **Evaluate and explain:** paired group-bootstrap contrasts (5 − 1, 2 − 1, 4 − 3), SHAP on the tabular models, GNN explanations and relation ablations.
+- **Explain:** SHAP on the tabular models, GNN explanations and relation ablations.
 
 ## Open decisions: do not decide these unilaterally
 
@@ -122,7 +122,7 @@ Ask before implementing anything that commits to one of these (plan §10):
 
 - **Model 6:** amending invariant 1 to allow supervised out-of-fold GNN features.
 - **Which dataset is the main one.** Plan v2 calls YelpChi the main dataset. On 2026-10-08 YelpChi was described as being for pipeline validation, so whether Amazon takes the main role in the ladder's contrasts is for the group to confirm.
-- **Features flagged by the audit as possible shortcuts:** keep, drop, or report results both ways ([#36](https://github.com/caelenm/fraud-detect-gnn/issues/36) for Amazon). Never drop a feature without asking.
+- **Features flagged by the audit as possible shortcuts:** for Amazon ([#36](https://github.com/caelenm/fraud-detect-gnn/issues/36)) the user decided on 2026-10-19 to **report both ways** (see the decision log); keep #36 open until the group has seen both. Never drop a feature without asking.
 - **The earlier pilot's place in the final report** (the state at `main@3336d87`, see the decision log): omit it, or mention it as the motivating pilot.
 - Adding any architecture beyond GraphSAGE and its graph-free control, any dataset beyond YelpChi and Amazon, or any text data.
 
@@ -147,6 +147,17 @@ Also ask before changing the metrics, the split proportions or grouping rule, th
   - **Bundles keep every tuned model** (the latest df-analyze run, with its jsonpickle results) plus the exported Model A, and **drop caches and temporary files** (`__JOBLIB_CACHE__`, `lightning_logs`, `__pycache__`, `*.tmp`, `*.part`).
   - The **`export_model` stage and `scripts/dfa/predict.py`** were added, so teammates load and use the models in df-analyze's environment without retraining.
   - The branch **goes to `main` through a PR** (this overrides plan §0's "do not push"); never merge it.
+- **2026-10-18 (phase 2, [`docs/PHASE2_GNN_PLAN.md`](docs/PHASE2_GNN_PLAN.md)):**
+  - Work on `feat/gnn-embeddings`, committed locally; **do not push or open a PR** until the user says so.
+  - Model 5's embeddings are **self-supervised only** (Deep Graph Infomax); no label reaches any feature. Model 6 is out of scope.
+  - **One block per kind covering all relations**: `nbr` (1-hop mean of every own feature plus log1p(degree) per relation) and `gnnssl` (DGI per relation, 2-layer GCN encoder, hidden/output 64, PReLU, row-shuffle corruption, Adam 1e-3, ≤ 300 epochs, patience 20, PCA to 8 per relation).
+  - The scaler that feeds DGI and the PCA are **fit on training nodes only**; the DGI loss covers **non-test nodes** (train and unlabelled), and test nodes take part in message passing only.
+  - **Pilot without touching phase 1**: `pilot_` feature sets with `df_analyze.classifiers=[lgbm,lr,catboost]` and `htune_trials=10`, all on the same machine.
+  - The **comparison page** is a standalone script that may use inline JavaScript but makes no external requests (see "Comparison page" above).
+- **2026-10-19 (user decisions):**
+  - **Issue #36: report both.** Every Amazon rung is run with all 25 features and without `own__f13`, `own__f15`, `own__f18`, `own__f19` (`*_no36` feature sets; the config's `feature_variants.no36`). The four are also left out of the neighbour-aggregate and GNN inputs (`nbr_no36`, `gnnssl_no36`).
+  - **GNN embeddings on the CPU** (`gnn_embed.device: cpu`). CUDA's sparse products differ by ~1e-7 between runs; the CPU is bit-identical.
+  - **torch stays at 2.9** in the `gnn` extra: newer PyPI torch is built for CUDA 13, which the group laptop's driver (CUDA 12.8) cannot run.
 - **Kept from earlier work:** Model A uses df-analyze classifiers **`lgbm`, `lr`, `catboost`, `gandalf`, `rf`, `knn`** (plus the automatic dummy; `mlp` is left out because it is CPU-only in df-analyze and adds about 4 h per run), 100 tuning trials, tuned on **balanced accuracy** for every model (`htune_cls_metric: bal-acc`; not `acc`, which suits imbalanced classes poorly; not `auroc`, which df-analyze applies inconsistently across models), with `--filter-pred-classify auroc` for the prediction-based feature filter; Model A is **chosen by shared 5-fold CV PR-AUC on the training set** (`select_model`), not by df-analyze's tuning score; CatBoost and GANDALF run on the GPU; `--df-tests-method` is never passed (it hits an enum bug in df-analyze 4.1.0).
 
 ## Code conventions

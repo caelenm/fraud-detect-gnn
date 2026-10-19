@@ -430,10 +430,80 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
   - **Saved models (`export_model`).** df-analyze's `eval_htune_results_jsonpickle_00.json` does not decode with jsonpickle as written: GANDALF's training state cannot be rebuilt (a `torch.dtype` cannot be created; the torch optimizer and Lightning internals fail in `__setstate__`), which stops the whole decode. Skipping those failures makes jsonpickle's object numbering drift, so references in every model saved after GANDALF (kNN, LightGBM, LR, RF) point at wrong objects. `scripts/dfa/model_io.py` now decodes with a tolerant unpickler that turns such references into explicit placeholders, and restores LightGBM's two shared references from their first copies. **17 of 28 combinations** load intact and reproduce df-analyze's saved test probabilities and labels exactly (max difference 0): CatBoost ×4, kNN ×4, LightGBM ×4, LightGBM RF ×4, logistic regression (`none`). Not usable from the file: GANDALF ×4 (cannot be rebuilt), dummy ×4 (random strategy: its predictions differ on every call), logistic regression ×3 (`n_iter_` cannot be rebuilt). None of these was refit. Model A decoded intact and was saved as `model_a.joblib`; reloaded, it reproduces the test probabilities to 0 and the labels exactly.
   - **Bundle.** `pack_artifacts.py --dataset amazon`: 89 files, 54 MB, **25 MB** compressed. The largest files: `eval_htune_results_jsonpickle_00.json` 23 MB (every tuned model), `prediction_results_00.json` 8.7 MB, the graph edge lists 15 MB (`homo` 7.2 MB, `usu` 5.9 MB, `uvu` 1.9 MB, `upu` 0.3 MB), `oof_predictions.parquet` 1.9 MB, `df_analyze.log` 1.0 MB; everything else is under 1 MB (Model A's `model_a.joblib` 59 KB). df-analyze 4.1.0 wrote no `__JOBLIB_CACHE__` in this run (its use is commented out at the pinned commit), so leaving out caches and temporary files changed nothing here: the bundle was 25 MB before and after.
   - **Round trip as a teammate (Task 6).** A fresh clone in WSL2 that only unpacked the bundle: all 89 checksums verified; `uv run run.py --dataset amazon` skipped every stage, `download` included, with no raw data present; `predict.py` reproduced Model A's saved test probabilities (max difference 1.1e-16) and CatBoost (`embed_linear`) via `--model`, also with the GPU hidden (`CUDA_VISIBLE_DEVICES=''`).
+- **2026-10-18 (phase 2 decisions, [`PHASE2_GNN_PLAN.md`](PHASE2_GNN_PLAN.md), decisions 3–6 and 9–10):**
+  - **One block per kind, covering every relation** (`nbr`, `gnnssl`; columns `nbr__upu_mean_f00`, `gnnssl__upu_pc01`), so feature-set names are the same on YelpChi and Amazon. df-analyze's names (`nbr_upu_mean_f00`) have no collisions on either dataset (tested).
+  - **`nbr` (Model 2):** per relation (not `homo`), the 1-hop mean of every own feature and log1p(degree): 78 columns on Amazon. 1-hop max and 2-hop means are later ablations.
+  - **`gnnssl` (Model 5):** Deep Graph Infomax per relation. Encoder: two rounds of GCN-normalised propagation over a sparse A + I, hidden 64, output 64, PReLU. Corruption: row shuffle. Adam lr 1e-3, at most 300 epochs, early stopping on the DGI loss (patience 20), seeded. PCA to 8 per relation: 24 columns.
+  - **Train-only fitting and the loss mask:** the scaler that feeds DGI and every PCA are fit on training nodes only. The DGI loss and its summary vector cover non-test nodes (train and unlabelled); test nodes take part in message passing only (invariant 5) and add no loss term. Both masks come from the `split` column, never the labels.
+  - **Pilot without touching phase 1:** `pilot_` feature sets, `df_analyze.classifiers=[lgbm,lr,catboost]`, `htune_trials=10`, all on the same machine. The 100-trial `m1_own` run is never rerun.
+  - **Comparison page:** a standalone script (`scripts/compare_report.py`), not a stage. It may use inline JavaScript but makes no external requests, and it has a group-only banner.
+- **2026-10-19 (user decisions):**
+  - **Issue #36, report both:** every Amazon rung also runs without `own__f13`, `own__f15`, `own__f18`, `own__f19` (`*_no36`). The four are left out of the df-analyze input and of the `nbr_no36` / `gnnssl_no36` inputs.
+  - **GNN embeddings on the CPU:** on the GPU, two runs differed by ~1e-7 per training step (also with `torch.use_deterministic_algorithms`); CPU runs are bit-identical.
+  - **torch 2.9** in the `gnn` extra: PyPI's newest torch (2.14.1) is built for CUDA 13 and could not see the GPU under the laptop's driver (CUDA 12.8).
+- **2026-10-19 (phase 2 build facts, Amazon, WSL2, RTX 4060 laptop, torch 2.9.1+cu128, PyG 2.8.1):**
+  - **`nbr`:** 11,944 × 78, no nulls, all continuous on the 5,183 training nodes; under 1 s. `nbr_no36`: 66 columns from 21 own features. U-P-U leaves 1,720 nodes isolated (mean 0); median degrees U-P-U 6, U-S-U 264, U-V-U 90.
+  - **`gnnssl` on the CPU** (34 s for the stage): U-P-U 246 epochs (best 226, loss 0.775, 4.0 s), U-S-U 300 (best 285, 0.047, 20.6 s), U-V-U 263 (best 243, 0.054, 7.9 s). PCA variance kept by 8 components: 93.6%, 99.7%, 98.9%. U-S-U hit the 300-epoch cap. 24 continuous columns.
+  - **`gnnssl_no36` on the CPU** (22 s): U-P-U 246 epochs (best 226), U-S-U 112 (best 92), U-V-U 300 (best 291, cap). PCA variance 94.6%, 99.8%, 98.2%.
+  - An earlier GPU build (stage 9 s; U-P-U 1.5 s, U-S-U 3.6 s, U-V-U 2.8 s) was replaced by the CPU build.
+  - **Probe** (`scripts/probe_blocks.py`; fixed untuned HistGradientBoosting, 5 saved grouped CV folds, training nodes only; a signal, not a result):
+
+    | Blocks | Features | CV PR-AUC (mean ± SD) | CV AUROC |
+    |---|---|---|---|
+    | own | 25 | 0.907 ± 0.028 | 0.977 |
+    | own + nbr | 103 | 0.935 ± 0.029 | 0.986 |
+    | own + gnnssl | 49 | 0.934 ± 0.030 | 0.988 |
+    | own_no36 | 21 | 0.500 ± 0.043 | 0.879 |
+    | own_no36 + nbr_no36 | 87 | 0.704 ± 0.034 | 0.928 |
+    | own_no36 + gnnssl_no36 | 45 | 0.672 ± 0.046 | 0.929 |
+
+    Without the four #36 features, own-only PR-AUC falls by about 0.41. Both graph blocks recover about 0.17–0.20 of it, much more than the about 0.03 they add with all features.
+
+- **2026-10-19 (phase 2 PILOT, Amazon).** This is a pilot, not a final result: 10 trials; classifiers `lgbm, lr, catboost` plus the dummy; one grouped split; seed 555; all six runs sequentially on the same machine (WSL2, RTX 4060 laptop GPU 8 GB, CatBoost on the GPU, embeddings on the CPU); df-analyze `199e563`.
+  - **Checks:** for every run, `split_check.json` matched our split row for row (5,183 / 3,456; labels identical) and `type_check.json` had all column types matching, with nothing dropped or coerced. The `_no36` runs print the sanity-band warning, which is expected because the band describes all 25 features. No search hit its time limit (12 "all trials" and 4 "early stop" per run).
+  - **Wall-clock:** `pilot_m1_own` 12.8 min, `_no36` 10.6; `pilot_m2_own_nbr` 16.0, `_no36` 15.3; `pilot_m5_own_gnnssl` 14.6, `_no36` 15.6; 85 min in total. `compare_report.py`: 22 s per page, 3.1–4.3 MB.
+
+    | Feature set | Features | Model A (selection; columns kept) | Shared-CV PR-AUC | Test PR-AUC [95% CI] | Test AUROC [95% CI] |
+    |---|---|---|---|---|---|
+    | pilot_m1_own | 25 | LightGBM (embed linear; 25) | 0.921 ± 0.035 | 0.917 [0.888, 0.941] | 0.979 [0.970, 0.987] |
+    | pilot_m2_own_nbr | 103 | CatBoost (embed linear; 24: 11 own, 13 nbr from all three relations) | 0.939 ± 0.029 | 0.926 [0.901, 0.946] | 0.984 [0.978, 0.990] |
+    | pilot_m5_own_gnnssl | 49 | LightGBM (embed linear; 49) | 0.938 ± 0.030 | 0.929 [0.905, 0.949] | 0.981 [0.972, 0.989] |
+    | pilot_m1_own_no36 | 21 | LightGBM (assoc; 21) | 0.567 ± 0.042 | 0.524 [0.470, 0.583] | 0.893 [0.873, 0.910] |
+    | pilot_m2_own_nbr_no36 | 87 | CatBoost (assoc; 87) | 0.714 ± 0.045 | 0.710 [0.663, 0.754] | 0.935 [0.920, 0.948] |
+    | pilot_m5_own_gnnssl_no36 | 45 | LightGBM (embed linear; 45) | 0.684 ± 0.045 | 0.677 [0.626, 0.726] | 0.927 [0.912, 0.941] |
+
+  - **Paired contrasts** (`compare_metrics.json`; B − A on the same test nodes, 2,000 group-bootstrap resamples, seed 555):
+
+    | Contrast | ΔPR-AUC [95% CI] | B ahead | ΔAUROC [95% CI] | Recall@K A → B | Fraud: B rescues / breaks |
+    |---|---|---|---|---|---|
+    | m2 − m1 | +0.0089 [−0.0009, +0.0201] | 96.1% | +0.0051 [−0.0001, +0.0111] | 0.872 → 0.857 | 9 / 7 |
+    | m5 − m1 | +0.0115 [+0.0001, +0.0251] | 97.6% | +0.0018 [−0.0029, +0.0064] | 0.872 → 0.860 | 6 / 12 |
+    | m5 − m2 | +0.0027 [−0.0063, +0.0121] | 70.7% | −0.0033 [−0.0085, +0.0011] | 0.857 → 0.860 | 2 / 10 |
+    | m2 − m1, no36 | +0.1855 [+0.1424, +0.2254] | 100% | +0.0422 [+0.0307, +0.0547] | 0.558 → 0.646 | 18 / 28 |
+    | m5 − m1, no36 | +0.1529 [+0.1037, +0.1956] | 100% | +0.0346 [+0.0232, +0.0474] | 0.558 → 0.625 | 25 / 30 |
+    | m5 − m2, no36 | −0.0326 [−0.0621, −0.0043] | 1.0% | −0.0076 [−0.0154, −0.0001] | 0.646 → 0.625 | 23 / 18 |
+
+  - **Reading:**
+    - With all features, the graph rungs add about one PR-AUC point. That is borderline on one split at a pilot budget: m2's interval includes 0, and m5's lower bound is +0.0001.
+    - Without the #36 features, own features fall to 0.524, and both graph rungs add 0.15–0.19 with intervals well above 0. There, untuned DGI embeddings are worse than neighbour means.
+    - The #36 features account for about 0.39 of Model 1's test PR-AUC. At each side's own threshold the differences are small and mixed: gains come from ranking, not from more frauds caught.
+    - The pilot `m1` (0.917) is close to the 100-trial `m1_own` (0.919). Never compare a pilot rung with the 100-trial run.
 
 ---
 
-## 12. Status and next steps (hand-off, 2026-10-14)
+## 12. Status and next steps
+
+**Phase 2 (2026-10-19, branch `feat/gnn-embeddings`, local commits, not pushed).** Models 2 (`nbr`) and 5 (`gnnssl`) are implemented as feature blocks, each also without the four #36 features (`_no36`), with the comparison page (`scripts/compare_report.py`) and a CV probe. The Amazon pilot (six runs: three rungs × two variants, 10 trials, 3 classifiers) and its comparison pages are in §11. Tested on Linux (WSL2) with an NVIDIA GPU; 173 tests pass with the `gnn` extra, and without it the GNN tests are skipped.
+
+**Next steps (phase 3; ask before starting):**
+1. Choose the embedding settings on training data only: a small grid (dim 16/32/64, epochs 100/300, PCA k 4/8/16), scored by the probe on the grouped CV folds. Two relations hit the 300-epoch cap.
+2. Full-budget runs of `m2_own_nbr`, `m5_own_gnnssl` and the three `_no36` rungs, on the same machine as `m1_own`; about 2 h each.
+3. `split.n_repeats: 3` for every compared rung, with the scaler and PCA refit per split. Report the per-repeat Δ and the Nadeau–Bengio corrected t-test over the 15 paired CV folds.
+4. YelpChi: the same ladder.
+5. Ablations: GraphMAE, or a homogeneous (`homo`) embedding.
+6. The group's reading of #36 once both variants have been seen.
+
+**Phase 1 hand-off (2026-10-14), kept for reference.**
 
 **State of this branch (`feat/review-fraud-pivot`).** M0–M9 are done, and phase 1 is done: the full Amazon Model 1 run on the GPU (§11), the `export_model` stage, `predict.py`, and a bundle a teammate can use without retraining. The branch has been pushed and opened as a PR to `main`. Tested on Linux (WSL2, Debian) with an NVIDIA GPU; not tested on macOS (the CPU-only decode was simulated by hiding the GPU).
 

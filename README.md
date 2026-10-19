@@ -4,7 +4,7 @@
 
 Course project for CS555: Data Mining and Machine Learning, St. Francis Xavier University (StFX).
 
-> **Status:** Model 1 (df-analyze on each node's own features) is implemented end to end for both datasets: download, load, grouped split, features, audit, df-analyze, grouped shared-CV model choice, test report with bootstrap intervals, an HTML report, and a verified export of Model A. **Phase 1 (Amazon) is done:** the full run is below ([Results](#results-phase-1-amazon)), and its outputs, including every tuned model, are shared as a bundle that needs no retraining. The node table, relation edge lists and feature-block interfaces that the graph models need are in place; the graph models themselves (Models 2–6) are not built yet. The working plan is [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md); its §12 lists the next steps (one YelpChi validation run, then Model 2). An earlier version of this project used CFPB complaint narratives; that state is preserved at commit `3336d87` on `main`.
+> **Status:** Model 1 (df-analyze on each node's own features) is implemented end to end for both datasets, and **phase 1 (Amazon) is done** ([Results](#results-phase-1-amazon)). **Phase 2** ([`docs/PHASE2_GNN_PLAN.md`](docs/PHASE2_GNN_PLAN.md) is the plan; branch `feat/gnn-embeddings`) adds two graph rungs as feature blocks for df-analyze: **Model 2** (`nbr`, label-free neighbour means) and **Model 5** (`gnnssl`, self-supervised GNN embeddings), each also without the four features of issue [#36](https://github.com/caelenm/fraud-detect-gnn/issues/36), and a [comparison page](#comparing-two-feature-sets) that shows two rungs' Model A test node by test node. Amazon pilot results are in [Results (phase 2 pilot)](#results-phase-2-pilot-amazon). GraphSAGE (Models 3–4) and Model 6 are not built. The working plan is [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md). An earlier version of this project used CFPB complaint narratives; that state is preserved at commit `3336d87` on `main`.
 
 ---
 
@@ -22,10 +22,10 @@ Both datasets come with precomputed, anonymous node features *and* several relat
 | # | Model | Graph information | Status |
 |---|---|---|---|
 | 1 | df-analyze on each node's own features (Model A) | none | **implemented** |
-| 2 | df-analyze on own features + label-free neighbour aggregates, per relation | hand-made | interfaces ready |
+| 2 | df-analyze on own features + label-free neighbour aggregates, per relation (`m2_own_nbr`) | hand-made | **implemented**; Amazon pilot |
 | 3 | GraphSAGE with all edges removed (an MLP) | none | planned |
 | 4 | Heterogeneous GraphSAGE over all relations | learned | planned |
-| 5 | df-analyze on own features + self-supervised GNN embeddings, per relation, PCA-compressed | learned, no labels | interfaces ready |
+| 5 | df-analyze on own features + self-supervised GNN embeddings, per relation, PCA-compressed (`m5_own_gnnssl`) | learned, no labels | **implemented**; Amazon pilot |
 | 6 | df-analyze on own features + supervised, out-of-fold GNN embeddings or score | learned from labels | needs a rule change (open decision) |
 
 The key contrasts: **5 vs 1** (does the GNN help df-analyze?), **5 vs 2** (learned embeddings vs hand-made aggregates) and **4 vs 3** (message passing with the architecture held fixed). The headline metric is **PR-AUC** (average precision) on a frozen, grouped test set, always next to the no-skill baseline (the test positive rate).
@@ -97,15 +97,58 @@ One full Model 1 run (2026-10-13; seed 555, 100 tuning trials per model, one gro
 - **Read these numbers with [#36](https://github.com/caelenm/fraud-detect-gnn/issues/36) in mind:** four features alone reach a univariate AUROC of 0.86–0.88 and may encode the helpfulness votes the labels come from. All 25 features are in the model until the group decides.
 - The result is inside the sanity band (≈ 0.91 for untuned gradient boosting), and the 10-trial CPU pilot gave almost the same test PR-AUC (0.920).
 
-## Prepared for the graph models
+## Results (phase 2 pilot, Amazon)
 
-Nothing on this branch trains a GNN, but the data model is ready for one:
+**Pilot, not final:** 10 tuning trials, 3 classifiers (LightGBM, logistic regression, CatBoost) plus the dummy, one grouped split, seed 555, all six runs on the same RTX 4060 laptop on 2026-10-19. Each Model A was chosen by grouped CV on the training set only. Test PR-AUC with 95% group-bootstrap intervals (1,000 resamples, from each run's report; the comparison pages use 2,000, so their per-side intervals differ in the third decimal); no-skill PR-AUC 0.095.
+
+| Feature set | Features | Model A | Test PR-AUC [95% CI] | Test AUROC |
+|---|---|---|---|---|
+| m1: own | 25 | LightGBM, embedded selection | 0.917 [0.888, 0.941] | 0.979 |
+| m2: own + nbr | 103 | CatBoost, embedded selection (24 kept: 11 own, 13 nbr) | 0.926 [0.901, 0.946] | 0.984 |
+| m5: own + gnnssl | 49 | LightGBM, embedded selection (all 49 kept) | 0.929 [0.905, 0.949] | 0.981 |
+| m1 without #36 | 21 | LightGBM, association filter | 0.524 [0.470, 0.583] | 0.893 |
+| m2 without #36 | 87 | CatBoost, association filter (all kept) | 0.710 [0.663, 0.754] | 0.935 |
+| m5 without #36 | 45 | LightGBM, embedded selection (all kept) | 0.677 [0.626, 0.726] | 0.927 |
+
+Paired differences on the same test nodes (B − A, 2,000 resamples of whole test groups; "B ahead" is the share of resamples, not a p-value):
+
+| Contrast | ΔPR-AUC [95% CI] | B ahead | ΔAUROC [95% CI] |
+|---|---|---|---|
+| m2 − m1 | +0.009 [−0.001, +0.020] | 96% | +0.005 [−0.000, +0.011] |
+| m5 − m1 | +0.012 [+0.000, +0.025] | 98% | +0.002 [−0.003, +0.006] |
+| m5 − m2 | +0.003 [−0.006, +0.012] | 71% | −0.003 [−0.009, +0.001] |
+| m2 − m1, without #36 | **+0.186** [+0.142, +0.225] | 100% | +0.042 [+0.031, +0.055] |
+| m5 − m1, without #36 | **+0.153** [+0.104, +0.196] | 100% | +0.035 [+0.023, +0.047] |
+| m5 − m2, without #36 | −0.033 [−0.062, −0.004] | 1% | −0.008 [−0.015, −0.000] |
+
+**Reading:**
+- **With all 25 features, the graph adds about one point** (m2 +0.009, m5 +0.012). That is in the 0–1.5 point range GADBench suggested. m2's interval includes 0; m5's lower bound is +0.0001, too close to 0 to call it a gain on one split at a pilot budget. Learned embeddings and hand-made neighbour means tie.
+- **Without the four #36 features, the graph helps a lot:** own features alone drop to 0.524. Neighbour means add 0.19 and the GNN embeddings 0.15, with intervals well above 0. Here the untuned DGI embeddings are *worse* than simple neighbour means (−0.033, interval below 0).
+- **The four #36 features carry much of the score:** 0.917 with them, 0.524 without. With them the task is close to saturated, which leaves the graph little room; this is the caveat of [#36](https://github.com/caelenm/fraud-detect-gnn/issues/36).
+- **At a fixed threshold the picture is mixed:** with all features, m5 rescues 6 frauds that m1 misses but misses 12 that m1 catches, and removes 12 of m1's false alarms (each side at its own out-of-fold threshold). The gain is in the ranking, not in more frauds caught at the threshold.
+- The `_no36` runs print the sanity-band warning (0.91 is the band for all features); that is expected, not a bug.
+- **What these numbers do not show:** variation across splits and seeds, or the effect of tuning the embeddings or the full df-analyze budget. That is phase 3.
+
+Each pair has a comparison page in `outputs/amazon/compare/` (in the bundle). Run times: 10.6–16.0 min per feature set, 85 min for all six; the CPU embeddings took 34 s (all features) and 22 s (without #36).
+
+## Graph feature blocks (Models 2 and 5)
+
+The graph reaches df-analyze as extra columns per node, joined next to the own features; df-analyze then treats each node as a table row exactly as in Model 1. Every rung uses the same split, folds, tuning and test scoring; only the input columns differ.
 
 - **Node table** `data/processed/<dataset>/nodes.parquet`: `node_id`, `label` (null when unlabelled), `is_labelled`, `group_id`, `split` (train/test/unlabelled), `cv_fold`.
 - **Relations** `data/processed/<dataset>/graph/<relation>.npz` (plus `homo`): undirected int32 edge lists with `src < dst`, no self-loops, deduplicated; `graph/manifest.json` records counts and the source checksum.
-- **Feature blocks** `data/processed/<dataset>/features/<block>.parquet` keyed by `node_id`, with columns prefixed `<block>__`. Only `own` exists so far; later blocks are e.g. `nbr_rur` and `gnnssl_rur`.
-- **Feature sets** in the config (`feature_sets:`; for example `m1_own: [own]`) are the ladder's rungs. `--set feature_set=<name>` runs stages 6–11 for one set, writing to `outputs/<dataset>/<feature_set>/`.
-- **Label blindness:** graph feature builders take `(features, edges)` and never labels. [`tests/test_label_blindness.py`](tests/test_label_blindness.py) holds the check every builder must pass: identical output after permuting all labels. Graph features may use the features (never labels) of all nodes, test and unlabelled ones included.
+- **Feature blocks** `data/processed/<dataset>/features/<block>.parquet` keyed by `node_id`, with columns prefixed `<block>__`. One block per kind covers every relation, so the names are the same on both datasets:
+  - **`nbr`** (stage `neighbour_agg`, Model 2): for each relation (not `homo`), the 1-hop mean of every own feature over a node's neighbours (0 when isolated) and log1p(degree). Amazon: 3 × 26 = 78 columns, e.g. `nbr__upu_mean_f13`. A sparse, row-normalised adjacency times the feature matrix; no learning.
+  - **`gnnssl`** (stage `gnn_embed`, Model 5): for each relation, [Deep Graph Infomax](https://arxiv.org/abs/1809.10341) (PyG `DeepGraphInfomax`) trains a 2-layer GCN encoder (hidden 64, output 64, PReLU) over the sparse, GCN-normalised adjacency **without labels**: the encoder must tell the real graph from one with shuffled feature rows. Adam (lr 1e-3), at most 300 epochs, early stopping on the loss (patience 20), seeded, on the CPU. Each 64-d embedding is compressed by a PCA to 8 components: 3 × 8 = 24 columns, e.g. `gnnssl__upu_pc01`. The raw embeddings and the training log (`meta.json`: loss curves, best epoch, PCA variance, timing, versions) stay in `outputs/<dataset>/gnn_embed/`.
+  - Each block's column types are decided on training nodes (`<block>.spec.json`), like `column_spec.json` for `own`.
+- **Variants (issue #36):** a block named `<kind>_<variant>` is built from the own features without the columns `feature_variants.<variant>` lists. `no36` leaves out `own__f13`, `own__f15`, `own__f18`, `own__f19`: `own_no36` is the own block without them, and `nbr_no36` / `gnnssl_no36` are built from that reduced input (`outputs/<dataset>/gnn_embed_no36/`), so the GNN never sees them either.
+- **Feature sets** in the config are the ladder's rungs: `m1_own: [own]`, `m2_own_nbr: [own, nbr]`, `m5_own_gnnssl: [own, gnnssl]`, their `_no36` versions (`[own_no36, gnnssl_no36]`, …), and `pilot_` copies of all six for reduced-budget runs. `--set feature_set=<name>` runs stages 8–13 for one set, writing to `outputs/<dataset>/<feature_set>/`; the block stages build only the blocks the set uses.
+- **Leakage rules:**
+  - Graph feature builders take features and edges and never labels; tests permute every label and expect identical output ([`tests/test_label_blindness.py`](tests/test_label_blindness.py), `test_graph_blocks.py`, `test_gnn_ssl.py`).
+  - Graph features use the features (never labels) of all nodes, test and unlabelled ones included.
+  - The scaler that feeds the GNN and each PCA are fit on training nodes only.
+  - The DGI loss covers non-test nodes (train and unlabelled); test nodes only pass messages.
+- **Probe:** `uv run scripts/probe_blocks.py --dataset amazon` fits one fixed, untuned gradient-boosting model per saved grouped CV fold (training nodes only) for `own`, `own+nbr`, `own+gnnssl` and their `_no36` versions, and writes `outputs/<dataset>/probe/probe_cv.csv`. It is a quick signal before spending df-analyze runs, not a result; nothing is chosen from it.
 
 ## Setup
 
@@ -127,10 +170,11 @@ Two separate Python environments are needed, because df-analyze manages its own 
 | df-analyze (separate clone) | 3.13.11+ (not 3.14) | `df-analyze.py` and `scripts/dfa/*.py`, called as subprocesses |
 
 ```bash
-# 1. This project
+# 1. This project (with the optional `gnn` extra: torch and PyTorch Geometric,
+#    needed only by the gnn_embed stage)
 git clone https://github.com/caelenm/fraud-detect-gnn.git
 cd fraud-detect-gnn
-uv sync
+uv sync --extra gnn            # or plain `uv sync` without the GNN stage
 
 # 2. df-analyze, next to this repository, at the tested commit, on Python 3.13
 uv python install '>=3.13.11,<3.14'
@@ -141,6 +185,12 @@ uv sync --locked --python '>=3.13.11,<3.14' --directory ../df-analyze
 # 3. The data (checksum-verified; safe to rerun)
 ./download_dataset.sh          # both datasets into data/raw/care_gnn/
 ```
+
+About the `gnn` extra:
+- It installs torch 2.9 and PyTorch Geometric into this project's environment only, never df-analyze's. Plain PyG; no compiled `torch_scatter`/`torch_sparse`.
+- torch stays at 2.9, whose Linux wheels on PyPI are built for CUDA 12.8 (like df-analyze's torch). The newest ones are built for CUDA 13, which needs a newer NVIDIA driver than the group laptop has.
+- The GNN embeddings run on the CPU by default (`gnn_embed.device: cpu`, about 35 s on Amazon), so no GPU is needed for them.
+- Plain `uv sync` removes the extra again; use `uv sync --extra gnn`. Without it, the GNN tests are skipped and the `gnn_embed` stage stops with an install hint.
 
 Some details on the df-analyze clone:
 - **Pinned commit.** The commit is recorded as `df_analyze.commit` in `configs/default.yaml`. The stages that call df-analyze stop if the clone is at a different commit.
@@ -168,16 +218,50 @@ uv run run.py --dataset yelpchi --only audit           # one stage
 | 3 | `split` | Grouped, stratified 60/40 split and 5 grouped CV folds | `train_ids.csv`, `test_ids.csv`, `cv_folds.csv`, `split_summary.json` |
 | 4 | `features` | The `own` feature block and column types from training nodes | `features/own.parquet`, `column_spec.json` |
 | 5 | `audit` | Counts, feature statistics and shortcut flags, duplicates, groups, homophily | `outputs/<dataset>/reports/audit.md` + CSVs |
-| 6 | `df_analyze_input` | Train/test tables for the active feature set | `data/processed/<dataset>/df_analyze/<feature_set>/` |
-| 7 | `df_analyze` | Runs df-analyze; verifies its split and column types | `outputs/<dataset>/<feature_set>/df_analyze/<time>/`, `split_check.json`, `type_check.json` |
-| 8 | `select_model` | Refits every tuned combination on the grouped CV folds; out-of-fold probabilities; tuning budget | `model_selection_cv.csv`, `oof_predictions.parquet`, `tuning_budget.csv` |
-| 9 | `df_analyze_report` | Model A, thresholds, test metrics, bootstrap intervals, sanity band | `model_a_report.md`, `model_a_metrics.csv`, `model_a.json` |
-| 10 | `web_report` | One self-contained HTML page | `outputs/<dataset>/<feature_set>/report/index.html` |
-| 11 | `export_model` | Checks that every tuned model df-analyze saved loads and reproduces its test probabilities; saves Model A in its native format | `outputs/<dataset>/<feature_set>/model/`: `model_a.joblib` (or `.cbm`), `model_a.json`, `models_check.csv` |
+| 6 | `neighbour_agg` | The `nbr` block(s) the feature set uses (Model 2) | `features/nbr.parquet`, `nbr.spec.json` (and `nbr_no36.*`) |
+| 7 | `gnn_embed` | The `gnnssl` block(s) the feature set uses (Model 5); one resumable unit per relation | `features/gnnssl.parquet`, `gnnssl.spec.json`, `outputs/<dataset>/gnn_embed/` (and `_no36`) |
+| 8 | `df_analyze_input` | Train/test tables for the active feature set | `data/processed/<dataset>/df_analyze/<feature_set>/` |
+| 9 | `df_analyze` | Runs df-analyze; verifies its split and column types | `outputs/<dataset>/<feature_set>/df_analyze/<time>/`, `split_check.json`, `type_check.json` |
+| 10 | `select_model` | Refits every tuned combination on the grouped CV folds; out-of-fold probabilities; tuning budget | `model_selection_cv.csv`, `oof_predictions.parquet`, `tuning_budget.csv` |
+| 11 | `df_analyze_report` | Model A, thresholds, test metrics, bootstrap intervals, sanity band | `model_a_report.md`, `model_a_metrics.csv`, `model_a.json` |
+| 12 | `web_report` | One self-contained HTML page | `outputs/<dataset>/<feature_set>/report/index.html` |
+| 13 | `export_model` | Checks that every tuned model df-analyze saved loads and reproduces its test probabilities; saves Model A in its native format | `outputs/<dataset>/<feature_set>/model/`: `model_a.joblib` (or `.cbm`), `model_a.json`, `models_check.csv` |
 
-Paths in the table are relative to `data/processed/<dataset>/` or `outputs/<dataset>/<feature_set>/reports/` unless shown in full. `export_model` is last on purpose: `run.py` reruns every stage after the first one with missing outputs, so adding it earlier would rerun df-analyze. Each stage can also be run on its own with `uv run scripts/NN_<stage>.py --dataset <name>`. Every invocation writes its config, seed, git commit and package versions to `outputs/<dataset>/runs/<timestamp>/`.
+Paths in the table are relative to `data/processed/<dataset>/` or `outputs/<dataset>/<feature_set>/reports/` unless shown in full. `export_model` is last on purpose: `run.py` reruns every stage after the first one with missing outputs, so adding it earlier would rerun df-analyze. For the same reason the block stages count as done when the active feature set does not use their block, so an `m1_own` run or bundle never reruns anything. Each stage can also be run on its own with `uv run scripts/NN_<stage>.py --dataset <name>`. Every invocation writes its config, seed, git commit and package versions to `outputs/<dataset>/runs/<timestamp>/`.
 
 **The web report** needs no server: open the file in a browser (from WSL: `explorer.exe outputs/amazon/m1_own/report/index.html`). It shows Model A's configuration, tuned hyperparameters, test metrics with intervals, the confusion matrix at the chosen threshold, every tuned model, the tuning budget and the run configuration. It also has two scrollable cards of the most and least confident test nodes, each with its highest-ranked features (value and training percentile). It contains row-level test data: share it only within the group, never commit or post it.
+
+### Comparing two feature sets
+
+Once two feature sets have finished the pipeline (through `df_analyze_report`):
+
+```bash
+uv run scripts/compare_report.py --dataset amazon --a pilot_m1_own --b pilot_m5_own_gnnssl
+```
+
+This writes `outputs/<dataset>/compare/<a>__vs__<b>/compare.html` and `compare_metrics.json`. It is not a stage, because it spans two feature sets, and it stops if they were not scored on the same test nodes. It reads only what the pipeline saved: each side's Model A, its threshold (chosen on out-of-fold training predictions) and its test probabilities.
+
+- **Metrics:** each side's test PR-AUC and AUROC with group-bootstrap 95% intervals, Recall@K (K = the number of test frauds) and F1/precision/recall at its own threshold. The headline is the **paired ΔPR-AUC (B − A)**: both models are scored on the same 2,000 resamples of whole test groups, giving its 95% interval and the share of resamples with B ahead.
+- **Scatter:** P(fraud | A) against P(fraud | B) for every test node, with both thresholds and the four outcomes (both catch, B rescues, B breaks, both miss).
+- **Galleries:** the 20 fraud nodes B rescues and the 20 it breaks, by how far apart the two scores are.
+- **Node cards** (click a point): features ranked by training percentile, and one neighbourhood per relation (at most 12 neighbours, seeded; only training neighbours coloured by label).
+- **Embedding view:** a 2-D PCA (fit on training nodes) of a DGI embedding next to the own features.
+
+The page is a single offline file: inline CSS, inline SVG and a little inline JavaScript, with no external requests. It contains row-level test data, so share it within the group only.
+
+### What to expect (literature)
+
+- **GADBench** ([Tang et al., NeurIPS 2023](https://arxiv.org/abs/2306.12251), tuned models, random splits), Amazon AUPRC:
+  - plain XGBoost 91.88;
+  - XGBoost with simple neighbour aggregation 93.33;
+  - the best specialised GNN, BWGNN, 91.48.
+
+  Model A (0.919) is already at the "trees without a graph" level, so the realistic gain on Amazon is 0 to about 1.5 points, which is inside its test interval (about ±2.6 points).
+- **Frozen self-supervised embeddings** ([Cheng et al., arXiv 2410.18487](https://arxiv.org/abs/2410.18487)): DGI with an MLP reaches 88.92 AUPRC on Amazon. Such embeddings help most on sparse graphs with few labels; Amazon is dense and has over 5,000 training labels, so Model 5 may tie Model 1 or lose to Model 2. That is a valid finding: graph context may add little beyond strong tabular features.
+- **YelpChi** is where graph information clearly helped trees in GADBench (84.0 → 91.1 AUPRC).
+- **Issue #36:** if the four flagged features encode the label, they may saturate the task and hide any graph benefit. That is why every rung is also run without them.
+
+These benchmarks use random splits and ours are grouped, so their numbers set expectations; they are not targets.
 
 ### Stopping and resuming
 
@@ -211,6 +295,8 @@ uv run unpack_artifacts.py --dataset amazon      # verifies checksums; run.py th
 ```
 
 A bundle holds `data/processed/<dataset>/` and `outputs/<dataset>/` (only the latest df-analyze run of each feature set), never the raw downloads, the per-invocation logs, caches (`__JOBLIB_CACHE__`, `lightning_logs`) or temporary files. Every file is checked against a SHA-256 manifest. If a file already exists with different contents, nothing is written unless you pass `--force`. Share bundles through OneDrive or Teams, never through the repository: they contain row-level data.
+
+From phase 2 on, a bundle also holds every feature set run so far (including the `pilot_` ones), the graph blocks (`features/nbr*.parquet`, `gnnssl*.parquet`), the raw embeddings and training logs (`gnn_embed*/`), the probe table and the comparison pages (`compare/`).
 
 **Nothing has to be retrained.** After unpacking, `uv run run.py --dataset amazon` skips every stage, `download` included (the bundle has no raw data, and none is needed). The bundle contains:
 - **every tuned model** df-analyze saved, each refit on the full training set: `eval_htune_results_jsonpickle_00.json` in the df-analyze run's `results/test00/` folder, with df-analyze's prepared feature tables (`X_train_00.csv`, `X_test_00.csv`) next to it;
@@ -249,6 +335,7 @@ fraud-detect-gnn/
 ├── CLAUDE.md            # points Claude Code at AGENTS.md
 ├── docs/RESEARCH_PLAN.md
 ├── docs/PHASE1_AMAZON_PLAN.md  # phase 1: Amazon Model A end to end, shareable bundle
+├── docs/PHASE2_GNN_PLAN.md     # phase 2: Models 2 and 5 as df-analyze blocks, comparison page
 ├── download_dataset.sh  # runs the download stage for both datasets
 ├── run.py               # runs the pipeline stages in order
 ├── pack_artifacts.py / unpack_artifacts.py
@@ -260,14 +347,15 @@ fraud-detect-gnn/
 │   ├── config.py        # config loading and per-dataset paths
 │   ├── columns.py       # node-table column names
 │   ├── data/            # download, .mat loading, grouped split, audit
-│   ├── features/        # own block, column types, feature blocks and sets
-│   ├── models/          # df-analyze (Model A), model choice, evaluation, repeats, export
-│   ├── report/          # static HTML report (web.py, report.css)
+│   ├── features/        # own block, column types, feature blocks and sets, nbr block
+│   ├── graph/           # self-supervised GNN embeddings (ssl.py; needs the gnn extra)
+│   ├── models/          # df-analyze (Model A), model choice, evaluation, repeats, export, probe
+│   ├── report/          # HTML report (web.py, report.css), comparison page (compare.py)
 │   ├── external.py      # runs df-analyze scripts in their own environment
 │   ├── artifacts.py     # packing and unpacking output bundles
 │   ├── runstate.py      # stop/resume, atomic writes
 │   └── runlog.py        # seeds and run metadata
-├── scripts/             # NN_<stage>.py: run one stage
+├── scripts/             # NN_<stage>.py: run one stage; compare_report.py, probe_blocks.py
 │   └── dfa/             # run in df-analyze's env: cv_select, export_model, predict
 ├── tests/
 ├── data/                # local only, git-ignored
@@ -277,7 +365,9 @@ fraud-detect-gnn/
 ## Limitations
 
 - **The features are precomputed and anonymous.** We cannot inspect or change how they were built. Some relations (same product and star rating, same month, text similarity) are themselves derived from review attributes, so part of the graph is constructed rather than observed.
-- **Possible label shortcut on Amazon** ([#36](https://github.com/caelenm/fraud-detect-gnn/issues/36)). Labels come from helpfulness votes, and four features (`own__f13`, `own__f15`, `own__f18`, `own__f19`) reach a univariate AUROC of 0.86–0.88 on their own. If they are derived from the same votes, Amazon results overstate what can be detected from behaviour. All 25 features are kept until the group decides, so the phase 1 results include them.
+- **Possible label shortcut on Amazon** ([#36](https://github.com/caelenm/fraud-detect-gnn/issues/36)). Labels come from helpfulness votes, and four features (`own__f13`, `own__f15`, `own__f18`, `own__f19`) reach a univariate AUROC of 0.86–0.88 on their own. If they are derived from the same votes, Amazon results overstate what can be detected from behaviour. Phase 1 used all 25. From phase 2 on, every rung is reported both ways (decided 2026-10-19): with all 25 features, and without the four (`_no36`, also left out of the GNN input).
+- **GNN embedding settings are untuned** (64-d, up to 300 epochs, 8 PCA components per relation, the plan's defaults). Some relations were still improving at 300 epochs. Choosing them, on training CV only, is phase 3.
+- **The comparison is one split and one seed,** and the pilot uses a reduced budget (10 trials, 3 classifiers); see the pilot section.
 - **df-analyze's internal CV is not grouped.** Its tuning and feature-selection folds are random, so a YelpChi user's reviews can sit on both sides of them. This makes its tuning scores optimistic, which is one more reason Model A is chosen by our grouped CV. The test set is grouped, so final scores are not affected; the tuned hyperparameters may still be slightly over-fitted to user-level leakage.
 - **df-analyze scales continuous features over train and test together,** and infers types on both. No labels are used, but test rows influence the clip points. Our own type decisions use training nodes only.
 - **Single split by default.** Bootstrap intervals cover test-set sampling only. Amazon is small, and its scores vary across splits; `split.n_repeats` measures this at the cost of one df-analyze run per repeat.
@@ -289,6 +379,8 @@ fraud-detect-gnn/
 - Rayana, S., & Akoglu, L. (2015). *Collective Opinion Spam Detection: Bridging Review Networks and Metadata.* KDD. https://doi.org/10.1145/2783258.2783370
 - Zhang, S., Yin, H., Chen, T., Hung, Q. V. N., Huang, Z., & Cui, L. (2020). *GCN-Based User Representation Learning for Unifying Robust Recommendation and Fraudster Detection.* SIGIR. https://arxiv.org/abs/2005.10150 (the Amazon features)
 - Tang, J., Hua, F., Gao, Z., Zhao, P., & Li, J. (2023). *GADBench: Revisiting and Benchmarking Supervised Graph Anomaly Detection.* NeurIPS Datasets and Benchmarks. https://arxiv.org/abs/2306.12251
+- Veličković, P., Fedus, W., Hamilton, W. L., Liò, P., Bengio, Y., & Hjelm, R. D. (2019). *Deep Graph Infomax.* ICLR. https://arxiv.org/abs/1809.10341
+- Cheng et al. (2024). arXiv:2410.18487 (frozen self-supervised GNN embeddings for graph anomaly detection; cited from the phase 2 plan, check the details before quoting)
 - Hamilton, W., Ying, R., & Leskovec, J. (2017). *Inductive Representation Learning on Large Graphs* (GraphSAGE). NeurIPS.
 - df-analyze: https://github.com/stfxecutables/df-analyze
 - PyTorch Geometric: https://github.com/pyg-team/pytorch_geometric
