@@ -22,6 +22,11 @@ TARGET = "target"
 # Feature columns are "<block>__<name>", e.g. own__f00 (see features/blocks.py).
 BLOCK_SEPARATOR = "__"
 OWN_BLOCK = "own"
+# Graph-derived blocks, one per kind, covering every relation of the dataset:
+# nbr__upu_mean_f00 (label-free neighbour means, Model 2) and gnnssl__upu_pc01
+# (self-supervised GNN embeddings, Model 5).
+NBR_BLOCK = "nbr"
+GNNSSL_BLOCK = "gnnssl"
 
 # Columns that identify, label or place a node. They must never appear in any
 # feature block or model input (AGENTS.md leakage invariant 7).

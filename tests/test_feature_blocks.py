@@ -5,6 +5,8 @@ Blocks are written to pytest's tmp_path; values are invented.
 
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -97,3 +99,26 @@ def test_df_analyze_input_stage_writes_only_own_columns_and_target(tmp_path):
     assert test[C.TARGET].tolist() == saved[C.LABEL].tolist()
     block = pd.read_parquet(p.block_file(C.OWN_BLOCK)).set_index(C.NODE_ID)
     assert np.allclose(test["own_f01"], block.loc[saved[C.NODE_ID], "own__f01"])
+
+
+def test_df_analyze_input_takes_other_blocks_types_from_their_spec_files(tmp_path):
+    path, config = fake_dataset(tmp_path, n_nodes=120)
+    assert main(["--config", str(path), "--to", "audit"]) == 0
+    p = get_paths(config)
+    # A hand-made `nbr` block of noise, without its column types at first.
+    extra = fake_block("nbr", n=120, width=2, seed=1)
+    extra.to_parquet(p.block_file("nbr"), index=False)
+    args = ["--config", str(path), "--only", "df_analyze_input",
+            "--set", "feature_set=m2_own_nbr"]  # fmt: skip
+    assert main(args) == 2  # no nbr.spec.json
+    spec = {"columns": {c: {"type": "continuous"} for c in extra.columns[1:]}}
+    p.block_spec("nbr").write_text(json.dumps(spec), encoding="utf-8")
+    assert main([*args, "--force"]) == 0
+    m2 = get_paths({**config, "feature_set": "m2_own_nbr"})
+    info = json.loads((m2.df_analyze_input_dir / "feature_set.json").read_text())
+    assert info["blocks"] == ["own", "nbr"]
+    assert info["columns"]["nbr_x1"] == {"block_column": "nbr__x1", "type": "continuous"}
+    own_types = json.loads(p.column_spec.read_text())["columns"]
+    assert len(info["columns"]) == len(own_types) + 2
+    # m1_own's tables are untouched (another folder).
+    assert not p.df_analyze_input_dir.exists()

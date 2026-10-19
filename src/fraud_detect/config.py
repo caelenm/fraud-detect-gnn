@@ -95,7 +95,9 @@ class Paths:
 
     data/raw/care_gnn/               downloaded .zip and .mat files (shared)
     data/processed/<dataset>/        node table, graph, split, feature blocks
-    outputs/<dataset>/               dataset-level reports, run state, run logs
+    outputs/<dataset>/               dataset-level reports, run state, run logs,
+                                     GNN embeddings (gnn_embed/), comparison
+                                     pages (compare/)
     outputs/<dataset>/<feature_set>/ df-analyze runs, model reports, web report,
                                      exported Model A (model/)
     """
@@ -106,6 +108,9 @@ class Paths:
     processed_dir: Path
     outputs_dir: Path
     feature_set: str
+    # The active feature set's blocks, so a block stage's outputs can be only
+    # the blocks this feature set uses (none for m1_own).
+    blocks: tuple[str, ...] = ()
 
     # ---- Dataset level -----------------------------------------------------
     @property
@@ -154,9 +159,27 @@ class Paths:
     def block_file(self, block: str) -> Path:
         return self.features_dir / f"{block}.parquet"
 
+    def block_spec(self, block: str) -> Path:
+        """Column types of a block other than `own` (whose types are in
+        column_spec.json), decided on training nodes like column_spec.json."""
+        return self.features_dir / f"{block}.spec.json"
+
     @property
     def column_spec(self) -> Path:
         return self.processed_dir / "column_spec.json"
+
+    @property
+    def gnn_embed_dir(self) -> Path:
+        """Raw self-supervised embeddings and their training log (gnn_embed)."""
+        return self.outputs_dir / "gnn_embed"
+
+    @property
+    def probe_dir(self) -> Path:
+        return self.outputs_dir / "probe"
+
+    def compare_dir(self, a: str, b: str) -> Path:
+        """Comparison page of feature sets `a` and `b` (scripts/compare_report.py)."""
+        return self.outputs_dir / "compare" / f"{a}__vs__{b}"
 
     # ---- Feature-set level (one df-analyze run per feature set) -------------
     @property
@@ -202,13 +225,15 @@ def get_paths(config: dict[str, Any], root: Path = REPO_ROOT) -> Paths:
     if not dataset:
         raise ConfigError("No dataset selected (use --dataset or `dataset:`)")
     folder = run_folder(dataset, int(config["split"].get("repeat", 0)))
+    feature_set = str(config["feature_set"])
     return Paths(
         root=root,
         raw_dir=_resolve(root, p["raw_dir"]),
         mat=_resolve(root, p["raw_dir"]) / config["datasets"][dataset]["mat"],
         processed_dir=_resolve(root, p["processed_dir"]) / folder,
         outputs_dir=_resolve(root, p["outputs_dir"]) / folder,
-        feature_set=str(config["feature_set"]),
+        feature_set=feature_set,
+        blocks=tuple(config["feature_sets"].get(feature_set, ())),
     )
 
 

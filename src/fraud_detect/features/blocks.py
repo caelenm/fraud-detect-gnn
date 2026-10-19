@@ -2,9 +2,12 @@
 
 A feature block is one parquet file, data/processed/<dataset>/features/
 <block>.parquet, keyed by `node_id`, with every other column named
-`<block>__<feature>`. The `own` block holds each node's own features; later
-blocks (neighbour aggregates `nbr_<relation>`, GNN embeddings
-`gnnssl_<relation>`) are added the same way.
+`<block>__<feature>`. The `own` block holds each node's own features. Graph
+blocks hold one kind of feature for every relation, with the relation in the
+column name: `nbr` (label-free neighbour means, e.g. nbr__upu_mean_f00) and
+`gnnssl` (self-supervised GNN embeddings, e.g. gnnssl__upu_pc01). Each block
+other than `own` has its column types in <block>.spec.json next to it
+(`own`'s are in column_spec.json), decided on training nodes only.
 
 A feature set (a rung of the model ladder) is a list of blocks in the config
 (`feature_sets`). The df_analyze_input stage joins a set's blocks on

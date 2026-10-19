@@ -358,13 +358,73 @@ def run_audit(ctx: Context) -> None:
 
 
 # --------------------------------------------------------------------------
-# Stage 6: df-analyze input tables for the active feature set
+# Stages 6-7: graph feature blocks (nbr, gnnssl)
+# --------------------------------------------------------------------------
+# A block stage builds its block only for feature sets that use it, and its
+# outputs are only the blocks the active feature set uses: none for m1_own,
+# so a finished m1_own run (or bundle) has nothing left to run here.
+GNN_EMBED_META = "meta.json"
+
+
+def block_outputs(block: str) -> Callable[[Paths], list[Path]]:
+    """A block stage's outputs: the block and its column types (written last),
+    or nothing when the active feature set does not use the block."""
+
+    def outputs(p: Paths) -> list[Path]:
+        if block not in p.blocks:
+            return []
+        return [p.block_file(block), p.block_spec(block)]
+
+    return outputs
+
+
+def gnn_embed_outputs(p: Paths) -> list[Path]:
+    found = block_outputs(C.GNNSSL_BLOCK)(p)
+    return [*found, p.gnn_embed_dir / GNN_EMBED_META] if found else []
+
+
+def _uses_block(ctx: Context, block: str) -> bool:
+    if block in ctx.paths.blocks:
+        return True
+    print(
+        f"Feature set {ctx.config['feature_set']} does not use the {block!r} block, "
+        f"so there is nothing to build (run with --set feature_set=<a set using it>)."
+    )
+    return False
+
+
+def run_neighbour_agg(ctx: Context) -> None:
+    if not _uses_block(ctx, C.NBR_BLOCK):
+        return
+    raise StageError("The neighbour_agg stage is not implemented yet.")
+
+
+def run_gnn_embed(ctx: Context) -> None:
+    if not _uses_block(ctx, C.GNNSSL_BLOCK):
+        return
+    raise StageError("The gnn_embed stage is not implemented yet.")
+
+
+# --------------------------------------------------------------------------
+# Stage 8: df-analyze input tables for the active feature set
 # --------------------------------------------------------------------------
 FEATURE_SET_INFO = "feature_set.json"
 
 
 def feature_set_blocks(ctx: Context) -> list[str]:
     return list(ctx.config["feature_sets"][ctx.config["feature_set"]])
+
+
+def column_types(p: Paths, block_names: list[str]) -> dict[str, dict[str, Any]]:
+    """Every column's type, all decided on training nodes: the own block's from
+    column_spec.json, every other block's from its <block>.spec.json."""
+    _require(p.column_spec)
+    types = dict(_read_json(p.column_spec)["columns"])
+    for name in block_names:
+        if name != C.OWN_BLOCK:
+            _require(p.block_spec(name))
+            types.update(_read_json(p.block_spec(name))["columns"])
+    return types
 
 
 def run_df_analyze_input(ctx: Context) -> None:
@@ -383,11 +443,14 @@ def run_df_analyze_input(ctx: Context) -> None:
     for ids, table in ((train_ids, train), (test_ids, test)):
         if not np.array_equal(by_id.loc[ids[C.NODE_ID]].to_numpy(int), table[C.TARGET]):
             raise StageError("Labels in the split files differ from nodes.parquet")
-    spec = _read_json(p.column_spec)["columns"]
+    spec = column_types(p, names)
     feature_cols = [c for c in train.columns if c != C.TARGET]
     untyped = [c for c in feature_cols if c not in spec]
     if untyped:
-        raise StageError(f"No column type in {p.column_spec} for: {untyped}")
+        raise StageError(
+            f"No column type in {p.column_spec} or the blocks' .spec.json files "
+            f"for: {untyped}"
+        )
     try:
         renames = df_analyze.df_analyze_names(feature_cols)
     except ValueError as e:
@@ -424,7 +487,7 @@ def columns_of_type(info: dict[str, Any], kind: str) -> list[str]:
 
 
 # --------------------------------------------------------------------------
-# Stage 7: run df-analyze; verify its split and its column types
+# Stage 9: run df-analyze; verify its split and its column types
 # --------------------------------------------------------------------------
 # df-analyze models that train on the GPU when CUDA is available.
 GPU_CLASSIFIERS = frozenset({"catboost", "gandalf"})
@@ -545,7 +608,7 @@ def _latest_verified_run(p: Paths) -> tuple[str, Path]:
 
 
 # --------------------------------------------------------------------------
-# Stage 8: score every tuned model on the saved grouped CV folds (train only)
+# Stage 10: score every tuned model on the saved grouped CV folds (train only)
 # --------------------------------------------------------------------------
 CV_SELECT_RUNNER = REPO_ROOT / "scripts" / "dfa" / "cv_select.py"
 SHARED_CV = "model_selection_cv.csv"
@@ -641,7 +704,7 @@ def run_select_model(ctx: Context) -> None:
 
 
 # --------------------------------------------------------------------------
-# Stage 9: Model A report: choice by shared CV, threshold from out-of-fold
+# Stage 11: Model A report: choice by shared CV, threshold from out-of-fold
 # training predictions, test metrics, group-bootstrap intervals, sanity band
 # --------------------------------------------------------------------------
 MODEL_A_REPORT = "model_a_report.md"
@@ -763,7 +826,7 @@ def run_df_analyze_report(ctx: Context) -> None:
 
 
 # --------------------------------------------------------------------------
-# Stage 10: static HTML report (parameters, results, confidence cards)
+# Stage 12: static HTML report (parameters, results, confidence cards)
 # --------------------------------------------------------------------------
 DATASET_LABELS = {"yelpchi": "YelpChi (reviews)", "amazon": "Amazon (users)"}
 
@@ -870,7 +933,7 @@ def run_web_report(ctx: Context) -> None:
 
 
 # --------------------------------------------------------------------------
-# Stage 11: Model A in its native format; check every model df-analyze saved
+# Stage 13: Model A in its native format; check every model df-analyze saved
 # --------------------------------------------------------------------------
 # Last in STAGES on purpose: run.py reruns every stage after the first one
 # with missing outputs, so an earlier position would rerun df-analyze.
@@ -979,6 +1042,12 @@ STAGES: list[Stage] = [
     Stage("audit", "Counts, feature statistics, duplicates, homophily", run_audit,
           lambda p: [p.reports_dir / AUDIT_REPORT,
                      *(p.reports_dir / t for t in AUDIT_TABLES)]),
+    # The graph blocks come right after audit and count as done when the
+    # active feature set does not use them (see block_outputs).
+    Stage("neighbour_agg", "nbr block: label-free neighbour means per relation",
+          run_neighbour_agg, block_outputs(C.NBR_BLOCK)),
+    Stage("gnn_embed", "gnnssl block: self-supervised DGI embeddings per relation",
+          run_gnn_embed, gnn_embed_outputs),
     Stage("df_analyze_input", "df-analyze train/test tables for the feature set",
           run_df_analyze_input,
           lambda p: [p.df_analyze_input_dir / "train.parquet",

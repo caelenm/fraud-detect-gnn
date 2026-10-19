@@ -9,7 +9,8 @@ dataset: null
 
 # Active feature set (a rung of the model ladder; see feature_sets below).
 # Stages from df_analyze_input on run for this feature set only and write to
-# outputs/<dataset>/<feature_set>/. Change with --set feature_set=<name>.
+# outputs/<dataset>/<feature_set>/; the graph block stages (neighbour_agg,
+# gnn_embed) build only the blocks it uses. Change with --set feature_set=<name>.
 feature_set: m1_own
 
 gpu:
@@ -81,10 +82,56 @@ datasets:
 
 # Feature sets = rungs of the model ladder: lists of feature blocks, each
 # data/processed/<dataset>/features/<block>.parquet with columns <block>__*.
+# One block per kind covers every relation (nbr__upu_mean_f00,
+# gnnssl__upu_pc01), so the names are the same on YelpChi and Amazon.
 feature_sets:
   m1_own: [own]
-  # later: m2_own_nbr: [own, nbr_rur, nbr_rtr, nbr_rsr]
-  #        m5_own_gnnssl: [own, gnnssl_rur, gnnssl_rtr, gnnssl_rsr]
+  m2_own_nbr: [own, nbr]          # + label-free neighbour means (Model 2)
+  m5_own_gnnssl: [own, gnnssl]    # + self-supervised GNN embeddings (Model 5)
+  # Pilot rungs (first demo, 2026-10-20): the same blocks under other names,
+  # so the 100-trial m1_own run is never overwritten. All three are run with
+  # --set "df_analyze.classifiers=[lgbm,lr,catboost]" --set df_analyze.htune_trials=10
+  # on the same machine: a slower machine hits df-analyze's time limits
+  # sooner, which would make the comparison unfair.
+  pilot_m1_own: [own]
+  pilot_m2_own_nbr: [own, nbr]
+  pilot_m5_own_gnnssl: [own, gnnssl]
+
+neighbour_agg:
+  # Model 2's `nbr` block. For each relation of the dataset (not homo): the
+  # 1-hop mean of every own feature over the node's neighbours (0 for an
+  # isolated node), and log1p(degree). On Amazon 3 x (25 + 1) = 78 columns.
+  # It uses the features of every node, test and unlabelled ones included,
+  # and never a label (AGENTS.md invariants 1 and 5). The 1-hop max and 2-hop
+  # means are later ablations: they would push df-analyze past its
+  # recommended number of features.
+  statistics: [mean]
+  log1p_degree: true
+
+gnn_embed:
+  # Model 5's `gnnssl` block: Deep Graph Infomax (PyG DeepGraphInfomax), one
+  # model per relation, trained without labels. Needs the gnn extra
+  # (`uv sync --extra gnn`).
+  # Encoder: `layers` rounds of GCN-normalised propagation over a sparse
+  # adjacency (with self-loops), each a linear map and a PReLU.
+  layers: 2
+  hidden: 64
+  out_dim: 64
+  # Corruption: the node feature rows are shuffled. Adam, early stopping on
+  # the DGI loss. The loss covers non-test nodes (train and unlabelled); test
+  # nodes take part in message passing only. The feature scaler that feeds
+  # DGI and the PCA are fit on training nodes only (invariant 6).
+  lr: 0.001
+  max_epochs: 300
+  patience: 20
+  # PCA of each relation's 64-d embedding: 3 x 8 = 24 columns on Amazon.
+  pca_components: 8
+  # auto: CUDA if torch can use it, else the CPU. Or cpu / cuda.
+  device: auto
+  # Fraction of U-S-U edges kept (about 7.1M directed; sampled once, seeded);
+  # 1.0 keeps all. If CUDA runs out of memory, that relation is retried on the
+  # CPU (logged in meta.json); lower this only if the CPU is too slow.
+  usu_edge_fraction: 1.0
 
 split:
   # StratifiedGroupKFold over the labelled nodes: `test_folds` of `n_folds`
