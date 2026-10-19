@@ -19,8 +19,10 @@ import scipy.io
 import scipy.sparse as sp
 import yaml
 from synthetic import (
+    fake_block,
     fake_care_gnn_mat,
     fake_df_analyze_results,
+    fake_embeddings,
     fake_model_a_metadata,
     fake_oof_predictions,
     fake_shared_cv,
@@ -165,6 +167,28 @@ def fake_df_analyze_run(paths, cv_scores: dict[tuple[str, str], float]) -> None:
         list(cv_scores), train["target"].to_numpy(), folds.loc[train_ids].to_numpy()
     ).to_parquet(run / "oof_predictions.parquet", index=False)
     (paths.df_analyze_output_dir / "latest.txt").write_text(FAKE_RUN + "\n")
+
+
+def fake_gnnssl_outputs(paths, relations: tuple[str, ...], n_nodes: int, k: int = 2):
+    """Write a gnn_embed stage's outputs without torch: a gnnssl block of noise
+    (k columns per relation), its spec, a meta.json and raw embeddings."""
+    from fraud_detect.features import own  # noqa: PLC0415
+
+    block = fake_block(C.GNNSSL_BLOCK, n=n_nodes, width=k * len(relations), seed=5)
+    block.columns = [C.NODE_ID] + [
+        f"gnnssl__{r}_pc{j:02d}" for r in relations for j in range(1, k + 1)
+    ]
+    train_ids = pd.read_csv(paths.train_ids)[C.NODE_ID].to_numpy()
+    paths.gnn_embed_dir.mkdir(parents=True, exist_ok=True)
+    for r, z in fake_embeddings(n_nodes, relations).items():
+        np.save(paths.raw_embedding(r), z)
+    (paths.gnn_embed_dir / "meta.json").write_text(
+        json.dumps({"config_sha256": "fake"}), encoding="utf-8"
+    )
+    block.to_parquet(paths.block_file(C.GNNSSL_BLOCK), index=False)
+    paths.block_spec(C.GNNSSL_BLOCK).write_text(
+        json.dumps(own.column_spec(block, train_ids)), encoding="utf-8"
+    )
 
 
 def fake_export_outputs(paths) -> None:

@@ -208,6 +208,15 @@ def fake_block(name: str, n: int = 10, width: int = 3, seed: int = 0) -> pd.Data
     return block
 
 
+def fake_embeddings(
+    n: int, relations: tuple[str, ...], dim: int = 8, seed: int = 0
+) -> dict[str, np.ndarray]:
+    """Invented raw node embeddings (float32 noise), one (n, dim) per relation,
+    shaped like the gnn_embed stage's raw_<relation>.npy."""
+    rng = np.random.default_rng(seed)
+    return {r: rng.normal(size=(n, dim)).astype(np.float32) for r in relations}
+
+
 def fake_edges(n: int, n_pairs: int, seed: int = 0) -> np.ndarray:
     """Invented undirected edge list over nodes 0..n-1, shaped like the load
     stage's output: (2, E) int32, src < dst, no self-loops, no repeats."""

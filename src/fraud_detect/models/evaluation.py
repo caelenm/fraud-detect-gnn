@@ -87,9 +87,11 @@ class Interval:
     high: float
     n_resamples: int  # resamples with both classes present (others skipped)
     level: float = 0.95
+    # Paired only: the share of resamples in which score_a beats score_b.
+    share_above_zero: float | None = None
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        out = {
             "metric": self.metric,
             "estimate": self.estimate,
             "low": self.low,
@@ -97,6 +99,9 @@ class Interval:
             "level": self.level,
             "n_resamples": self.n_resamples,
         }
+        if self.share_above_zero is not None:
+            out["share_above_zero"] = self.share_above_zero
+        return out
 
 
 def _group_index(groups: np.ndarray) -> tuple[np.ndarray, int]:
@@ -149,6 +154,7 @@ def group_bootstrap(
         high=float(high),
         n_resamples=len(values),
         level=level,
+        share_above_zero=None if b is None else float(np.mean(np.array(values) > 0)),
     )
 
 

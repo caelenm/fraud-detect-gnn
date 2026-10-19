@@ -106,6 +106,8 @@ Stages (plan §7):
 
 A clone that only unpacked a bundle has no raw data; the `download` stage counts as done when the `load` stage's outputs exist, so such a clone skips every stage.
 
+**Comparison page (not a stage; it spans two feature sets).** `uv run scripts/compare_report.py --dataset <name> --a <feature_set> --b <feature_set>` (`src/fraud_detect/report/compare.py`) writes `outputs/<dataset>/compare/<a>__vs__<b>/compare.html` and `compare_metrics.json` from what the pipeline already saved: each side's Model A, its out-of-fold threshold and its test probabilities. It adds no outputs to any stage (that would make existing bundles rerun) and stops if the two sides were not scored on the same test nodes. **Exception to the `web_report` rule:** this page may contain inline JavaScript (clicking a point shows that node's card), but it must still make **no external requests** (no CDN, fonts, images or other linked resources; charts are inline SVG drawn in Python, no Plotly). Every inserted value is HTML-escaped. It contains row-level test data, shows a group-only banner, and is never committed.
+
 Still to do (later branches; tracked as GitHub issues):
 
 - **Model 2, neighbour features:** label-free aggregates of each node's neighbours' own features, one block per relation (`nbr_rur`, …), run through the same df-analyze pipeline as a new feature set.

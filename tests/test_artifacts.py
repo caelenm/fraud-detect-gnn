@@ -35,6 +35,17 @@ INCLUDED = [
     "outputs/amazon/m1_own/model/model_a.json",
     "outputs/amazon/m1_own/model/model_a.joblib",
     "outputs/amazon/m1_own/model/models_check.csv",
+    # graph blocks, raw GNN embeddings, the probe and comparison pages
+    "data/processed/amazon/features/nbr.parquet",
+    "data/processed/amazon/features/nbr.spec.json",
+    "data/processed/amazon/features/gnnssl.parquet",
+    "data/processed/amazon/features/gnnssl.spec.json",
+    "outputs/amazon/gnn_embed/meta.json",
+    "outputs/amazon/gnn_embed/raw_upu.npy",
+    "outputs/amazon/probe/probe_cv.csv",
+    "outputs/amazon/compare/pilot_m1_own__vs__pilot_m5_own_gnnssl/compare.html",
+    "outputs/amazon/compare/pilot_m1_own__vs__pilot_m5_own_gnnssl/compare_metrics.json",
+    "outputs/amazon/pilot_m5_own_gnnssl/reports/model_a.json",
 ]
 EXCLUDED = [
     # caches and scratch files (nothing reads them back)
@@ -48,6 +59,8 @@ EXCLUDED = [
     "outputs/yelpchi/reports/audit.md",
     "outputs/amazon/runs/20260101T000000Z/run_info.json",
     "outputs/amazon/checkpoints/select_model/unit.json",
+    "outputs/amazon/checkpoints/gnn_embed/relation_upu.json",
+    "outputs/amazon/gnn_embed/raw_usu.tmp.npy",
     "outputs/amazon/pipeline_state.json",
     "outputs/amazon/m1_own/df_analyze/20260101T000000Z/results.csv",  # not the latest
 ]
