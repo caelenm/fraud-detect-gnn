@@ -27,6 +27,9 @@ OWN_BLOCK = "own"
 # (self-supervised GNN embeddings, Model 5).
 NBR_BLOCK = "nbr"
 GNNSSL_BLOCK = "gnnssl"
+# Every block name is one of these kinds, optionally followed by _<variant>
+# (see features/blocks.py).
+BLOCK_KINDS: tuple[str, ...] = (OWN_BLOCK, NBR_BLOCK, GNNSSL_BLOCK)
 
 # Columns that identify, label or place a node. They must never appear in any
 # feature block or model input (AGENTS.md leakage invariant 7).

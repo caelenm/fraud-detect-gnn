@@ -10,6 +10,8 @@ from typing import Any
 
 import yaml
 
+from fraud_detect.columns import BLOCK_KINDS
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG = REPO_ROOT / "configs" / "default.yaml"
 
@@ -83,9 +85,6 @@ def with_dataset(config: dict[str, Any], dataset: str | None) -> dict[str, Any]:
         )
     check_feature_sets(out)
     return out
-
-
-BLOCK_KINDS = ("own", "nbr", "gnnssl")  # see features/blocks.py
 
 
 def check_feature_sets(config: dict[str, Any]) -> None:

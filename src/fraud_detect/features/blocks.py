@@ -42,7 +42,7 @@ class BlockError(ValueError):
 # without those columns (read from own.parquet, own__ names kept); the graph
 # blocks nbr_<variant> and gnnssl_<variant> are built from that reduced input
 # and stored as their own files, with columns prefixed <block>__.
-BLOCK_KINDS = (C.OWN_BLOCK, C.NBR_BLOCK, C.GNNSSL_BLOCK)
+BLOCK_KINDS = C.BLOCK_KINDS
 
 
 def parse_block(name: str) -> tuple[str, str | None]:

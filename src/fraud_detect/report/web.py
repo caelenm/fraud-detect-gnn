@@ -483,14 +483,6 @@ def _sample(rank: int, row: pd.Series) -> str:
     )
 
 
-def _or_dash(value: Any) -> str:
-    return (
-        "—"
-        if value is None or (isinstance(value, float) and np.isnan(value))
-        else str(value)
-    )
-
-
 def _card(title: str, blurb: str, rows: pd.DataFrame, n: int) -> str:
     items = "".join(_sample(i, row) for i, (_, row) in enumerate(rows.iterrows(), 1))
     n_correct = int(rows["correct"].sum())
@@ -632,23 +624,16 @@ def _pending_panel(title: str, body: str) -> str:
 
 PENDING = (
     "<section><h2>The model ladder</h2>"
-    '<p class="lede">Reserved for the graph models (docs/RESEARCH_PLAN.md §1). '
-    "These panels fill in once those stages exist.</p>"
+    '<p class="lede">Models 2 (neighbour means) and 5 (self-supervised GNN '
+    "embeddings) are compared with Model 1 test node by test node, with paired "
+    "group-bootstrap intervals, on the comparison pages "
+    "(<code>uv run scripts/compare_report.py</code>; outputs/&lt;dataset&gt;/"
+    "compare/). The panels below fill in once those stages exist.</p>"
     '<div class="grid-2">'
     + _pending_panel(
-        "Does the graph help?",
-        "Every rung on the same test nodes, with paired group-bootstrap intervals."
-        "<ul><li>Model 2 − Model 1: hand-made neighbour aggregates</li>"
-        "<li>Model 5 − Model 1: self-supervised GNN embeddings in df-analyze</li>"
-        "<li>Model 4 − Model 3: GraphSAGE with and without edges (mean ± std over "
-        "seeds)</li></ul>",
-    )
-    + _pending_panel(
-        "Inter-model agreement",
-        "Where Model A and the GNN agree and disagree on the same test nodes."
-        "<ul><li>Agreement rate and Cohen's kappa on predicted labels</li>"
-        "<li>Correlation of their fraud probabilities</li>"
-        "<li>Nodes each model gets right that the other gets wrong</li></ul>",
+        "GraphSAGE with and without edges",
+        "Model 4 − Model 3: message passing with the architecture held fixed "
+        "(mean ± std over seeds).",
     )
     + _pending_panel(
         "Feature-block importance",
