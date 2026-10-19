@@ -3,16 +3,24 @@
 THIS SCRIPT RUNS INSIDE DF-ANALYZE'S ENVIRONMENT, not this project's:
 
     uv run --directory <df-analyze> --python '>=3.13.11,<3.14' \
-        python <this file> --export-dir <.../results/test00> --out cv.csv
+        python <this file> --export-dir <.../results/test00> --out cv.csv \
+        --oof-out oof.parquet --folds-file folds.csv
 
 df-analyze's tuning scores cannot be compared across models: most models are
 tuned on 5-fold balanced accuracy of hard predictions, while GANDALF is scored
-on a single validation split with its own code path. To choose the best
-Model A fairly, this script takes each tuned configuration (model, feature
-set, tuned hyperparameters, from prediction_results_00.json), refits it with
-df-analyze's own `refit_tuned` on the SAME stratified folds of the TRAINING
-set, and scores the held-out fold from predicted probabilities. The test set
-is never read.
+on a single validation split with its own code path, and its internal folds
+are random rather than grouped. To choose the best Model A fairly, this
+script takes each tuned configuration (model, feature set, tuned
+hyperparameters, from prediction_results_00.json), refits it with
+df-analyze's own `refit_tuned` on the SAME saved grouped folds of the
+TRAINING set (--folds-file: one fold number per training row, in the row
+order of df-analyze's X_train export, made by the pipeline from
+cv_folds.csv), and scores the held-out fold from predicted probabilities. The
+test set is never read.
+
+The out-of-fold probabilities of every configuration are saved too
+(--oof-out), so the report stage can choose a decision threshold on training
+data only.
 
 Each configuration is also scored with df-analyze's DEFAULT hyperparameters
 (no tuning) on the same folds, so the effect of tuning can be reported. Only
@@ -47,7 +55,6 @@ from sklearn.metrics import (  # noqa: E402
     brier_score_loss,
     roc_auc_score,
 )
-from sklearn.model_selection import StratifiedKFold  # noqa: E402
 
 MODEL_MODULES = (
     "catboost", "dummy", "gandalf", "knn", "lgbm", "linear", "mlp", "svm",
@@ -107,6 +114,32 @@ def job_key(entry: dict, settings: str) -> tuple[str, str, str, str]:
     )
 
 
+KEY_COLUMNS = ("model_cls", "selection", "embed_selector", "settings")
+
+
+def read_folds(path: Path, n_rows: int) -> np.ndarray:
+    """Each training row's saved fold, checked against the export's size."""
+    folds = pd.read_csv(path)["fold"].to_numpy(dtype=np.int64)
+    if len(folds) != n_rows:
+        raise SystemExit(
+            f"{path} has {len(folds)} folds for {n_rows} training rows; the "
+            "pipeline writes one per row of df-analyze's X_train export."
+        )
+    if len(np.unique(folds)) < 2:
+        raise SystemExit(f"{path} has fewer than 2 folds")
+    return folds
+
+
+def previous_oof(path: Path, done: set) -> list[pd.DataFrame]:
+    """Out-of-fold predictions of configurations kept on --resume."""
+    if not path.is_file() or not done:
+        return []
+    frame = pd.read_parquet(path)
+    frame["embed_selector"] = frame["embed_selector"].fillna("")
+    keys = frame[list(KEY_COLUMNS)].astype(str).apply(tuple, axis=1)
+    return [frame[keys.isin(done)]]
+
+
 def row_key(row: dict) -> tuple[str, str, str, str]:
     return (
         str(row["model_cls"]),
@@ -144,7 +177,15 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--export-dir", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
-    parser.add_argument("--folds", type=int, default=5)
+    parser.add_argument(
+        "--oof-out", type=Path, required=True, help="out-of-fold probabilities (.parquet)"
+    )
+    parser.add_argument(
+        "--folds-file",
+        type=Path,
+        required=True,
+        help="CSV with a `fold` column: each training row's fold, in X_train order",
+    )
     parser.add_argument("--seed", type=int, default=555)
     parser.add_argument(
         "--only", nargs="*", default=None, help="model class names (for smoke tests)"
@@ -177,12 +218,15 @@ def main() -> int:
         (args.export_dir / "prediction_results_00.json").read_text(encoding="utf-8")
     )["predictions"]
     num_classes = int(y.nunique())
-    folds = list(
-        StratifiedKFold(n_splits=args.folds, shuffle=True, random_state=args.seed).split(
-            X, y
-        )
+    fold_of_row = read_folds(args.folds_file, len(X))
+    folds = [
+        (np.flatnonzero(fold_of_row != k), np.flatnonzero(fold_of_row == k))
+        for k in sorted(np.unique(fold_of_row))
+    ]
+    print(
+        f"CV on {len(X)} training rows, {len(folds)} saved grouped folds, "
+        f"{len(predictions)} configs"
     )
-    print(f"CV on {len(X)} training rows, {args.folds} folds, {len(predictions)} configs")
 
     # Every tuned fit (which choose Model A) runs before any default-settings
     # fit, and the table is rewritten after each configuration, so a crash,
@@ -196,6 +240,7 @@ def main() -> int:
     args.out.parent.mkdir(parents=True, exist_ok=True)
     rows = previous_rows(args.out) if args.resume else []
     done = {row_key(r) for r in rows}
+    oof = previous_oof(args.oof_out, done) if args.resume else []
     if done:
         print(f"Resuming: {len(done)} of {len(jobs)} configurations already scored")
     session_seconds: list[float] = []
@@ -232,6 +277,7 @@ def main() -> int:
             Xs = X[cols]
             row["n_features"] = len(cols)
             per_fold = []
+            prob_oof = np.full(len(X), np.nan)
             for k, (idx_tr, idx_va) in enumerate(folds):
                 seed_everything(args.seed + k)
                 model = (
@@ -240,12 +286,23 @@ def main() -> int:
                 model.refit_tuned(X=Xs.iloc[idx_tr], y=y.iloc[idx_tr], tuned_args=params)
                 prob = np.asarray(model.predict_proba(Xs.iloc[idx_va]))[:, 1]
                 per_fold.append(fold_scores(y.iloc[idx_va].to_numpy(), prob))
+                prob_oof[idx_va] = prob
             frame = pd.DataFrame(per_fold)
             for metric in frame.columns:
                 row[f"{metric}_mean"] = float(frame[metric].mean())
                 row[f"{metric}_std"] = float(frame[metric].std(ddof=1))
             row["fold_pr_auc"] = json.dumps([round(v, 6) for v in frame["pr_auc"]])
             row["error"] = ""
+            oof.append(
+                pd.DataFrame(
+                    {
+                        **{k: row[k] for k in KEY_COLUMNS},
+                        "row": np.arange(len(X)),
+                        "fold": fold_of_row,
+                        "prob": prob_oof,
+                    }
+                )
+            )
         except Exception as e:  # record and continue with the other models
             traceback.print_exc()
             row["error"] = f"{type(e).__name__}: {e}"
@@ -259,9 +316,16 @@ def main() -> int:
         )
         rows.append(row)
         session_seconds.append(row["seconds"])
+        # Out-of-fold probabilities first, then the table that marks the
+        # configuration as done; both atomic, so a crash never leaves a
+        # half-written file or a scored configuration without its predictions.
+        if oof:
+            tmp = args.oof_out.with_name(args.oof_out.stem + ".tmp.parquet")
+            pd.concat(oof, ignore_index=True).to_parquet(tmp, index=False)
+            os.replace(tmp, args.oof_out)
         tmp = args.out.with_name(args.out.name + ".tmp")
         pd.DataFrame(rows).to_csv(tmp, index=False)
-        os.replace(tmp, args.out)  # atomic: a crash never leaves a half-written table
+        os.replace(tmp, args.out)
 
     print(f"Saved {len(rows)} cross-validated configurations to {args.out}")
     # Per-model errors are recorded in the table; the pipeline decides what to do.

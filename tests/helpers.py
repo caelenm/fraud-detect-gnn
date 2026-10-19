@@ -1,0 +1,204 @@
+"""Test helpers: temporary configs and fake dataset files under tmp_path.
+
+Nothing here is real data; the fake .mat contents come from synthetic.py.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import inspect
+import json
+import zipfile
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import pandas as pd
+import scipy.io
+import scipy.sparse as sp
+import yaml
+from synthetic import (
+    fake_block,
+    fake_care_gnn_mat,
+    fake_df_analyze_results,
+    fake_embeddings,
+    fake_model_a_metadata,
+    fake_oof_predictions,
+    fake_shared_cv,
+)
+
+from fraud_detect import columns as C
+from fraud_detect.config import DEFAULT_CONFIG, load_config, with_dataset
+from fraud_detect.models import model_export
+
+
+def sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def label_like(name: str) -> bool:
+    """A parameter name that looks like it carries labels: one of its
+    underscore-separated parts is `y` or starts with `label` or `target`
+    (y_train, labels, is_labelled; but not edges_by_relation)."""
+    parts = name.lower().split("_")
+    return any(p == "y" or p.startswith(("label", "target")) for p in parts)
+
+
+def assert_label_blind(
+    builder: Callable[[pd.DataFrame, Any], pd.DataFrame],
+    nodes: pd.DataFrame,
+    features: pd.DataFrame,
+    edges: Any,
+    seed: int = 0,
+) -> None:
+    """Fail unless graph feature `builder(features, edges)` takes no label
+    argument and gives identical output after the labels in `nodes` are
+    permuted in place (the label-blindness convention, plan §6). `edges` is an
+    edge list or a dict of them, passed as a copy each time."""
+    params = list(inspect.signature(builder).parameters)
+    assert not [p for p in params if label_like(p)], params
+    assert not set(features.columns) & (set(C.FORBIDDEN_FEATURE_COLUMNS) - {C.NODE_ID})
+    before = builder(features.copy(), edges.copy())
+    original = nodes[C.LABEL].copy()
+    rng = np.random.default_rng(seed)
+    try:
+        nodes[C.LABEL] = original.to_numpy()[rng.permutation(len(nodes))]
+        assert not nodes[C.LABEL].equals(original)  # the permutation changed labels
+        after = builder(features.copy(), edges.copy())
+    finally:
+        nodes[C.LABEL] = original
+    pd.testing.assert_frame_equal(before, after)
+
+
+def tmp_config(tmp_path: Path, dataset: str = "amazon", config: dict | None = None):
+    """The default config (or `config`) with every path under tmp_path and a
+    dataset chosen. Returns the config file (for the CLI) and the config with
+    the dataset set."""
+    config = config or load_config(DEFAULT_CONFIG)
+    for key in ("raw_dir", "processed_dir", "outputs_dir"):
+        config["paths"][key] = str(tmp_path / key)
+    config["dataset"] = dataset
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    return path, with_dataset(config, None)
+
+
+def fake_dataset(tmp_path: Path, **kwargs) -> tuple[Path, dict]:
+    """Write a fake CARE-GNN zip to tmp_path/server/ and return (config file,
+    config) with a dataset `fake` whose checksums and expected counts describe
+    it, downloaded from that folder through a file:// URL."""
+    server = tmp_path / "server"
+    server.mkdir()
+    mat_path = tmp_path / "Fake.mat"
+    contents = fake_care_gnn_mat(**kwargs)
+    scipy.io.savemat(mat_path, contents)
+    with zipfile.ZipFile(server / "Fake.zip", "w") as zf:
+        zf.write(mat_path, "Fake.mat")
+    labels = contents["label"].ravel()
+    prefix = kwargs.get("unlabelled_prefix", 8)
+
+    def n_edges(m: sp.spmatrix) -> int:
+        return int(sp.triu(m, k=1).nnz)
+
+    config = load_config(DEFAULT_CONFIG)
+    config["download"]["base_url"] = server.resolve().as_uri()
+    config["datasets"]["fake"] = {
+        "archive": "Fake.zip",
+        "archive_sha256": sha256(server / "Fake.zip"),
+        "mat": "Fake.mat",
+        "mat_sha256": sha256(mat_path),
+        "relations": {"aaa": "net_aaa", "bbb": "net_bbb"},
+        "unlabelled_prefix": prefix,
+        "groups": {"rule": "duplicate_features"},
+        "expected": {
+            "n_nodes": len(labels),
+            "n_labelled": len(labels) - prefix,
+            "n_positive": int(labels[prefix:].sum()),
+            "n_features": contents["features"].shape[1],
+            "n_edges": {
+                "aaa": n_edges(contents["net_aaa"]),
+                "bbb": n_edges(contents["net_bbb"]),
+                "homo": n_edges(contents["homo"]),
+            },
+        },
+        "sanity_band": {"pr_auc": 0.5, "auroc": 0.5},
+    }
+    mat_path.unlink()
+    return tmp_config(tmp_path, "fake", config)
+
+
+def load_edges(path: Path) -> np.ndarray:
+    with np.load(path) as f:
+        return f["edges"]
+
+
+FAKE_RUN = "20260101T000000Z"
+
+
+def fake_df_analyze_run(paths, cv_scores: dict[tuple[str, str], float]) -> None:
+    """Write the files of a finished, verified df-analyze run and select_model
+    stage for the feature set in `paths` (all values invented), so the report
+    stages can run. Needs the df_analyze_input stage's tables."""
+    train = pd.read_parquet(paths.df_analyze_input_dir / "train.parquet")
+    test = pd.read_parquet(paths.df_analyze_input_dir / "test.parquet")
+    run = paths.df_analyze_output_dir / FAKE_RUN
+    deep = run / "train" / "hash"
+    for sub in ("tuning/test00", "results/test00", "prepared"):
+        (deep / sub).mkdir(parents=True)
+    entries, tuned = fake_df_analyze_results(test["target"].to_numpy(), cv_scores)
+    tuned.to_csv(deep / "tuning/test00/tuned_models_00.csv")
+    (deep / "results/test00/prediction_results_00.json").write_text(
+        json.dumps({"predictions": entries})
+    )
+    pd.DataFrame({"0": [0, 1]}).to_parquet(deep / "prepared/labels.parquet")
+    (deep / "options.json").write_text(json.dumps({"htune_trials": 3, "seed": 555}))
+    paths.model_reports_dir.mkdir(parents=True, exist_ok=True)
+    for check in ("split_check.json", "type_check.json"):
+        (run / check).write_text("{}")
+        (paths.model_reports_dir / check).write_text(json.dumps({"run": FAKE_RUN}))
+    for directory in (run, paths.model_reports_dir):
+        fake_shared_cv(cv_scores).to_csv(
+            directory / "model_selection_cv.csv", index=False
+        )
+    folds = pd.read_csv(paths.cv_folds).set_index("node_id")["fold"]
+    train_ids = pd.read_csv(paths.train_ids)["node_id"]
+    fake_oof_predictions(
+        list(cv_scores), train["target"].to_numpy(), folds.loc[train_ids].to_numpy()
+    ).to_parquet(run / "oof_predictions.parquet", index=False)
+    (paths.df_analyze_output_dir / "latest.txt").write_text(FAKE_RUN + "\n")
+
+
+def fake_gnnssl_outputs(paths, relations: tuple[str, ...], n_nodes: int, k: int = 2):
+    """Write a gnn_embed stage's outputs without torch: a gnnssl block of noise
+    (k columns per relation), its spec, a meta.json and raw embeddings."""
+    from fraud_detect.features import own  # noqa: PLC0415
+
+    block = fake_block(C.GNNSSL_BLOCK, n=n_nodes, width=k * len(relations), seed=5)
+    block.columns = [C.NODE_ID] + [
+        f"gnnssl__{r}_pc{j:02d}" for r in relations for j in range(1, k + 1)
+    ]
+    train_ids = pd.read_csv(paths.train_ids)[C.NODE_ID].to_numpy()
+    paths.gnn_embed_dir.mkdir(parents=True, exist_ok=True)
+    for r, z in fake_embeddings(n_nodes, relations).items():
+        np.save(paths.raw_embedding(r), z)
+    (paths.gnn_embed_dir / "meta.json").write_text(
+        json.dumps({"config_sha256": "fake"}), encoding="utf-8"
+    )
+    block.to_parquet(paths.block_file(C.GNNSSL_BLOCK), index=False)
+    paths.block_spec(C.GNNSSL_BLOCK).write_text(
+        json.dumps(own.column_spec(block, train_ids)), encoding="utf-8"
+    )
+
+
+def fake_export_outputs(paths) -> None:
+    """Write placeholder export_model outputs (model_a.json, models_check.csv
+    and a model file of placeholder bytes), as if the stage had run."""
+    paths.model_dir.mkdir(parents=True, exist_ok=True)
+    meta = fake_model_a_metadata()
+    model_export.write_metadata(paths.model_dir / model_export.MODEL_A_META, meta)
+    (paths.model_dir / model_export.MODELS_CHECK).write_text(
+        "model,selection,decoded,max_abs_diff,ok\nlgbm,none,yes,0.0,True\n",
+        encoding="utf-8",
+    )
+    (paths.model_dir / meta["model_file"]).write_bytes(b"placeholder model")

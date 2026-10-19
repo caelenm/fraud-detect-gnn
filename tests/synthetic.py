@@ -1,13 +1,12 @@
 """
 =====================================================================
-SYNTHETIC TEST DATA. NOT REAL CFPB DATA.
+SYNTHETIC TEST DATA. NOT REAL YELPCHI OR AMAZON DATA.
 =====================================================================
 
 Every row used by the test suite is built by a function in this module and
-nowhere else. All values are invented and deliberately look fake (company
-names like "SYNTHETIC-COMPANY-A", narratives that say "synthetic"). Only the
-category strings (e.g. "Fraud or scam") mirror CFPB category names, because
-the label rule matches on them.
+nowhere else. All values are invented: random feature values, made-up node
+IDs and labels, and graphs drawn at random. Nothing describes a real review,
+user or model.
 
 Nothing here is written to data/ or outputs/. Tests that need files write
 them to pytest's temporary directory (`tmp_path`), which is deleted
@@ -21,147 +20,10 @@ import pandas as pd
 
 from fraud_detect import columns as C
 
-FAKE_COMPANIES = ["SYNTHETIC-COMPANY-A", "SYNTHETIC-COMPANY-B", "SYNTHETIC-COMPANY-C"]
-FAKE_STATES = ["ZZ", "YY", "XX"]
-RESPONSES = ["Closed with explanation", "Closed with monetary relief"]
-TAG_VALUES = [None, "Older American", "Servicemember", "Older American, Servicemember"]
-
-# (product, issue, sub_issue, expected label under SYNTHETIC_CATEGORIES)
-CATEGORY_EXAMPLES: list[tuple[str, str, str | None, int]] = [
-    ("Money transfer, virtual currency, or money service", "Fraud or scam",
-     "Fraud or scam", 1),
-    ("Credit card or prepaid card", "Problem with a purchase shown on your statement",
-     "Card was charged for something you did not purchase with the card", 1),
-    ("Credit card or prepaid card", "Problem with a purchase shown on your statement",
-     "Credit card company isn't resolving a dispute about a purchase on your statement",
-     0),
-    ("Debt collection", "Attempts to collect debt not owed",
-     "Debt was result of identity theft", 1),
-    ("Debt collection", "Attempts to collect debt not owed", "Debt is not yours", 0),
-    ("Checking or savings account", "Managing an account", None, 0),
-    ("Credit reporting", "Identity theft protection or other monitoring services",
-     None, 0),
-]  # fmt: skip
-
-SYNTHETIC_CATEGORIES = {
-    "confirmed": True,
-    "target_products": [
-        "Money transfer, virtual currency, or money service",
-        "Credit card or prepaid card",
-        "Debt collection",
-        "Checking or savings account",
-    ],
-    "positive": [
-        {"issue": "Fraud or scam"},
-        {
-            "product": "Credit card or prepaid card",
-            "issue": "Problem with a purchase shown on your statement",
-            "sub_issue": "Card was charged for something you did not purchase "
-            "with the card",
-        },
-        {
-            "product": "Debt collection",
-            "issue": "Attempts to collect debt not owed",
-            "sub_issue": "Debt was result of identity theft",
-        },
-    ],
-    "reviewed_negative": [
-        {"issue": "Identity theft protection or other monitoring services"},
-    ],
-}
-
-
-def fake_narrative(i: int) -> str:
-    """Distinct synthetic narratives: each uses its own made-up words."""
-    rng = np.random.default_rng(i)
-    words = ["".join(rng.choice(list("abcdefghij"), size=6)) for _ in range(40)]
-    return f"synthetic narrative {i} " + " ".join(words)
-
-
-def complaints_with_categories() -> pd.DataFrame:
-    """One loaded complaint per CATEGORY_EXAMPLES row."""
-    rows = []
-    for i, (product, issue, sub_issue, _) in enumerate(CATEGORY_EXAMPLES):
-        rows.append(
-            {
-                C.COMPLAINT_ID: 1000 + i,
-                C.DATE_RECEIVED: pd.Timestamp("2020-01-01") + pd.Timedelta(days=i),
-                C.PRODUCT: product,
-                C.SUB_PRODUCT: "Synthetic sub-product",
-                C.ISSUE: issue,
-                C.SUB_ISSUE: sub_issue,
-                C.NARRATIVE: fake_narrative(i),
-                C.COMPANY: FAKE_COMPANIES[i % 3],
-                C.STATE: FAKE_STATES[i % 3],
-                C.TAGS: None,
-                C.SUBMITTED_VIA: "Web",
-                C.COMPANY_RESPONSE: RESPONSES[i % 2],
-                C.TIMELY_RESPONSE: "Yes",
-            }
-        )
-    return pd.DataFrame(rows)
-
-
-def labeled_sample(n: int = 200, positive_rate: float = 0.2, seed: int = 0):
-    """A labelled sample shaped like the output of the `sample` stage.
-
-    Features are random, so no feature should predict the label.
-    """
-    rng = np.random.default_rng(seed)
-    labels = (rng.random(n) < positive_rate).astype("int8")
-    labels[:2] = [0, 1]  # guarantee both classes
-    return pd.DataFrame(
-        {
-            C.COMPLAINT_ID: np.arange(5000, 5000 + n),
-            C.DATE_RECEIVED: pd.Timestamp("2019-01-01")
-            + pd.to_timedelta(rng.integers(0, 1500, n), unit="D"),
-            C.PRODUCT: rng.choice(["Synthetic product 1", "Synthetic product 2"], n),
-            C.SUB_PRODUCT: rng.choice(["Synthetic sub 1", "Synthetic sub 2", None], n),
-            C.NARRATIVE: [fake_narrative(i) for i in range(n)],
-            C.COMPANY: rng.choice(FAKE_COMPANIES, n),
-            C.STATE: rng.choice(FAKE_STATES, n),
-            C.TAGS: rng.choice(TAG_VALUES, n),
-            C.SUBMITTED_VIA: "Web",
-            C.COMPANY_RESPONSE: rng.choice([*RESPONSES, None], n),
-            C.TIMELY_RESPONSE: rng.choice(["Yes", "No"], n),
-            C.LABEL: labels,
-        }
-    )
-
-
-def raw_csv_rows() -> list[dict[str, str]]:
-    """Rows as they would appear in a raw CFPB CSV export (all strings)."""
-    base = {
-        "Date received": "2019-06-01",
-        "Product": "Debt collection",
-        "Sub-product": "Synthetic sub-product",
-        "Issue": "Attempts to collect debt not owed",
-        "Sub-issue": "Debt is not yours",
-        "Consumer complaint narrative": "synthetic narrative text",
-        "Company public response": "",
-        "Company": "SYNTHETIC-COMPANY-A",
-        "State": "zz",
-        "ZIP code": "000XX",
-        "Tags": "",
-        "Consumer consent provided?": "Consent provided",
-        "Submitted via": "Web",
-        "Date sent to company": "2019-06-02",
-        "Company response to consumer": "Closed with explanation",
-        "Timely response?": "Yes",
-        "Consumer disputed?": "N/A",
-        "Complaint ID": "1",
-    }
-    return [
-        base,
-        base | {"Complaint ID": "2", "Consumer complaint narrative": ""},  # no narrative
-        base | {"Complaint ID": "3", "Date received": "2017-01-01"},  # before range
-        base | {"Complaint ID": "4", "Consumer complaint narrative": "  another  "},
-    ]
-
-
 # (config name, df-analyze estimator class) for fake df-analyze results.
 FAKE_DFA_MODELS = [("dummy", "DummyClassifier"), ("lgbm", "LightGBMClassifier"),
-                   ("catboost", "CatBoostClassifier")]  # fmt: skip
+                   ("catboost", "CatBoostClassifier"),
+                   ("lr", "LRClassifier")]  # fmt: skip
 
 
 def fake_df_analyze_results(
@@ -186,6 +48,8 @@ def fake_df_analyze_results(
                 "score": score,
                 "probs_test": np.column_stack([1 - p1, p1]).tolist(),
                 "preds_test": (p1 > 0.5).astype(int).tolist(),
+                "params": "{'n_estimators': 50, 'learning_rate': 0.1}",
+                "selected_cols": ["own_f00", "own_f01"],
             }
         )
         tuned.append(
@@ -202,17 +66,20 @@ def fake_df_analyze_results(
     return entries, pd.DataFrame(tuned)
 
 
-def fake_test_meta(n: int) -> pd.DataFrame:
-    """Invented test-complaint details for the web report, in test order."""
+def fake_test_meta(n: int, n_features: int = 4, seed: int = 0) -> pd.DataFrame:
+    """Invented test-node details for the web report, in test order: node IDs
+    and each node's top features as (name, value, percentile) tuples."""
+    rng = np.random.default_rng(seed)
     return pd.DataFrame(
         {
-            C.COMPLAINT_ID: [f"SYN-{i:04d}" for i in range(n)],
-            C.DATE_RECEIVED: pd.date_range("2020-01-01", periods=n, freq="D"),
-            C.PRODUCT: ["Debt collection"] * n,
-            C.STATE: [FAKE_STATES[i % len(FAKE_STATES)] for i in range(n)],
-            C.NARRATIVE: [fake_narrative(i) for i in range(n)],
+            C.NODE_ID: [9000 + i for i in range(n)],
+            "top_features": [
+                [(f"own__f{j:02d}", float(rng.uniform()), float(rng.uniform()))
+                 for j in range(n_features)]
+                for _ in range(n)
+            ],
         }
-    )
+    )  # fmt: skip
 
 
 def fake_shared_cv(
@@ -243,27 +110,209 @@ def fake_shared_cv(
     return pd.DataFrame(rows)
 
 
-def renamed_product_complaints() -> pd.DataFrame:
-    """Invented complaints where a product is renamed part-way through, the
-    pattern the label audit must make visible. "Synthetic product OLD" exists in
-    2019-2020 (half fraud), "Synthetic product NEW" only in 2021 (no fraud), and
-    "Synthetic product STABLE" in every year (one fraud in four)."""
-    rows = []
-    for year in (2019, 2020):
-        for i in range(4):
-            rows.append(("Synthetic product OLD", f"{year}-03-0{i + 1}", i % 2))
-    for i in range(4):
-        rows.append(("Synthetic product NEW", f"2021-0{i + 5}-01", 0))
-    for year in (2019, 2020, 2021):
-        for i in range(4):
-            rows.append(("Synthetic product STABLE", f"{year}-07-0{i + 1}", int(i == 0)))
+def fake_model_tables(
+    n_train: int = 180, n_test: int = 120, seed: int = 0
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Invented df-analyze input tables: continuous, ordinal and binary `own__`
+    columns plus `target`, shaped like the df_analyze_input stage's output.
+    Features are random noise, so none predicts the label."""
+    rng = np.random.default_rng(seed)
+
+    def table(n: int) -> pd.DataFrame:
+        y = (rng.random(n) < 0.2).astype(int)
+        y[:2] = [0, 1]  # both classes
+        return pd.DataFrame(
+            {
+                "own__f00": rng.normal(size=n),
+                "own__f01": rng.uniform(size=n),
+                "own__f02": rng.integers(0, 6, n),
+                "own__f03": rng.integers(0, 2, n),
+                "target": y,
+            }
+        )
+
+    return table(n_train), table(n_test)
+
+
+def fake_care_gnn_mat(
+    n_nodes: int = 60, n_features: int = 5, unlabelled_prefix: int = 8, seed: int = 0
+) -> dict:
+    """Invented contents of a CARE-GNN-style .mat file (for scipy.io.savemat):
+    sparse `features`, a 1 x n `label` row (0 for the unlabelled prefix, as in
+    Amazon), two symmetric relations and their union `homo`.
+
+    Planted structure for the tests: labelled nodes p and p+1 have identical
+    feature rows (a duplicate group); relation `net_aaa` links nodes in pairs
+    (2k, 2k+1) for k < 10, so those pairs are its connected components."""
+    import scipy.sparse as sp  # noqa: PLC0415
+
+    rng = np.random.default_rng(seed)
+    features = rng.integers(0, 9, size=(n_nodes, n_features)).astype(float)
+    features[:, 0] = np.arange(n_nodes)  # unique rows unless planted below
+    p = unlabelled_prefix
+    features[p + 1] = features[p]
+    labels = (rng.random(n_nodes) < 0.3).astype(float)
+    labels[:p] = 0  # unlabelled nodes are stored as 0
+    labels[p], labels[p + 2] = 1, 0  # both classes among labelled nodes
+
+    def symmetric(pairs: list[tuple[int, int]]) -> sp.csc_matrix:
+        rows = [a for a, b in pairs] + [b for a, b in pairs]
+        cols = [b for a, b in pairs] + [a for a, b in pairs]
+        return sp.csc_matrix((np.ones(len(rows)), (rows, cols)), shape=(n_nodes,) * 2)
+
+    pairs_a = [(2 * k, 2 * k + 1) for k in range(10)]
+    pairs_b = [(int(a), int(b)) for a, b in rng.integers(0, n_nodes, (30, 2)) if a != b]
+    a, b = symmetric(pairs_a), symmetric(pairs_b)
+    homo = ((a + b) > 0).astype(float)
+    return {
+        "features": sp.csc_matrix(features),
+        "label": labels.reshape(1, -1),
+        "net_aaa": a,
+        "net_bbb": b,
+        "homo": sp.csc_matrix(homo),
+    }
+
+
+def fake_node_table(
+    n: int = 400, unlabelled: int = 0, group_size: int = 3, seed: int = 0
+) -> pd.DataFrame:
+    """Invented node table shaped like the load stage's output: the first
+    `unlabelled` nodes have no label; labelled nodes come in groups of
+    `group_size` consecutive nodes that share one label (like a YelpChi user's
+    reviews), about 15% positive."""
+    rng = np.random.default_rng(seed)
+    groups = np.arange(n) // group_size
+    group_label = (rng.random(groups.max() + 1) < 0.15).astype(int)
+    label = pd.array(group_label[groups], dtype="Int8")
+    is_labelled = np.arange(n) >= unlabelled
+    label[~is_labelled] = pd.NA
+    split = pd.array([None] * n, dtype="string")
+    split[~is_labelled] = C.UNLABELLED
     return pd.DataFrame(
         {
-            C.PRODUCT: [r[0] for r in rows],
-            C.SUB_PRODUCT: [
-                None if i % 3 == 0 else "Synthetic sub 1" for i in range(len(rows))
-            ],
-            C.DATE_RECEIVED: pd.to_datetime([r[1] for r in rows]),
-            C.LABEL: np.array([r[2] for r in rows], dtype="int8"),
+            C.NODE_ID: np.arange(n, dtype=np.int64),
+            C.LABEL: label,
+            C.IS_LABELLED: is_labelled,
+            C.GROUP_ID: groups.astype(np.int64),
+            C.SPLIT: split,
+            C.CV_FOLD: pd.array([None] * n, dtype="Int8"),
         }
     )
+
+
+def fake_block(name: str, n: int = 10, width: int = 3, seed: int = 0) -> pd.DataFrame:
+    """Invented feature block: node_id plus <name>__x0 ... columns of noise."""
+    rng = np.random.default_rng(seed)
+    block = pd.DataFrame(rng.normal(size=(n, width))).add_prefix(f"{name}__x")
+    block.insert(0, C.NODE_ID, np.arange(n, dtype=np.int64))
+    return block
+
+
+def fake_embeddings(
+    n: int, relations: tuple[str, ...], dim: int = 8, seed: int = 0
+) -> dict[str, np.ndarray]:
+    """Invented raw node embeddings (float32 noise), one (n, dim) per relation,
+    shaped like the gnn_embed stage's raw_<relation>.npy."""
+    rng = np.random.default_rng(seed)
+    return {r: rng.normal(size=(n, dim)).astype(np.float32) for r in relations}
+
+
+def fake_edges(n: int, n_pairs: int, seed: int = 0) -> np.ndarray:
+    """Invented undirected edge list over nodes 0..n-1, shaped like the load
+    stage's output: (2, E) int32, src < dst, no self-loops, no repeats."""
+    rng = np.random.default_rng(seed)
+    pairs = rng.integers(0, n, size=(2, n_pairs))
+    pairs = pairs[:, pairs[0] != pairs[1]]
+    return np.unique(np.sort(pairs, axis=0), axis=1).astype(np.int32)
+
+
+def fake_feature_graph(
+    n: int = 60,
+    width: int = 4,
+    relations: tuple[str, ...] = ("aaa", "bbb"),
+    seed: int = 0,
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, np.ndarray]]:
+    """Invented graph for the graph-block tests: a node table whose first n/10
+    nodes are unlabelled and whose labelled nodes are split about 60/40 into
+    train/test at random; an own block (own__f00, ...) of noise; and one random
+    edge list per relation."""
+    rng = np.random.default_rng(seed)
+    nodes = fake_node_table(n=n, unlabelled=n // 10, seed=seed)
+    labelled = nodes[C.IS_LABELLED].to_numpy()
+    nodes.loc[labelled, C.SPLIT] = np.where(
+        rng.random(int(labelled.sum())) < 0.6, C.TRAIN, C.TEST
+    )
+    own = fake_block(C.OWN_BLOCK, n=n, width=width, seed=seed)
+    own.columns = [C.NODE_ID, *(f"own__f{j:02d}" for j in range(width))]
+    edges = {r: fake_edges(n, 3 * n, seed + i) for i, r in enumerate(relations)}
+    return nodes, own, edges
+
+
+def fake_inferred_types(kinds: dict[str, str]) -> pd.DataFrame:
+    """Invented df-analyze inspection/inferred_types.csv: index feature_name,
+    columns user, inferred, reason (as written by InspectionResults.basic_df)."""
+    frame = pd.DataFrame(
+        {
+            "user": ["ord" if k.startswith("user-ord") else "" for k in kinds.values()],
+            "inferred": list(kinds.values()),
+            "reason": ["fake reason"] * len(kinds),
+        },
+        index=pd.Index(list(kinds), name="feature_name"),
+    )
+    return frame
+
+
+def fake_model_a_metadata(model_file: str = "model_a.joblib") -> dict:
+    """Invented model_a.json contents (export_model stage); describes no real
+    model."""
+    return {
+        "format_version": 1,
+        "dataset": "fake",
+        "feature_set": "m1_own",
+        "run": "20260101T000000Z",
+        "results_dir": "outputs/fake/m1_own/df_analyze/run/results/test00",
+        "model": "lgbm",
+        "model_cls": "LightGBMClassifier",
+        "selection": "none",
+        "embed_selector": "",
+        "selection_label": "none",
+        "input_columns": ["own_f00", "own_f01"],
+        "prepared_columns": ["own_f00", "own_f01", "own_f02"],
+        "tuned_params": {"n_estimators": 50},
+        "threshold": 0.3,
+        "threshold_rule": "max_f1 on out-of-fold training predictions",
+        "seed": 555,
+        "df_analyze_commit": "0" * 40,
+        "source": "decoded",
+        "model_file": model_file,
+        "model_format": "joblib",
+        "verification": {"max_abs_diff_native": 0.0, "tolerance": 1e-9},
+        "package_versions": {"python": "3.13.0", "lightgbm": "4.6.0"},
+    }
+
+
+def fake_oof_predictions(
+    keys: list[tuple[str, str]], y_train: np.ndarray, folds: np.ndarray, seed: int = 0
+) -> pd.DataFrame:
+    """Invented cv_select.py out-of-fold predictions: for each (model,
+    selection) key, a tuned and a default-settings row per training row."""
+    rng = np.random.default_rng(seed)
+    classes = dict(FAKE_DFA_MODELS)
+    frames = []
+    for model, selection in keys:
+        for settings in ("tuned", "default"):
+            prob = np.clip(rng.uniform(0, 0.6, len(y_train)) + 0.3 * y_train, 0, 1)
+            frames.append(
+                pd.DataFrame(
+                    {
+                        "model_cls": classes[model],
+                        "selection": selection,
+                        "embed_selector": "",
+                        "settings": settings,
+                        "row": np.arange(len(y_train)),
+                        "fold": folds,
+                        "prob": prob,
+                    }
+                )
+            )
+    return pd.concat(frames, ignore_index=True)

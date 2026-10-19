@@ -1,33 +1,49 @@
 """Pipeline stages, in order. `run.py` and `scripts/NN_*.py` both call these.
 
-Each stage reads its inputs from data/ or outputs/ and writes its outputs
-there, so any stage can be rerun on its own. New stages (graph, GNN,
-evaluation, explanation) are added to STAGES as they are implemented.
+Each stage reads its inputs from data/ or outputs/ (under the active
+dataset's subfolder) and writes its outputs there, so any stage can be rerun
+on its own. New stages (graph features, GNNs, evaluation) are added to STAGES
+as they are implemented.
 """
 
 from __future__ import annotations
 
 import json
-import math
+import os
+import shutil
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pandas as pd
-import pyarrow.parquet as pq
 
 from fraud_detect import columns as C
-from fraud_detect.config import REPO_ROOT, Paths, df_analyze_dir, load_yaml
-from fraud_detect.data import audit, dedup, label, load, sample
+from fraud_detect.config import REPO_ROOT, Paths, dataset_config, df_analyze_dir
+from fraud_detect.data import audit, care_gnn, download, split
 from fraud_detect.external import ExternalToolError, run_df_analyze_script
-from fraud_detect.features import tabular, text
-from fraud_detect.models import df_analyze, df_analyze_report, selection
+from fraud_detect.features import blocks, graph, own
+from fraud_detect.models import (
+    df_analyze,
+    df_analyze_report,
+    evaluation,
+    model_export,
+    selection,
+)
 from fraud_detect.report import web
-from fraud_detect.runlog import git_commit, write_json
-from fraud_detect.runstate import CHECKPOINT_DIR, UnitStore, atomic_write_text
+from fraud_detect.runlog import git_commit, package_versions
+from fraud_detect.runstate import (
+    CHECKPOINT_DIR,
+    UnitStore,
+    atomic_write,
+    atomic_write_csv,
+    atomic_write_json,
+    atomic_write_parquet,
+    atomic_write_text,
+    config_fingerprint,
+)
 
 
 class StageError(RuntimeError):
@@ -42,10 +58,27 @@ class Context:
     # True when this stage was interrupted earlier and is being continued with
     # `run.py --resume`: keep the units it already finished.
     resume: bool = False
+    # run.py --force: the download stage may then replace a raw file whose
+    # checksum differs from the expected one.
+    force: bool = False
 
     @property
     def seed(self) -> int:
         return int(self.config["seed"])
+
+    @property
+    def dataset(self) -> str:
+        return str(self.config["dataset"])
+
+    @property
+    def split_seed(self) -> int:
+        """Seed of the grouped split: independent for each split repeat."""
+        return self.seed + 1000 * int(self.config["split"].get("repeat", 0))
+
+    @property
+    def data(self) -> dict[str, Any]:
+        """The active dataset's config section."""
+        return dataset_config(self.config)
 
     def unit_store(self, stage: str) -> UnitStore:
         """Per-unit checkpoints for a long stage (see fraud_detect.runstate).
@@ -62,6 +95,17 @@ class Stage:
     description: str
     run: Callable[[Context], None]
     outputs: Callable[[Paths], list[Path]]
+    # Optional: other files whose presence also means the stage has nothing
+    # left to do (see the download stage).
+    skip_when: Callable[[Paths], list[Path]] | None = None
+
+    def is_done(self, paths: Paths) -> bool:
+        """True when every output exists (or every `skip_when` file does)."""
+        if all(o.exists() for o in self.outputs(paths)):
+            return True
+        return self.skip_when is not None and all(
+            p.exists() for p in self.skip_when(paths)
+        )
 
 
 def _require(*paths: Path) -> None:
@@ -70,153 +114,618 @@ def _require(*paths: Path) -> None:
             raise StageError(f"Missing input {p}. Run the earlier stages first.")
 
 
-def _read_ids(path: Path) -> pd.Series:
-    return pd.read_csv(path)[C.COMPLAINT_ID]
+def _require_mat(ctx: Context) -> None:
+    """The raw .mat; a clone that only unpacked a bundle has not downloaded it."""
+    if not ctx.paths.mat.exists():
+        raise StageError(
+            f"Missing {ctx.paths.mat}. Download it with `uv run run.py --dataset "
+            f"{ctx.dataset} --only download --force`."
+        )
 
 
 # --------------------------------------------------------------------------
-# Stage 1: load
+# Stage 1: download (checksum-verified)
+# --------------------------------------------------------------------------
+def run_download(ctx: Context) -> None:
+    try:
+        download.download_dataset(
+            ctx.paths.raw_dir, ctx.config["download"]["base_url"], ctx.data, ctx.force
+        )
+    except download.DownloadError as e:
+        raise StageError(str(e)) from e
+
+
+# --------------------------------------------------------------------------
+# Stage 2: load the .mat: node table, relation edge lists, count checks
 # --------------------------------------------------------------------------
 def run_load(ctx: Context) -> None:
-    cfg = ctx.config["load"]
-    files = load.find_raw_files(ctx.paths.raw_dir, cfg["archives"])
-    date_min = pd.Timestamp(cfg["date_min"])
-    date_max = pd.Timestamp(cfg["date_max"])
-    frames, summaries = [], []
-    for archive, paths in files.items():
-        for path in paths:
-            print(f"Reading {archive}/{path.name}", flush=True)
-            frame, summary = load.read_archive_csv(
-                path, archive, date_min, date_max, int(cfg["chunksize"])
-            )
-            frames.append(frame)
-            summaries.append(summary)
-    df, n_exact_dupes = load.combine_archives(frames)
-
-    ctx.paths.complaints.parent.mkdir(parents=True, exist_ok=True)
-    df.to_parquet(ctx.paths.complaints, index=False)
-
-    reports = ctx.paths.reports_dir
-    reports.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame([s.__dict__ for s in summaries]).to_csv(
-        reports / "raw_files.csv", index=False
-    )
-    categories = None
-    if ctx.paths.categories_file.exists():
-        categories = label.CategoryConfig.from_dict(load_yaml(ctx.paths.categories_file))
-    label.candidate_report(df, categories).to_csv(
-        reports / "category_values.csv", index=False
-    )
-    df[C.PRODUCT].value_counts(dropna=False).rename("n_complaints").to_csv(
-        reports / "product_counts.csv"
-    )
-    write_json(
-        reports / "load_summary.json",
-        {
-            "n_complaints_with_narrative_in_range": len(df),
-            "n_exact_duplicate_rows_dropped": n_exact_dupes,
-            "date_min": str(df[C.DATE_RECEIVED].min().date()),
-            "date_max": str(df[C.DATE_RECEIVED].max().date()),
-        },
-    )
-    print(
-        f"Kept {len(df):,} complaints with narratives. Review "
-        f"{reports / 'category_values.csv'} before running the label stage."
-    )
-
-
-# --------------------------------------------------------------------------
-# Stage 2: label
-# --------------------------------------------------------------------------
-def run_label(ctx: Context) -> None:
-    _require(ctx.paths.complaints, ctx.paths.categories_file)
-    df = pd.read_parquet(ctx.paths.complaints)
-    categories = label.CategoryConfig.from_dict(load_yaml(ctx.paths.categories_file))
+    p, data = ctx.paths, ctx.data
+    _require_mat(ctx)
+    print(f"Reading {p.mat}", flush=True)
     try:
-        label.validate_categories(df, categories)
-    except label.LabelConfigError as e:
-        raise StageError(f"{ctx.paths.categories_file}\n{e}") from e
-    labeled = label.apply_labels(df, categories)
-    labeled.to_parquet(ctx.paths.labeled, index=False)
-    excluded = label.excluded_report(df, categories)
-    excluded.to_csv(ctx.paths.reports_dir / "label_excluded.csv", index=False)
-    print(
-        f"Excluded {int(excluded['n_complaints'].sum()):,} complaints in "
-        f"{len(excluded)} ambiguous categories (see label_excluded.csv)"
-    )
-    summary = (
-        labeled.groupby(C.PRODUCT)[C.LABEL]
-        .agg(n_complaints="size", n_positive="sum", positive_rate="mean")
-        .reset_index()
-    )
-    summary.to_csv(ctx.paths.reports_dir / "label_summary.csv", index=False)
-    print(summary.to_string(index=False))
+        graph = care_gnn.read_mat(p.mat, data["relations"])
+        edges = {
+            name: care_gnn.edge_list(graph.adjacency[name])
+            for name in care_gnn.relation_names(data["relations"])
+        }
+        care_gnn.check_edges_in_range(edges, graph.n_nodes)
+        groups = care_gnn.group_ids(data["groups"], graph.features, edges)
+        nodes = care_gnn.node_table(graph.labels, int(data["unlabelled_prefix"]), groups)
+        counts = care_gnn.observed_counts(graph, nodes, edges)
+        care_gnn.check_counts(counts, data["expected"], p.mat.name)
+    except care_gnn.DatasetError as e:
+        raise StageError(str(e)) from e
 
-
-# --------------------------------------------------------------------------
-# Stage 3: deduplicate and sample
-# --------------------------------------------------------------------------
-def run_sample(ctx: Context) -> None:
-    _require(ctx.paths.labeled)
-    cfg, dcfg = ctx.config["sample"], ctx.config["dedup"]
-    df = pd.read_parquet(ctx.paths.labeled)
-    n = int(cfg["n_complaints"])
-    pool_n = min(len(df), math.ceil(n * float(cfg["pool_factor"])))
-    pool = sample.stratified_sample(df, pool_n, ctx.seed)
-    print(f"Deduplicating a stratified pool of {pool_n:,} complaints", flush=True)
-    result = dedup.remove_near_duplicates(
-        pool,
-        shingle_words=int(dcfg["shingle_words"]),
-        threshold=float(dcfg["jaccard_threshold"]),
-        num_perm=int(dcfg["num_perm"]),
-        seed=ctx.seed,
-    )
-    if len(result.kept) < n:
-        raise StageError(
-            f"Only {len(result.kept):,} complaints remain after deduplication; "
-            f"increase sample.pool_factor (currently {cfg['pool_factor']})."
+    mat_sha256 = download.sha256_file(p.mat)
+    relations = []
+    for name, e in edges.items():
+        atomic_write(p.relation_file(name),
+                     lambda tmp, e=e: np.savez_compressed(tmp, edges=e))  # fmt: skip
+        relations.append(
+            {
+                "name": name,
+                "source_key": data["relations"].get(name, care_gnn.HOMO),
+                "file": p.relation_file(name).name,
+                "n_edges": int(e.shape[1]),
+                "n_nodes": graph.n_nodes,
+                "mat_sha256": mat_sha256,
+            }
         )
-    final = sample.stratified_sample(result.kept, n, ctx.seed)
-    final.to_parquet(ctx.paths.sample, index=False)
-    write_json(
-        ctx.paths.reports_dir / "sample_summary.json",
-        {
-            "n_labeled_population": len(df),
-            "population_positive_rate": float(df[C.LABEL].mean()),
-            "pool_size": pool_n,
-            "near_duplicates_removed_from_pool": result.n_removed,
-            "duplicate_groups": result.n_groups_with_duplicates,
-            "duplicate_groups_with_mixed_labels": result.n_groups_with_mixed_labels,
-            "n_sample": len(final),
-            "sample_positive_rate": float(final[C.LABEL].mean()),
-        },
+    atomic_write_parquet(p.nodes, nodes)
+    labelled = nodes[C.IS_LABELLED]
+    summary = {
+        "dataset": ctx.dataset,
+        "source": p.mat.name,
+        "mat_sha256": mat_sha256,
+        **counts,
+        "n_unlabelled": int((~labelled).sum()),
+        "positive_rate_labelled": counts["n_positive"] / max(counts["n_labelled"], 1),
+        "grouping": data["groups"],
+        "n_groups_labelled": int(nodes.loc[labelled, C.GROUP_ID].nunique()),
+    }
+    atomic_write_json(p.reports_dir / "load_summary.json", summary)
+    manifest = {
+        "dataset": ctx.dataset,
+        "format": "npz key 'edges': int32 array of shape (2, E); each undirected "
+        "edge once with src < dst; no self-loops",
+        "source": p.mat.name,
+        "mat_sha256": mat_sha256,
+        "n_nodes": graph.n_nodes,
+        "relations": relations,
+    }
+    # Written last: the stage counts as finished only when everything is saved.
+    atomic_write_json(p.graph_manifest, manifest)
+    edge_text = ", ".join(f"{r['name']} {r['n_edges']:,}" for r in relations)
+    print(
+        f"{graph.n_nodes:,} nodes ({counts['n_labelled']:,} labelled, "
+        f"{counts['n_positive']:,} positive), {counts['n_features']} features, "
+        f"{summary['n_groups_labelled']:,} split groups among labelled nodes; "
+        f"undirected edges: {edge_text}. All counts match the config."
     )
-    print(f"Sampled {len(final):,} complaints; positive rate {final[C.LABEL].mean():.4f}")
+
+
+def _read_json(path: Path) -> Any:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def load_edges(path: Path) -> np.ndarray:
+    """A relation's (2, E) edge list written by the load stage."""
+    with np.load(path) as f:
+        return f["edges"]
+
+
+def read_nodes(p: Paths) -> pd.DataFrame:
+    """The node table, checked against the saved split files when they exist."""
+    _require(p.nodes)
+    nodes = pd.read_parquet(p.nodes)
+    if p.train_ids.exists() and p.test_ids.exists():
+        try:
+            split.check_against_saved_ids(
+                nodes, pd.read_csv(p.train_ids), pd.read_csv(p.test_ids)
+            )
+        except split.SplitError as e:
+            raise StageError(str(e)) from e
+    return nodes
 
 
 # --------------------------------------------------------------------------
-# Stage 4: train/test split
+# Stage 3: grouped, stratified train/test split and shared CV folds
 # --------------------------------------------------------------------------
 def run_split(ctx: Context) -> None:
-    _require(ctx.paths.sample)
-    df = pd.read_parquet(ctx.paths.sample)
-    split = sample.stratified_split(df, float(ctx.config["split"]["test_size"]), ctx.seed)
-    ctx.paths.processed_dir.mkdir(parents=True, exist_ok=True)
-    split.to_csv(ctx.paths.split, index=False)
-    sample.ids_for(split, "train").to_frame().to_csv(ctx.paths.train_ids, index=False)
-    sample.ids_for(split, "test").to_frame().to_csv(ctx.paths.test_ids, index=False)
-    merged = split.merge(df[[C.COMPLAINT_ID, C.LABEL]], on=C.COMPLAINT_ID)
-    summary = merged.groupby("split")[C.LABEL].agg(n="size", positive_rate="mean")
-    summary.to_csv(ctx.paths.reports_dir / "split_summary.csv")
-    print(summary.to_string())
+    p = ctx.paths
+    _require(p.nodes)
+    nodes = pd.read_parquet(p.nodes)
+    cfg = ctx.config["split"]
+    try:
+        nodes = split.split_nodes(nodes, cfg, ctx.split_seed)
+        summary = split.summary(nodes, cfg, ctx.split_seed)
+    except split.SplitError as e:
+        raise StageError(str(e)) from e
+    atomic_write_parquet(p.nodes, nodes)
+    for path, table in (
+        (p.train_ids, split.ids_table(nodes, C.TRAIN)),
+        (p.test_ids, split.ids_table(nodes, C.TEST)),
+        (p.cv_folds, split.folds_table(nodes)),
+    ):
+        atomic_write_csv(path, table)
+    atomic_write_json(p.reports_dir / "split_summary.json", summary)
+    atomic_write_json(p.split_summary, summary)  # last: marks the stage done
+    for part in ("train", "test"):
+        s = summary[part]
+        print(f"{part:>5}: {s['n_nodes']:>6,} nodes, {s['n_positive']:>5,} positive "
+              f"({s['positive_rate']:.4f}), {s['n_groups']:>6,} groups")  # fmt: skip
+    print(f"CV folds on train: {cfg['cv_folds']}; no group crosses train/test or folds.")
 
 
 # --------------------------------------------------------------------------
-# Stage 5: embed narratives with df-embed's code (on the GPU by default)
+# Stage 4: own-feature block and column types (training nodes only)
+# --------------------------------------------------------------------------
+def run_features(ctx: Context) -> None:
+    p = ctx.paths
+    _require_mat(ctx)
+    _require(p.train_ids)
+    nodes = read_nodes(p)
+    features = care_gnn.read_features(p.mat)
+    if len(features) != len(nodes):
+        raise StageError(
+            f"{p.mat.name} has {len(features)} rows, nodes.parquet {len(nodes)}"
+        )
+    block = own.own_block(features)
+    train_ids = pd.read_csv(p.train_ids)[C.NODE_ID].to_numpy()
+    spec = own.column_spec(block, train_ids)
+    if spec[own.CONSTANT]:
+        raise StageError(
+            f"Columns constant on the training nodes: {spec[own.CONSTANT]}. They "
+            "carry no information and df-analyze would drop them; ask the group "
+            "before removing them."
+        )
+    atomic_write_parquet(p.block_file(C.OWN_BLOCK), block)
+    atomic_write_json(p.column_spec, spec)  # last: marks the stage done
+    print(
+        f"own block: {block.shape[1] - 1} features for {len(block):,} nodes; types "
+        f"from training nodes: {len(spec[own.BINARY])} binary, "
+        f"{len(spec[own.ORDINAL])} ordinal, {len(spec[own.CONTINUOUS])} continuous"
+    )
+
+
+# --------------------------------------------------------------------------
+# Stage 5: audit (counts and statistics only)
+# --------------------------------------------------------------------------
+AUDIT_REPORT = "audit.md"
+AUDIT_TABLES = ("audit_features.csv", "audit_relations.csv", "audit_groups.csv")
+
+
+def run_audit(ctx: Context) -> None:
+    p, data = ctx.paths, ctx.data
+    _require(p.graph_manifest, p.block_file(C.OWN_BLOCK), p.column_spec, p.split_summary)
+    nodes = read_nodes(p)
+    block = pd.read_parquet(p.block_file(C.OWN_BLOCK))
+    spec = _read_json(p.column_spec)
+    manifest = _read_json(p.graph_manifest)
+    threshold = float(ctx.config["audit"]["shortcut_auroc"])
+
+    labelled = nodes[C.IS_LABELLED]
+    found = {
+        "n_nodes": len(nodes),
+        "n_labelled": int(labelled.sum()),
+        "n_positive": int(nodes.loc[labelled, C.LABEL].sum()),
+        "n_features": block.shape[1] - 1,
+        "n_edges": {r["name"]: r["n_edges"] for r in manifest["relations"]},
+    }
+    try:
+        care_gnn.check_counts(found, data["expected"], ctx.dataset)
+    except care_gnn.DatasetError as e:
+        raise StageError(str(e)) from e
+
+    features = audit.feature_table(block, nodes, spec, threshold)
+    duplicates = audit.duplicate_counts(block, nodes)
+    groups = audit.group_table(nodes)
+    purity = audit.group_purity(nodes)
+    relations = pd.DataFrame(
+        [
+            audit.relation_row(r["name"], load_edges(p.graph_dir / r["file"]), nodes)
+            for r in manifest["relations"]
+        ]
+    )
+    report = audit.report(
+        ctx.dataset,
+        audit.count_table(found, data["expected"]),
+        _read_json(p.split_summary),
+        features,
+        duplicates,
+        groups,
+        purity,
+        relations,
+        threshold,
+    )
+    for name, table in zip(AUDIT_TABLES, (features, relations, groups), strict=True):
+        atomic_write_csv(p.reports_dir / name, table)
+    atomic_write_json(p.reports_dir / "audit_summary.json",
+                      {"duplicates": duplicates, "group_purity": purity})  # fmt: skip
+    if duplicates["test_rows_identical_to_a_train_row"]:
+        raise StageError(
+            f"{duplicates['test_rows_identical_to_a_train_row']} test rows are identical "
+            "to a training row, so identical nodes sit on both sides of the split. "
+            f"See {p.reports_dir / 'audit_features.csv'} and fix the grouping."
+        )
+    atomic_write(p.reports_dir / AUDIT_REPORT,
+                 lambda tmp: tmp.write_text(report, encoding="utf-8"))  # fmt: skip
+    flagged = features[features["possible_shortcut"]]
+    print(report.split("## Exact duplicate")[0])
+    print(
+        f"{len(flagged)} feature(s) flagged as possible shortcuts "
+        f"(AUROC >= {threshold}). Full audit: {p.reports_dir / AUDIT_REPORT}"
+    )
+
+
+# --------------------------------------------------------------------------
+# Stages 6-7: graph feature blocks (nbr, gnnssl)
+# --------------------------------------------------------------------------
+# A block stage builds its block only for feature sets that use it, and its
+# outputs are only the blocks the active feature set uses: none for m1_own,
+# so a finished m1_own run (or bundle) has nothing left to run here.
+GNN_EMBED_META = "meta.json"
+
+
+def block_outputs(kind: str) -> Callable[[Paths], list[Path]]:
+    """A block stage's outputs: each block of this kind that the active feature
+    set uses (e.g. nbr, nbr_no36) and its column types (written last); nothing
+    when the feature set uses none."""
+
+    def outputs(p: Paths) -> list[Path]:
+        names = blocks.blocks_of_kind(p.blocks, kind)
+        return [f for b in names for f in (p.block_file(b), p.block_spec(b))]
+
+    return outputs
+
+
+def gnn_embed_outputs(p: Paths) -> list[Path]:
+    names = blocks.blocks_of_kind(p.blocks, C.GNNSSL_BLOCK)
+    meta = [p.embed_dir(b) / GNN_EMBED_META for b in names]
+    return [*block_outputs(C.GNNSSL_BLOCK)(p), *meta]
+
+
+def _blocks_to_build(ctx: Context, kind: str) -> list[str]:
+    names = blocks.blocks_of_kind(ctx.paths.blocks, kind)
+    if not names:
+        print(
+            f"Feature set {ctx.config['feature_set']} uses no {kind!r} block, so there "
+            "is nothing to build (run with --set feature_set=<a set using it>)."
+        )
+    return names
+
+
+def _variants(ctx: Context) -> dict[str, list[str]]:
+    return dict(ctx.config.get("feature_variants") or {})
+
+
+def _own_input(ctx: Context, block: str) -> pd.DataFrame:
+    """The own features a graph block is built from: all of them, or without
+    the columns its variant leaves out (e.g. issue #36 for *_no36)."""
+    p = ctx.paths
+    _require(p.block_file(C.OWN_BLOCK), p.train_ids)
+    try:
+        return blocks.own_view(pd.read_parquet(p.block_file(C.OWN_BLOCK)), block,
+                               _variants(ctx))  # fmt: skip
+    except blocks.BlockError as e:
+        raise StageError(str(e)) from e
+
+
+def _relation_edges(ctx: Context) -> dict[str, np.ndarray]:
+    """The dataset's relations (not homo), in config order, as edge lists."""
+    p = ctx.paths
+    _require(p.graph_manifest)
+    return {r: load_edges(p.relation_file(r)) for r in ctx.data["relations"]}
+
+
+def _write_block(p: Paths, name: str, block: pd.DataFrame) -> dict[str, Any]:
+    """Validate a graph block, type its columns on the training nodes (as the
+    features stage does for own), and save both; the spec file is written
+    last and marks the block as finished."""
+    try:
+        blocks.validate_block(name, block)
+    except blocks.BlockError as e:
+        raise StageError(str(e)) from e
+    train_ids = pd.read_csv(p.train_ids)[C.NODE_ID].to_numpy()
+    spec = own.column_spec(block, train_ids)
+    if spec[own.CONSTANT]:
+        raise StageError(
+            f"Columns of block {name!r} constant on the training nodes: "
+            f"{spec[own.CONSTANT]}. Ask the group before dropping them."
+        )
+    atomic_write_parquet(p.block_file(name), block)
+    atomic_write_json(p.block_spec(name), spec)
+    return spec
+
+
+def _type_counts(spec: dict[str, Any]) -> str:
+    return ", ".join(
+        f"{len(spec[kind])} {kind}" for kind in (own.BINARY, own.ORDINAL, own.CONTINUOUS)
+    )
+
+
+def run_neighbour_agg(ctx: Context) -> None:
+    p, cfg = ctx.paths, ctx.config["neighbour_agg"]
+    if list(cfg["statistics"]) != ["mean"]:
+        raise StageError(
+            f"neighbour_agg.statistics is {cfg['statistics']}; only [mean] is "
+            "implemented (1-hop max and 2-hop means are later ablations)."
+        )
+    names = _blocks_to_build(ctx, C.NBR_BLOCK)
+    if not names:
+        return
+    edges = _relation_edges(ctx)
+    for name in names:
+        own_input = _own_input(ctx, name)
+        try:
+            block = graph.build_nbr_block(
+                own_input, edges, log1p_degree=bool(cfg["log1p_degree"]), name=name
+            )
+        except ValueError as e:
+            raise StageError(str(e)) from e
+        spec = _write_block(p, name, block)
+        print(
+            f"{name} block: {block.shape[1] - 1} features from {own_input.shape[1] - 1} "
+            f"own features for {len(block):,} nodes over relations {', '.join(edges)}; "
+            f"types from training nodes: {_type_counts(spec)}"
+        )
+
+
+def split_masks(nodes: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
+    """In node order: `fit` = training nodes (scaler and PCA fits); `loss` = the
+    non-test nodes, train and unlabelled (the DGI loss). From the split
+    column only, never the labels."""
+    ordered = nodes.sort_values(C.NODE_ID)
+    if not np.array_equal(ordered[C.NODE_ID].to_numpy(), np.arange(len(ordered))):
+        raise StageError("nodes.parquet must have one row per node 0..n-1")
+    split = ordered[C.SPLIT].astype("string").fillna("").to_numpy(dtype=str)
+    unknown = sorted(set(split) - {C.TRAIN, C.TEST, C.UNLABELLED})
+    if unknown:
+        raise StageError(f"Nodes without a train/test/unlabelled split: {unknown}")
+    return split == C.TRAIN, split != C.TEST
+
+
+def gnn_embed_fingerprint(ctx: Context, block: str = C.GNNSSL_BLOCK) -> str:
+    """What a gnnssl block depends on besides the data: its settings, the seed,
+    the relations and the own columns its variant leaves out. Recorded in
+    meta.json and checked before use."""
+    try:
+        excluded = blocks.excluded_columns(block, _variants(ctx))
+    except blocks.BlockError as e:
+        raise StageError(str(e)) from e
+    fields = {
+        "gnn_embed": ctx.config["gnn_embed"],
+        "seed": ctx.seed,
+        "relations": list(ctx.data["relations"]),
+    }
+    if excluded:  # keeps the fingerprint of the all-features block unchanged
+        fields["excluded_own_columns"] = excluded
+    return config_fingerprint(fields)
+
+
+def run_gnn_embed(ctx: Context) -> None:
+    """Self-supervised DGI embeddings for each gnnssl block the feature set
+    uses (graph/ssl.py): one unit per (block, relation), then PCA per
+    relation. The raw embeddings stay in outputs/<dataset>/gnn_embed[_variant]/
+    for the comparison page."""
+    names = _blocks_to_build(ctx, C.GNNSSL_BLOCK)
+    if not names:
+        return
+    try:
+        from fraud_detect.graph import ssl  # noqa: PLC0415  (needs the gnn extra)
+    except ImportError as e:
+        raise StageError(
+            "The gnn_embed stage needs torch and torch_geometric. Install them with "
+            f"`uv sync --extra gnn` ({e})."
+        ) from e
+    p = ctx.paths
+    try:
+        cfg = ssl.SSLConfig.from_config(ctx.config["gnn_embed"], ctx.seed)
+        device = ssl.resolve_device(cfg.device)
+    except (TypeError, ValueError) as e:
+        raise StageError(f"gnn_embed settings: {e}") from e
+    fit_mask, loss_mask = split_masks(read_nodes(p))
+    edges = _relation_edges(ctx)
+    store = ctx.unit_store("gnn_embed")
+    for name in names:
+        _embed_block(ctx, ssl, cfg, device, name, store, fit_mask, loss_mask, edges)
+
+
+def _embed_block(
+    ctx: Context,
+    ssl: Any,
+    cfg: Any,
+    device: str,
+    name: str,
+    store: UnitStore,
+    fit_mask: np.ndarray,
+    loss_mask: np.ndarray,
+    edges: dict[str, np.ndarray],
+) -> None:
+    """One gnnssl block: DGI per relation (a saved unit each), PCA, meta.json,
+    then the block and its spec."""
+    p = ctx.paths
+    own_input = _own_input(ctx, name)
+    try:
+        x = ssl.standardized_features(own_input, fit_mask)
+        ssl.check_masks(len(x), fit_mask, loss_mask)
+    except ValueError as e:
+        raise StageError(str(e)) from e
+    print(
+        f"{name}: DGI per relation on {device} from {x.shape[1]} own features; "
+        f"{len(x):,} nodes; loss over {int(loss_mask.sum()):,} non-test nodes; "
+        f"scaler and PCA fit on {int(fit_mask.sum()):,} training nodes",
+        flush=True,
+    )
+    embeddings: dict[str, np.ndarray] = {}
+    logs: dict[str, dict[str, Any]] = {}
+    for relation, rel_edges in edges.items():
+        unit, path = f"{name}/{relation}", p.raw_embedding(relation, name)
+        if store.done(unit) and path.is_file():
+            logs[relation] = store.load(unit)["log"]
+            embeddings[relation] = np.load(path)
+            print(f"  {relation}: finished in the interrupted run; kept")
+            continue
+        result = ssl.embed_relation(x, rel_edges, loss_mask, cfg, relation)
+        atomic_write(path, lambda tmp, z=result.embedding: np.save(tmp, z))
+        store.save(unit, {"log": result.log})
+        embeddings[relation], logs[relation] = result.embedding, result.log
+        log = result.log
+        print(
+            f"  {relation}: {log['n_edges_used']:,} edges, {log['epochs_run']} epochs "
+            f"(best {log['best_epoch']}, loss {log['best_loss']:.4f}) on "
+            f"{log['device']} in {log['seconds']:.1f} s",
+            flush=True,
+        )
+
+    try:
+        block, pca_info = ssl.pca_block(
+            embeddings, fit_mask, cfg.pca_components, cfg.seed, name=name
+        )
+    except ValueError as e:
+        raise StageError(str(e)) from e
+    versions = package_versions()
+    meta = {
+        "block": name,
+        "own_columns_used": [c for c in own_input.columns if c != C.NODE_ID],
+        "own_columns_left_out": blocks.excluded_columns(name, _variants(ctx)),
+        "method": "Deep Graph Infomax (torch_geometric.nn.DeepGraphInfomax), one "
+        "model per relation, no labels",
+        "encoder": f"{cfg.layers} rounds of GCN-normalised propagation over A + I, "
+        f"hidden {cfg.hidden}, output {cfg.out_dim}, PReLU",
+        "corruption": "row shuffle of the node features",
+        "loss_nodes": "non-test nodes (train and unlabelled); test nodes take part "
+        "in message passing only",
+        "fit_nodes": "the feature scaler and each PCA are fit on training nodes only",
+        "n_nodes": len(x),
+        "n_fit_nodes": int(fit_mask.sum()),
+        "n_loss_nodes": int(loss_mask.sum()),
+        "config": asdict(cfg),
+        "config_sha256": gnn_embed_fingerprint(ctx, name),
+        "versions": {
+            k: versions[k] for k in ("torch", "torch-geometric") if k in versions
+        },
+        "cuda_device": ssl.device_name(device),
+        "relations": {r: {**logs[r], **pca_info[r]} for r in edges},
+        "raw_embeddings": {r: p.raw_embedding(r, name).name for r in edges},
+        "columns": [c for c in block.columns if c != C.NODE_ID],
+        "created_utc": datetime.now(UTC).isoformat(timespec="seconds"),
+    }
+    atomic_write_json(p.embed_dir(name) / GNN_EMBED_META, meta)
+    spec = _write_block(p, name, block)
+    explained = ", ".join(
+        f"{r} {pca_info[r]['explained_variance_total']:.0%}" for r in edges
+    )
+    print(
+        f"{name} block: {block.shape[1] - 1} features for {len(block):,} nodes; PCA "
+        f"variance kept per relation: {explained}; types from training nodes: "
+        f"{_type_counts(spec)}"
+    )
+
+
+def check_gnn_embed_settings(ctx: Context, block: str) -> None:
+    """Warn when a gnnssl block was built with other gnn_embed settings, seed,
+    relations or left-out columns than the current config."""
+    meta_path = ctx.paths.embed_dir(block) / GNN_EMBED_META
+    _require(meta_path)
+    if _read_json(meta_path).get("config_sha256") != gnn_embed_fingerprint(ctx, block):
+        print(
+            f"WARNING: the {block} block was built with different gnn_embed settings, "
+            "seed, relations or left-out columns than the current config. Rebuild it "
+            f"with `uv run run.py --dataset {ctx.dataset} --only gnn_embed --force "
+            f"--set feature_set={ctx.config['feature_set']}` if that was not intended."
+        )
+
+
+# --------------------------------------------------------------------------
+# Stage 8: df-analyze input tables for the active feature set
+# --------------------------------------------------------------------------
+FEATURE_SET_INFO = "feature_set.json"
+
+
+def feature_set_blocks(ctx: Context) -> list[str]:
+    return list(ctx.config["feature_sets"][ctx.config["feature_set"]])
+
+
+def column_types(p: Paths, block_names: list[str]) -> dict[str, dict[str, Any]]:
+    """Every column's type, all decided on training nodes: the own block's from
+    column_spec.json, every other block's from its <block>.spec.json."""
+    _require(p.column_spec)
+    types = dict(_read_json(p.column_spec)["columns"])
+    for name in block_names:
+        if blocks.parse_block(name)[0] != C.OWN_BLOCK:  # own_<variant>: own's types
+            _require(p.block_spec(name))
+            types.update(_read_json(p.block_spec(name))["columns"])
+    return types
+
+
+def run_df_analyze_input(ctx: Context) -> None:
+    p = ctx.paths
+    _require(p.train_ids, p.test_ids, p.column_spec)
+    nodes = read_nodes(p)
+    names = feature_set_blocks(ctx)
+    for name in blocks.blocks_of_kind(names, C.GNNSSL_BLOCK):
+        check_gnn_embed_settings(ctx, name)
+    try:
+        features = blocks.load_feature_set(p.features_dir, names, _variants(ctx))
+        train_ids, test_ids = pd.read_csv(p.train_ids), pd.read_csv(p.test_ids)
+        train, test = blocks.model_tables(features, train_ids, test_ids)
+    except blocks.BlockError as e:
+        raise StageError(str(e)) from e
+    # The labels in the ID files must be the node table's labels.
+    by_id = nodes.set_index(C.NODE_ID)[C.LABEL]
+    for ids, table in ((train_ids, train), (test_ids, test)):
+        if not np.array_equal(by_id.loc[ids[C.NODE_ID]].to_numpy(int), table[C.TARGET]):
+            raise StageError("Labels in the split files differ from nodes.parquet")
+    spec = column_types(p, names)
+    feature_cols = [c for c in train.columns if c != C.TARGET]
+    untyped = [c for c in feature_cols if c not in spec]
+    if untyped:
+        raise StageError(
+            f"No column type in {p.column_spec} or the blocks' .spec.json files "
+            f"for: {untyped}"
+        )
+    try:
+        renames = df_analyze.df_analyze_names(feature_cols)
+    except ValueError as e:
+        raise StageError(str(e)) from e
+    # Written with the names df-analyze uses, so it renames nothing.
+    train, test = train.rename(columns=renames), test.rename(columns=renames)
+    info = {
+        "feature_set": ctx.config["feature_set"],
+        "blocks": names,
+        "n_train": len(train),
+        "n_test": len(test),
+        # df-analyze name -> our block column and its type (column_spec.json)
+        "columns": {
+            renames[c]: {"block_column": c, "type": spec[c]["type"]} for c in feature_cols
+        },
+    }
+    atomic_write_parquet(p.df_analyze_input_dir / "train.parquet", train)
+    atomic_write_parquet(p.df_analyze_input_dir / "test.parquet", test)
+    atomic_write_json(p.df_analyze_input_dir / FEATURE_SET_INFO, info)
+    print(
+        f"Feature set {info['feature_set']} ({', '.join(names)}): "
+        f"{len(feature_cols)} features; train {train.shape}, test {test.shape}"
+    )
+
+
+def read_feature_set_info(p: Paths) -> dict[str, Any]:
+    path = p.df_analyze_input_dir / FEATURE_SET_INFO
+    _require(path)
+    return _read_json(path)
+
+
+def columns_of_type(info: dict[str, Any], kind: str) -> list[str]:
+    return [name for name, c in info["columns"].items() if c["type"] == kind]
+
+
+# --------------------------------------------------------------------------
+# Stage 9: run df-analyze; verify its split and its column types
 # --------------------------------------------------------------------------
 # df-analyze models that train on the GPU when CUDA is available.
 GPU_CLASSIFIERS = frozenset({"catboost", "gandalf"})
-GPU_EMBED_RUNNER = REPO_ROOT / "scripts" / "dfa" / "embed_on_device.py"
+CUDA_INFO_RUNNER = REPO_ROOT / "scripts" / "dfa" / "cuda_info.py"
 CUDA_HELP = """df-analyze's environment cannot see a CUDA GPU. Check that:
   - `nvidia-smi` works in this shell (inside a toolbox/container the NVIDIA
     driver's user-space libraries must be visible there too), and
@@ -224,6 +733,8 @@ CUDA_HELP = """df-analyze's environment cannot see a CUDA GPU. Check that:
       uv run --python '{python}' --directory {dfa} \\
         python -c "import torch; print(torch.cuda.is_available())"
 To run on the CPU instead, set `gpu.require: false` in the config."""
+SPLIT_CHECK = "split_check.json"
+TYPE_CHECK = "type_check.json"
 
 
 def _run_dfa(ctx: Context, script: str, args: list[str], log_path: Path) -> None:
@@ -242,14 +753,13 @@ def _run_dfa(ctx: Context, script: str, args: list[str], log_path: Path) -> None
         raise StageError(str(e)) from e
 
 
-def check_cuda(ctx: Context, key: str, purpose: str) -> bool:
+def check_cuda(ctx: Context, purpose: str) -> bool:
     """Ask df-analyze's environment whether it can use a CUDA GPU, log the answer
-    to the run directory as cuda_info_<key>.json, and stop if a GPU is required
-    but missing."""
-    report = ctx.run_dir / f"cuda_info_{key}.json"
-    args = ["--cuda-info", "--report", str(report.resolve())]
-    _run_dfa(ctx, str(GPU_EMBED_RUNNER), args, ctx.run_dir / f"cuda_info_{key}.log")
-    info = json.loads(report.read_text(encoding="utf-8"))
+    to the run directory, and stop if a GPU is required but missing."""
+    report = ctx.run_dir / "cuda_info.json"
+    args = ["--report", str(report.resolve())]
+    _run_dfa(ctx, str(CUDA_INFO_RUNNER), args, ctx.run_dir / "cuda_info.log")
+    info = _read_json(report)
     if info["cuda_available"]:
         print(f"GPU for {purpose}: {info['device_name']} (torch {info['torch']})")
         return True
@@ -262,202 +772,126 @@ def check_cuda(ctx: Context, key: str, purpose: str) -> bool:
     return False
 
 
-def run_embed(ctx: Context) -> None:
-    _require(ctx.paths.sample)
-    dfa = df_analyze_dir(ctx.config)
-    python = ctx.config["df_analyze"].get("python")
-    if not (dfa / text.DF_EMBED_MODEL_DIR).is_dir():
-        raise StageError(
-            f"The df-embed NLP model is not downloaded in {dfa}. Run once:\n"
-            f"  uv run --python '{python}' --directory {dfa} "
-            "python df-embed.py --download --modality nlp"
-        )
-    cfg = ctx.config["embed"]
-    df = pd.read_parquet(ctx.paths.sample)
-    ctx.paths.embed_dir.mkdir(parents=True, exist_ok=True)
-    input_path = ctx.paths.embed_dir / "embed_input.parquet"
-    output_path = ctx.paths.embed_dir / "embed_output.parquet"
-    text.df_embed_input(df).to_parquet(input_path, index=False)
-    output_path.unlink(missing_ok=True)
-    io_args = [
-        "--data", str(input_path.resolve()),
-        "--out", str(output_path.resolve()),
-        "--batch-size", str(cfg["batch_size"]),
-    ]  # fmt: skip
-    if cfg["runner"] == "gpu":
-        # df-embed's own code, run on the GPU when available (see the script).
-        use_gpu = check_cuda(ctx, "embed", "embedding")
-        report = ctx.run_dir / "embed_report.json"
-        args = [
-            *io_args,
-            "--device", "cuda" if use_gpu else "cpu",
-            "--verify-rows", str(cfg["verify_rows"]),
-            "--report", str(report.resolve()),
-        ]  # fmt: skip
-        _run_dfa(ctx, str(GPU_EMBED_RUNNER), args, ctx.run_dir / "embed.log")
-        write_json(
-            ctx.paths.reports_dir / "embed_report.json", json.loads(report.read_text())
-        )
-    elif cfg["runner"] == "df-embed":
-        args = ["--modality", "nlp", *io_args]
-        _run_dfa(ctx, "df-embed.py", args, ctx.run_dir / "df_embed.log")
-    else:
-        raise StageError(
-            f"Unknown embed.runner {cfg['runner']!r}; use 'gpu' or 'df-embed'"
-        )
-    embedded = pd.read_parquet(output_path)
-    table = text.attach_ids_to_embeddings(embedded, df[C.COMPLAINT_ID], df[C.LABEL])
-    table.to_parquet(ctx.paths.embeddings, index=False)
-    print(f"Saved {len(table):,} embeddings of width {table.shape[1] - 1}")
-
-
-# --------------------------------------------------------------------------
-# Stage 6: PCA on text embeddings (fit on training complaints only)
-# --------------------------------------------------------------------------
-def run_pca(ctx: Context) -> None:
-    _require(ctx.paths.embeddings, ctx.paths.train_ids)
-    embeddings = pd.read_parquet(ctx.paths.embeddings)
-    comps, variance = text.fit_pca(
-        embeddings,
-        _read_ids(ctx.paths.train_ids),
-        int(ctx.config["pca"]["n_components"]),
-        ctx.seed,
-    )
-    comps.to_parquet(ctx.paths.text_pca, index=False)
-    variance.to_csv(ctx.paths.reports_dir / "pca_explained_variance.csv", index=False)
-    explained = variance["cumulative"].iloc[-1]
-    print(f"{comps.shape[1] - 1} components explain {explained:.3f} of the variance")
-
-
-# --------------------------------------------------------------------------
-# Stage 7: tabular features (company statistics from training complaints only)
-# --------------------------------------------------------------------------
-def run_features(ctx: Context) -> None:
-    _require(ctx.paths.sample, ctx.paths.train_ids)
-    df = pd.read_parquet(ctx.paths.sample)
-    features, groups, merged = tabular.build_tabular_features(
-        df,
-        _read_ids(ctx.paths.train_ids),
-        min_level_count=int(ctx.config["features"]["min_level_count"]),
-    )
-    write_json(ctx.paths.reports_dir / "rare_levels_merged.json", merged)
-    for col, levels in merged.items():
-        print(
-            f"{col}: merged {len(levels)} rare or unseen levels into {tabular.RARE_LEVEL}"
-        )
-    features.to_parquet(ctx.paths.tabular_features, index=False)
-    write_json(ctx.paths.tabular_feature_groups, groups)
-    print(f"Built {features.shape[1] - 1} tabular features")
-
-
-# --------------------------------------------------------------------------
-# Stage 8: df-analyze input tables
-# --------------------------------------------------------------------------
-def run_df_analyze_input(ctx: Context) -> None:
-    p = ctx.paths
-    _require(
-        p.tabular_features,
-        p.tabular_feature_groups,
-        p.text_pca,
-        p.sample,
-        p.train_ids,
-        p.test_ids,
-    )
-    features = pd.read_parquet(p.tabular_features)
-    comps = pd.read_parquet(p.text_pca)
-    labels = pd.read_parquet(p.sample, columns=[C.COMPLAINT_ID, C.LABEL])
-    train, test = df_analyze.build_tables(
-        features, comps, labels, _read_ids(p.train_ids), _read_ids(p.test_ids)
-    )
-    p.df_analyze_input_dir.mkdir(parents=True, exist_ok=True)
-    train.to_parquet(p.df_analyze_input_dir / "train.parquet", index=False)
-    test.to_parquet(p.df_analyze_input_dir / "test.parquet", index=False)
-    groups = json.loads(p.tabular_feature_groups.read_text(encoding="utf-8"))
-    groups["text"] = [c for c in comps.columns if c != C.COMPLAINT_ID]
-    write_json(p.feature_groups, groups)
-    print(f"df-analyze tables: train {train.shape}, test {test.shape}")
-
-
-# --------------------------------------------------------------------------
-# Stage 9: run df-analyze and verify its exported split
-# --------------------------------------------------------------------------
 def run_df_analyze(ctx: Context) -> None:
     p = ctx.paths
     train_path = p.df_analyze_input_dir / "train.parquet"
     test_path = p.df_analyze_input_dir / "test.parquet"
-    _require(train_path, test_path, p.text_pca)
+    _require(train_path, test_path)
+    info = read_feature_set_info(p)
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     outdir = p.df_analyze_output_dir / stamp
     outdir.mkdir(parents=True, exist_ok=False)
     gpu_models = GPU_CLASSIFIERS.intersection(ctx.config["df_analyze"]["classifiers"])
     if gpu_models:
         # CatBoost and GANDALF switch to the GPU when df-analyze sees CUDA.
-        check_cuda(
-            ctx, "df_analyze", "df-analyze (" + ", ".join(sorted(gpu_models)) + ")"
-        )
+        check_cuda(ctx, "df-analyze (" + ", ".join(sorted(gpu_models)) + ")")
     args = df_analyze.df_analyze_args(
-        ctx.config["df_analyze"], train_path, test_path, outdir, ctx.seed
+        ctx.config["df_analyze"],
+        train_path,
+        test_path,
+        outdir,
+        ctx.seed,
+        ordinals=columns_of_type(info, own.ORDINAL),
     )
     _run_dfa(ctx, "df-analyze.py", args, outdir / "df_analyze.log")
-    verify_df_analyze_split(ctx, outdir)
-    (p.df_analyze_output_dir / "latest.txt").write_text(stamp + "\n", encoding="utf-8")
+    verify_df_analyze_run(ctx, outdir, info)
+    atomic_write_text(p.df_analyze_output_dir / "latest.txt", stamp + "\n")
 
 
-def verify_df_analyze_split(ctx: Context, outdir: Path) -> None:
+def verify_df_analyze_run(ctx: Context, outdir: Path, info: dict[str, Any]) -> None:
+    """Check df-analyze's exported split against ours row by row, and its
+    inferred column types against column_spec.json; save both reports."""
     p = ctx.paths
     train = pd.read_parquet(p.df_analyze_input_dir / "train.parquet")
     test = pd.read_parquet(p.df_analyze_input_dir / "test.parquet")
-    pca_cols = [c for c in train.columns if c.startswith(text.PCA_PREFIX)]
-    export = df_analyze.read_export(df_analyze.find_export_dir(outdir))
     try:
-        report = df_analyze.verify_export(export, train, test, pca_cols)
-    except df_analyze.SplitVerificationError as e:
-        raise StageError(str(e)) from e
-    write_json(outdir / "split_check.json", report)
-    write_json(p.reports_dir / "df_analyze_split_check.json", report)
+        export = df_analyze.read_export(df_analyze.find_export_dir(outdir))
+        split_report = df_analyze.verify_export(
+            export, train, test, columns_of_type(info, own.CONTINUOUS)
+        )
+        inferred = pd.read_csv(df_analyze.find_inferred_types(outdir), index_col=0)
+        expected = {name: c["type"] for name, c in info["columns"].items()}
+        type_report = df_analyze.check_inferred_types(
+            inferred, expected, export.X_train.columns
+        )
+    except (df_analyze.SplitVerificationError, df_analyze.TypeCheckError) as e:
+        raise StageError(f"{e}\nStop and ask before working around this.") from e
+    for name, report in ((TYPE_CHECK, type_report), (SPLIT_CHECK, split_report)):
+        atomic_write_json(outdir / name, report)
+        atomic_write_json(p.model_reports_dir / name, {"run": outdir.name, **report})
     print("Verified: df-analyze's exported train/test rows match our saved split.")
+    print(f"Verified: df-analyze kept all {type_report['n_features']} features with our "
+          "column types.")  # fmt: skip
+    for line in type_report["dropped_or_coerced"]:
+        print(f"  df-analyze note: {line}")
 
 
 def _latest_verified_run(p: Paths) -> tuple[str, Path]:
-    """The latest df-analyze run, which must have passed split verification."""
+    """The latest df-analyze run, which must have passed both checks."""
     latest = p.df_analyze_output_dir / "latest.txt"
     _require(latest)
     stamp = latest.read_text(encoding="utf-8").strip()
     outdir = p.df_analyze_output_dir / stamp
-    if not (outdir / "split_check.json").is_file():
-        raise StageError(
-            f"df-analyze run {outdir} has no split_check.json, so its test set was "
-            "never verified against ours. Rerun the df_analyze stage."
-        )
+    for check in (SPLIT_CHECK, TYPE_CHECK):
+        if not (outdir / check).is_file():
+            raise StageError(
+                f"df-analyze run {outdir} has no {check}, so it was never verified. "
+                "Rerun the df_analyze stage."
+            )
     return stamp, outdir
 
 
 # --------------------------------------------------------------------------
-# Stage 10: score every tuned model with one shared CV on the training set
+# Stage 10: score every tuned model on the saved grouped CV folds (train only)
 # --------------------------------------------------------------------------
 CV_SELECT_RUNNER = REPO_ROOT / "scripts" / "dfa" / "cv_select.py"
 SHARED_CV = "model_selection_cv.csv"
+OOF_PREDICTIONS = "oof_predictions.parquet"
 TUNING_BUDGET = "tuning_budget.csv"
+FOLDS_IN_TRAIN_ORDER = "cv_folds_train_order.csv"
+
+
+def folds_in_train_order(p: Paths) -> pd.DataFrame:
+    """The saved CV fold of every training row, in the df-analyze train table's
+    row order (= train_ids.csv order)."""
+    _require(p.cv_folds, p.train_ids)
+    train_ids = pd.read_csv(p.train_ids)
+    folds = pd.read_csv(p.cv_folds).set_index(C.NODE_ID)["fold"]
+    missing = set(train_ids[C.NODE_ID]) - set(folds.index)
+    if missing:
+        raise StageError(f"{len(missing)} training nodes have no CV fold; rerun split")
+    return pd.DataFrame(
+        {
+            C.NODE_ID: train_ids[C.NODE_ID],
+            "fold": folds.loc[train_ids[C.NODE_ID]].to_numpy(),
+        }
+    )
 
 
 def run_select_model(ctx: Context) -> None:
-    """df-analyze's tuning scores are not comparable across models, so refit
-    every tuned combination on the same folds of the training set and score it
-    from its probabilities (see scripts/dfa/cv_select.py). The test set is not
-    read. The report stage chooses Model A from this table."""
+    """df-analyze's tuning scores are not comparable across models (and its
+    internal CV is not grouped), so refit every tuned combination on the saved
+    grouped folds of the training set and score it from its probabilities (see
+    scripts/dfa/cv_select.py). The test set is not read. The report stage
+    chooses Model A from this table."""
     p = ctx.paths
     stamp, outdir = _latest_verified_run(p)
     export_dir = df_analyze.find_export_dir(outdir)
     cfg = ctx.config["select_model"]
-    cv_path = outdir / SHARED_CV
-    # The CV script saves its table after every configuration. On --resume it
+    folds = folds_in_train_order(p)
+    folds_path = outdir / FOLDS_IN_TRAIN_ORDER
+    atomic_write_csv(folds_path, folds)
+    cv_path, oof_path = outdir / SHARED_CV, outdir / OOF_PREDICTIONS
+    # The CV script saves its tables after every configuration. On --resume it
     # keeps the finished ones; on a fresh run it starts over.
     if not ctx.resume:
         cv_path.unlink(missing_ok=True)
+        oof_path.unlink(missing_ok=True)
     args = [
         "--export-dir", str(export_dir.resolve()),
         "--out", str(cv_path.resolve()),
-        "--folds", str(cfg["n_folds"]),
+        "--oof-out", str(oof_path.resolve()),
+        "--folds-file", str(folds_path.resolve()),
         "--seed", str(ctx.seed),
         "--config-timeout", str(cfg.get("config_timeout_s", 0)),
     ]  # fmt: skip
@@ -469,9 +903,7 @@ def run_select_model(ctx: Context) -> None:
     cv = pd.read_csv(cv_path, keep_default_na=False, na_values=[""])
     log = (outdir / "df_analyze.log").read_text(encoding="utf-8", errors="replace")
     budget = selection.parse_tuning_budget(log)
-    budget.to_csv(outdir / TUNING_BUDGET, index=False)
-    for name, frame in ((SHARED_CV, cv), (TUNING_BUDGET, budget)):
-        frame.to_csv(p.reports_dir / name, index=False)
+    atomic_write_csv(outdir / TUNING_BUDGET, budget)
     failed = cv["error"].fillna("").astype(str) != ""
     tuned = cv["settings"] == "tuned"
     errors = cv[failed & tuned]
@@ -485,89 +917,171 @@ def run_select_model(ctx: Context) -> None:
             "These tuned models could not be cross-validated, so the models cannot "
             f"be compared fairly:\n{errors[['model_cls', 'selection', 'error']]}\n"
             f"See {outdir / 'model_selection.log'}; fix and rerun "
-            "`uv run run.py --from select_model`."
+            "`uv run run.py --dataset <name> --from select_model`."
         )
-    shown = cv.pivot_table(
-        index=["model_cls", "selection", "embed_selector"],
-        columns="settings",
-        values="pr_auc_mean",
-    ).reset_index()
+    atomic_write_csv(p.model_reports_dir / TUNING_BUDGET, budget)
+    # Written last: marks the stage as done.
+    atomic_write_csv(p.model_reports_dir / SHARED_CV, cv)
+    # embed_selector is empty (read as NaN) except for embedded selection;
+    # pivot_table would silently drop those rows.
+    shown = (
+        cv.assign(embed_selector=cv["embed_selector"].fillna(""))
+        .pivot_table(
+            index=["model_cls", "selection", "embed_selector"],
+            columns="settings",
+            values="pr_auc_mean",
+        )
+        .reset_index()
+    )
     print(shown.sort_values("tuned", ascending=False).to_string(index=False))
-    print(f"Saved shared-CV scores for run {stamp} to {p.reports_dir / SHARED_CV}")
+    print(f"Saved shared-CV scores for run {stamp} to {p.model_reports_dir / SHARED_CV}")
 
 
 # --------------------------------------------------------------------------
-# Stage 11: Model A metrics report (Model A chosen by shared-CV PR-AUC)
+# Stage 11: Model A report: choice by shared CV, threshold from out-of-fold
+# training predictions, test metrics, group-bootstrap intervals, sanity band
 # --------------------------------------------------------------------------
 MODEL_A_REPORT = "model_a_report.md"
 MODEL_A_METRICS = "model_a_metrics.csv"
 MODEL_A_SUMMARY = "model_a.json"
+THRESHOLDS = "thresholds.csv"
+
+
+def oof_thresholds(oof: pd.DataFrame, y_train: np.ndarray, rule: str) -> pd.DataFrame:
+    """Each tuned model's decision threshold from its out-of-fold training
+    predictions (select_model's oof_predictions.parquet)."""
+    tuned = oof[oof["settings"] == "tuned"]
+    rows = []
+    for (cls, sel), frame in tuned.groupby(["model_cls", "selection"], sort=True):
+        frame = frame.sort_values("row")
+        if not np.array_equal(frame["row"].to_numpy(), np.arange(len(y_train))):
+            raise StageError(f"{cls} ({sel}): out-of-fold predictions do not cover "
+                             "every training row once")  # fmt: skip
+        found = evaluation.threshold_from_oof(frame.assign(y=y_train), rule)
+        model = df_analyze_report.MODEL_NAMES.get(cls, cls)
+        rows.append({"model": model, "selection": sel, **found})
+    return pd.DataFrame(rows)
 
 
 def run_df_analyze_report(ctx: Context) -> None:
     p = ctx.paths
+    train_path = p.df_analyze_input_dir / "train.parquet"
     test_path = p.df_analyze_input_dir / "test.parquet"
-    _require(p.df_analyze_input_dir / "train.parquet", test_path)
+    _require(train_path, test_path, p.test_ids)
     stamp, outdir = _latest_verified_run(p)
-    if not (outdir / SHARED_CV).is_file():
-        raise StageError(
-            f"df-analyze run {outdir} has no {SHARED_CV}. Run the select_model stage "
-            "first so every model is scored with the same cross-validation."
-        )
-    train = pd.read_parquet(p.df_analyze_input_dir / "train.parquet")
-    y_test = pd.read_parquet(test_path)[df_analyze.TARGET].to_numpy()
+    for name in (SHARED_CV, OOF_PREDICTIONS):
+        if not (outdir / name).is_file():
+            raise StageError(
+                f"df-analyze run {outdir} has no {name}. Run the select_model stage "
+                "first so every model is scored with the same cross-validation."
+            )
+    cfg = ctx.config["report"]
+    y_train = pd.read_parquet(train_path)[C.TARGET].to_numpy()
+    y_test = pd.read_parquet(test_path)[C.TARGET].to_numpy()
+    test_ids = pd.read_csv(p.test_ids)
+    if not np.array_equal(test_ids[C.LABEL].to_numpy(), y_test):
+        raise StageError("Labels in test_ids.csv and the test table disagree")
     shared_cv = pd.read_csv(outdir / SHARED_CV, keep_default_na=False, na_values=[""])
+    oof = pd.read_parquet(outdir / OOF_PREDICTIONS)
     budget_path = outdir / TUNING_BUDGET
     budget = pd.read_csv(budget_path) if budget_path.is_file() else None
     try:
+        thresholds = oof_thresholds(oof, y_train, str(cfg["threshold_rule"]))
+        by_key = {(r.model, r.selection): r.threshold for r in thresholds.itertuples()}
         predictions, tuned, options = df_analyze_report.load_run(outdir)
-        table = df_analyze_report.metrics_table(predictions, tuned, y_test, shared_cv)
+        table = df_analyze_report.metrics_table(
+            predictions, tuned, y_test, shared_cv, by_key
+        )
         model_a = df_analyze_report.choose_model_a(table)
-    except df_analyze_report.ReportError as e:
+        entry = web.find_entry(predictions, model_a, df_analyze_report.MODEL_NAMES)
+        prob_a = np.asarray(entry["probs_test"], dtype=float)[:, 1]
+        intervals = [
+            evaluation.group_bootstrap(
+                y_test,
+                test_ids[C.GROUP_ID].to_numpy(),
+                prob_a,
+                metric=metric,
+                n_resamples=int(cfg["bootstrap_resamples"]),
+                seed=ctx.seed,
+            ).as_dict()
+            for metric in ("pr_auc", "auroc")
+        ]
+    except (
+        df_analyze_report.ReportError,
+        evaluation.EvaluationError,
+        web.WebReportError,
+    ) as e:
         raise StageError(str(e)) from e
+    if not np.isclose(intervals[0]["estimate"], model_a["pr_auc"]):
+        raise StageError("Model A's bootstrap estimate differs from its test PR-AUC")
+    band = ctx.data["sanity_band"]
+    warning = evaluation.sanity_check(
+        float(model_a["pr_auc"]), band, float(cfg["sanity_margin"])
+    )
+    n_folds = int(pd.read_csv(p.cv_folds)["fold"].nunique())
     info = {
+        "dataset": ctx.dataset,
+        "feature_set": ctx.config["feature_set"],
         "run": stamp,
         "htune_trials": options.get("htune_trials"),
         "seed": options.get("seed"),
-        "n_train": len(train),
+        "n_train": len(y_train),
         "n_test": len(y_test),
         "test_positive_rate": float(y_test.mean()),
-        "cv_folds": int(ctx.config["select_model"]["n_folds"]),
-        "selection_rule": "highest mean shared-CV PR-AUC on the training set",
+        "cv_folds": n_folds,
+        "selection_rule": "highest mean shared-CV PR-AUC on the training set "
+        "(saved grouped folds)",
+        "threshold_rule": f"{cfg['threshold_rule']} on out-of-fold training predictions",
+        "sanity_band": band,
     }
-    report = df_analyze_report.build_report(table, model_a, info, budget)
+    report = df_analyze_report.build_report(
+        table, model_a, info, budget, intervals, warning
+    )
     model_a_dict = {k: v.item() if hasattr(v, "item") else v for k, v in model_a.items()}
-    summary = {**info, "model_a": model_a_dict}
-    for directory in (outdir, p.reports_dir):
-        table.to_csv(directory / MODEL_A_METRICS, index=False)
-        (directory / MODEL_A_REPORT).write_text(report, encoding="utf-8")
-        write_json(directory / MODEL_A_SUMMARY, summary)
+    a_key = (model_a["model"], model_a["selection"])
+    threshold_a = thresholds.set_index(["model", "selection"]).loc[a_key].to_dict()
+    summary = {
+        **info,
+        "model_a": model_a_dict,
+        "model_a_threshold": threshold_a,
+        "intervals": intervals,
+        "sanity_warning": warning,
+    }
+    for directory in (outdir, p.model_reports_dir):
+        for name, frame in ((MODEL_A_METRICS, table), (THRESHOLDS, thresholds)):
+            atomic_write_csv(directory / name, frame)
+        atomic_write_text(directory / MODEL_A_REPORT, report)
+        atomic_write_json(directory / MODEL_A_SUMMARY, summary)  # last: stage done
     print(report)
-    print(f"Saved the report to {p.reports_dir / MODEL_A_REPORT}")
+    if warning:
+        bar = "!" * 78
+        print(f"\n{bar}\nWARNING: {warning}\n{bar}")
+    print(f"Saved the report to {p.model_reports_dir / MODEL_A_REPORT}")
 
 
 # --------------------------------------------------------------------------
 # Stage 12: static HTML report (parameters, results, confidence cards)
 # --------------------------------------------------------------------------
-def web_report_path(p: Paths) -> Path:
-    return p.outputs_dir / "report" / "index.html"
+DATASET_LABELS = {"yelpchi": "YelpChi (reviews)", "amazon": "Amazon (users)"}
 
 
 def run_web_report(ctx: Context) -> None:
     p = ctx.paths
-    summary_path = p.reports_dir / MODEL_A_SUMMARY
+    summary_path = p.model_reports_dir / MODEL_A_SUMMARY
     test_path = p.df_analyze_input_dir / "test.parquet"
     train_path = p.df_analyze_input_dir / "train.parquet"
-    _require(summary_path, p.reports_dir / MODEL_A_METRICS, p.test_ids, p.sample,
-             test_path, train_path, p.embeddings)  # fmt: skip
-    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    _require(summary_path, p.model_reports_dir / MODEL_A_METRICS, p.test_ids,
+             test_path, train_path)  # fmt: skip
+    summary = _read_json(summary_path)
     stamp, outdir = _latest_verified_run(p)
     if summary["run"] != stamp:
         raise StageError(
             f"{summary_path} describes df-analyze run {summary['run']}, but the latest "
-            f"run is {stamp}. Rerun `uv run run.py --from select_model`."
+            f"run is {stamp}. Rerun `uv run run.py --dataset {ctx.dataset} "
+            "--from select_model`."
         )
     cfg = ctx.config["web_report"]
+    info = read_feature_set_info(p)
     try:
         predictions, _, _ = df_analyze_report.load_run(outdir)
         entry = web.find_entry(
@@ -577,57 +1091,57 @@ def run_web_report(ctx: Context) -> None:
     except (df_analyze_report.ReportError, web.WebReportError) as e:
         raise StageError(str(e)) from e
 
-    # Test rows are in the order of our saved test IDs (verified by stage 9).
-    test_ids = _read_ids(p.test_ids)
-    y_test = pd.read_parquet(test_path)[df_analyze.TARGET].to_numpy()
-    cols = [C.COMPLAINT_ID, C.DATE_RECEIVED, C.PRODUCT, C.STATE, C.NARRATIVE, C.LABEL]
-    meta = (
-        pd.read_parquet(p.sample, columns=cols)
-        .set_index(C.COMPLAINT_ID)
-        .loc[test_ids.to_numpy()]
-        .reset_index()
-    )
-    if not np.array_equal(meta[C.LABEL].to_numpy(), y_test):
-        raise StageError("Test labels in sample.parquet and test.parquet disagree")
-    probs = np.asarray(entry["probs_test"], dtype=float)
+    # Test rows are in the order of our saved test IDs (verified by df_analyze).
+    test_ids = pd.read_csv(p.test_ids)
+    train, test = pd.read_parquet(train_path), pd.read_parquet(test_path)
+    y_test = test[C.TARGET].to_numpy()
+    if not np.array_equal(test_ids[C.LABEL].to_numpy(), y_test):
+        raise StageError("Test labels in test_ids.csv and test.parquet disagree")
+    # Show features under their block names (own__f07), not df-analyze's.
+    names = {safe: c["block_column"] for safe, c in info["columns"].items()}
+    features = [c for c in train.columns if c != C.TARGET]
+    prob = np.asarray(entry["probs_test"], dtype=float)[:, 1]
     try:
-        samples = web.confidence_table(
-            probs[:, 1],
-            np.asarray(entry["preds_test"]),
-            y_test,
-            meta.drop(columns=C.LABEL),
+        top = web.top_features(
+            test[features].rename(columns=names),
+            train[features].rename(columns=names),
+            int(cfg["n_top_features"]),
         )
+        meta = pd.DataFrame({C.NODE_ID: test_ids[C.NODE_ID], "top_features": top})
+        # Cards use the model's own 0.5 cut-off, so confidence is the
+        # probability of the predicted class (0.5 to 1).
+        samples = web.confidence_table(prob, (prob >= 0.5).astype(int), y_test, meta)
     except web.WebReportError as e:
         raise StageError(str(e)) from e
 
-    metrics = pd.read_csv(p.reports_dir / MODEL_A_METRICS)
-    budget_path = p.reports_dir / TUNING_BUDGET
+    metrics = pd.read_csv(p.model_reports_dir / MODEL_A_METRICS)
+    budget_path = p.model_reports_dir / TUNING_BUDGET
     budget = pd.read_csv(budget_path) if budget_path.is_file() else None
-    train = pd.read_parquet(train_path)
-    pca_cols = [c for c in train.columns if c.startswith(text.PCA_PREFIX)]
-    n_tabular = train.shape[1] - 1 - len(pca_cols)  # minus target and text
-    embed_dim = len(pq.read_schema(p.embeddings).names) - 1  # minus Complaint ID
     dfa = ctx.config["df_analyze"]
+    types = pd.Series([c["type"] for c in info["columns"].values()]).value_counts()
     feature_sets = sorted(
         {web.feature_set_label(web.feature_set_key(s, e))
          for s, e in zip(metrics["selection"], metrics["embed_selector"], strict=True)}
     )  # fmt: skip
-    rule_version = load_yaml(p.categories_file).get("rule_version", 1)
+    a = summary["model_a"]
     run_config = [
-        ("Label rule", f"version {rule_version} (docs/LABEL_RULE.md)"),
+        ("Dataset", DATASET_LABELS.get(ctx.dataset, ctx.dataset)),
+        ("Feature set", f"{summary['feature_set']} ({', '.join(info['blocks'])})"),
         ("Seed", str(summary["seed"])),
-        ("Complaints", f"{summary['n_train']:,} train · {summary['n_test']:,} test"),
-        ("Fraud rate", f"{train[df_analyze.TARGET].mean():.1%} train · "
+        ("Nodes", f"{summary['n_train']:,} train · {summary['n_test']:,} test "
+                  "(grouped split)"),
+        ("Fraud rate", f"{train[C.TARGET].mean():.1%} train · "
                        f"{summary['test_positive_rate']:.1%} test"),
-        ("Text features", f"{len(pca_cols)} PCA components of {embed_dim}-dim "
-                          "narrative embeddings"),
-        ("Tabular features", f"{n_tabular} (product, region, company, metadata)"),
+        ("Features", f"{len(features)}: " + ", ".join(f"{n} {k}" for k, n in
+                                                   types.items())),
         ("Classifiers", ", ".join(web.model_label(m) for m in dfa["classifiers"])
                         + ", plus dummy baseline"),
         ("Tuning", f"up to {dfa['htune_trials']} trials per model · "
                    f"metric {dfa['htune_cls_metric']}"),
-        ("Feature sets", ", ".join(feature_sets)),
-        ("Model choice", f"{summary['cv_folds']}-fold shared CV on train, PR-AUC"),
+        ("Feature selections", ", ".join(feature_sets)),
+        ("Model choice", f"{summary['cv_folds']}-fold grouped shared CV on train, "
+                         "PR-AUC"),
+        ("Threshold", f"{a['threshold']:.4f} ({summary['threshold_rule']})"),
         ("df-analyze commit", str(dfa.get("commit") or "not pinned")[:12]),
     ]  # fmt: skip
     commit = git_commit(REPO_ROOT)
@@ -646,91 +1160,147 @@ def run_web_report(ctx: Context) -> None:
         run_config=run_config,
         budget=budget,
         n_samples=int(cfg["n_samples"]),
-        excerpt_chars=int(cfg["excerpt_chars"]),
+        dataset_label=DATASET_LABELS.get(ctx.dataset, ctx.dataset),
     )
-    out = web_report_path(p)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(web.render(inputs), encoding="utf-8")
-    print(f"Saved the web report to {out}")
+    atomic_write_text(p.web_report, web.render(inputs))
+    print(f"Saved the web report to {p.web_report}")
 
 
 # --------------------------------------------------------------------------
-# Stage 13: label shortcut audit (fraud rate by product name x year)
+# Stage 13: Model A in its native format; check every model df-analyze saved
 # --------------------------------------------------------------------------
-# It only reads the labelled data and the sample, but it sits at the end of
-# STAGES on purpose: run.py reruns every stage after the first one with missing
-# outputs, so placing it after `label` would rerun embedding and df-analyze.
-LABEL_AUDIT_REPORT = "label_audit.md"
-LABEL_AUDIT_TABLES = (
-    "label_audit_product_year.csv",
-    "label_audit_sub_product_year.csv",
-    "label_audit_product_span.csv",
-)
-AUDIT_COLUMNS = [C.PRODUCT, C.SUB_PRODUCT, C.DATE_RECEIVED, C.LABEL]
+# Last in STAGES on purpose: run.py reruns every stage after the first one
+# with missing outputs, so an earlier position would rerun df-analyze.
+EXPORT_RUNNER = REPO_ROOT / "scripts" / "dfa" / "export_model.py"
+EXPORT_REQUEST = "request.json"
 
 
-def run_label_audit(ctx: Context) -> None:
+def export_outputs(p: Paths) -> list[Path]:
+    """export_model's outputs: models_check.csv, model_a.json and the model
+    file model_a.json names. The stage moves its finished folder into place in
+    one step, so they appear together."""
+    outputs = [p.model_dir / model_export.MODELS_CHECK,
+               p.model_dir / model_export.MODEL_A_META]  # fmt: skip
+    try:
+        meta = model_export.read_metadata(outputs[1])
+    except (model_export.MetadataError, ValueError):  # missing or unreadable
+        return outputs
+    return [*outputs, p.model_dir / meta["model_file"]]
+
+
+def _repo_relative(path: Path, root: Path) -> str:
+    """`path` relative to the repository root (so it holds in another clone
+    that unpacked a bundle), or absolute if it lies outside."""
+    try:
+        return path.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return path.resolve().as_posix()
+
+
+def run_export_model(ctx: Context) -> None:
+    """Check that every tuned model df-analyze saved decodes and reproduces its
+    saved test probabilities, and save Model A (as chosen by df_analyze_report)
+    in its native format with model_a.json, so nobody has to retrain it (see
+    scripts/dfa/export_model.py). Nothing is chosen or tuned here."""
     p = ctx.paths
-    _require(p.labeled, p.sample)
-    labeled = pd.read_parquet(p.labeled, columns=AUDIT_COLUMNS)
-    sampled = pd.read_parquet(p.sample, columns=AUDIT_COLUMNS)
-
-    def both(build: Callable[[pd.DataFrame], pd.DataFrame]) -> pd.DataFrame:
-        return pd.concat(
-            [build(labeled).assign(dataset="labelled"),
-             build(sampled).assign(dataset="sample")],
-            ignore_index=True,
-        )  # fmt: skip
-
-    by_year, by_sub_product, span = LABEL_AUDIT_TABLES
-    tables = {
-        by_year: both(audit.product_year),
-        by_sub_product: both(audit.sub_product_year),
-        span: audit.product_span(labeled),
+    summary_path = p.model_reports_dir / MODEL_A_SUMMARY
+    thresholds_path = p.model_reports_dir / THRESHOLDS
+    _require(summary_path, thresholds_path)
+    summary = _read_json(summary_path)
+    stamp, outdir = _latest_verified_run(p)
+    if summary["run"] != stamp:
+        raise StageError(
+            f"{summary_path} describes df-analyze run {summary['run']}, but the latest "
+            f"run is {stamp}. Rerun `uv run run.py --dataset {ctx.dataset} "
+            "--from select_model`."
+        )
+    a = summary["model_a"]
+    staging = p.model_dir.with_name(p.model_dir.name + ".tmp")
+    shutil.rmtree(staging, ignore_errors=True)
+    staging.mkdir(parents=True)
+    request = {
+        "export_dir": str(df_analyze.find_export_dir(outdir).resolve()),
+        "out_dir": str(staging.resolve()),
+        "results_dir": _repo_relative(df_analyze.find_export_dir(outdir), p.root),
+        "dataset": ctx.dataset,
+        "feature_set": ctx.config["feature_set"],
+        "run": stamp,
+        "model_a": {k: a[k] for k in ("model", "selection", "embed_selector")},
+        "threshold": a["threshold"],
+        "threshold_rule": summary["threshold_rule"],
+        "thresholds": pd.read_csv(thresholds_path).to_dict("records"),
+        "seed": ctx.seed,
+        "df_analyze_commit": ctx.config["df_analyze"].get("commit"),
     }
-    for name, table in tables.items():
-        atomic_write_text(p.reports_dir / name, table.to_csv(index=False))
-    report = audit.audit_report(labeled, sampled)
-    # Written last, so the stage counts as finished only when everything is saved.
-    atomic_write_text(p.reports_dir / LABEL_AUDIT_REPORT, report)
-    print(report)
-    print(f"Saved the audit to {p.reports_dir / LABEL_AUDIT_REPORT}")
+    atomic_write_json(staging / EXPORT_REQUEST, request)
+    args = ["--request", str((staging / EXPORT_REQUEST).resolve())]
+    _run_dfa(ctx, str(EXPORT_RUNNER), args, outdir / "export_model.log")
+    (staging / EXPORT_REQUEST).unlink()
+    try:
+        meta = model_export.read_metadata(staging / model_export.MODEL_A_META)
+    except model_export.MetadataError as e:
+        raise StageError(str(e)) from e
+    _require(staging / meta["model_file"], staging / model_export.MODELS_CHECK)
+    # Replace the previous export in one step: the stage's outputs appear only
+    # when all of them are complete.
+    shutil.rmtree(p.model_dir, ignore_errors=True)
+    os.replace(staging, p.model_dir)
+
+    check = pd.read_csv(p.model_dir / model_export.MODELS_CHECK, keep_default_na=False)
+    shown = ["model", "selection_label", "decoded", "intact", "max_abs_diff", "ok"]
+    print(check[shown].to_string(index=False))
+    failed = check[check["ok"].astype(str) != "True"]
+    for r in failed.itertuples():
+        print(
+            f"WARNING: {r.model} ({r.selection_label}) cannot be loaded from "
+            f"df-analyze's saved results: {r.error}. It was not refit."
+        )
+    print(
+        f"Model A ({meta['model']}, {meta['selection_label']}, {meta['source']}) saved "
+        f"to {p.model_dir / meta['model_file']}; {len(check) - len(failed)} of "
+        f"{len(check)} tuned models load and reproduce their test probabilities."
+    )
 
 
 STAGES: list[Stage] = [
-    Stage("load", "Read archives 2-4, keep narratives, report categories", run_load,
-          lambda p: [p.complaints, p.reports_dir / "category_values.csv"]),
-    Stage("label", "Apply the reviewed label allow-list; drop Issue/Sub-issue",
-          run_label, lambda p: [p.labeled]),
-    Stage("sample", "Remove near-duplicate narratives; stratified sample", run_sample,
-          lambda p: [p.sample]),
-    Stage("split", "Stratified train/test split; save Complaint IDs", run_split,
-          lambda p: [p.split, p.train_ids, p.test_ids]),
-    Stage("embed", "Embed narratives with df-embed's code (GPU by default)", run_embed,
-          lambda p: [p.embeddings]),
-    Stage("pca", "PCA on embeddings, fit on training complaints", run_pca,
-          lambda p: [p.text_pca]),
-    Stage("features", "Tabular and company features (training stats only)",
-          run_features, lambda p: [p.tabular_features, p.tabular_feature_groups]),
-    Stage("df_analyze_input", "Write df-analyze train/test tables",
+    # A clone that unpacked a bundle has the load stage's outputs but no raw
+    # files; it has nothing left to download.
+    Stage("download", "Fetch and checksum the CARE-GNN .mat file", run_download,
+          lambda p: [p.mat], skip_when=lambda p: [p.nodes, p.graph_manifest]),
+    Stage("load", "Node table, relation edge lists, count checks", run_load,
+          lambda p: [p.nodes, p.graph_manifest]),
+    Stage("split", "Grouped stratified train/test split and CV folds", run_split,
+          lambda p: [p.train_ids, p.test_ids, p.cv_folds, p.split_summary]),
+    Stage("features", "Own-feature block and column types (training nodes)",
+          run_features, lambda p: [p.block_file(C.OWN_BLOCK), p.column_spec]),
+    Stage("audit", "Counts, feature statistics, duplicates, homophily", run_audit,
+          lambda p: [p.reports_dir / AUDIT_REPORT,
+                     *(p.reports_dir / t for t in AUDIT_TABLES)]),
+    # The graph blocks come right after audit and count as done when the
+    # active feature set does not use them (see block_outputs).
+    Stage("neighbour_agg", "nbr block: label-free neighbour means per relation",
+          run_neighbour_agg, block_outputs(C.NBR_BLOCK)),
+    Stage("gnn_embed", "gnnssl block: self-supervised DGI embeddings per relation",
+          run_gnn_embed, gnn_embed_outputs),
+    Stage("df_analyze_input", "df-analyze train/test tables for the feature set",
           run_df_analyze_input,
           lambda p: [p.df_analyze_input_dir / "train.parquet",
-                     p.df_analyze_input_dir / "test.parquet", p.feature_groups]),
-    Stage("df_analyze", "Run df-analyze (Model A) and verify its split", run_df_analyze,
-          lambda p: [p.reports_dir / "df_analyze_split_check.json"]),
-    Stage("select_model", "Score every tuned model with one shared CV (train only)",
-          run_select_model,
-          lambda p: [p.reports_dir / SHARED_CV, p.reports_dir / TUNING_BUDGET]),
-    Stage("df_analyze_report", "Model A test metrics (PR-AUC); pick by shared CV",
+                     p.df_analyze_input_dir / "test.parquet",
+                     p.df_analyze_input_dir / FEATURE_SET_INFO]),
+    Stage("df_analyze", "Run df-analyze (Model A); verify split and types",
+          run_df_analyze, lambda p: [p.model_reports_dir / SPLIT_CHECK,
+                                     p.model_reports_dir / TYPE_CHECK]),
+    Stage("select_model", "Score every tuned model on the grouped CV folds",
+          run_select_model, lambda p: [p.model_reports_dir / SHARED_CV]),
+    Stage("df_analyze_report", "Model A test metrics, threshold, bootstrap CIs",
           run_df_analyze_report,
-          lambda p: [p.reports_dir / MODEL_A_REPORT, p.reports_dir / MODEL_A_METRICS,
-                     p.reports_dir / MODEL_A_SUMMARY]),
+          lambda p: [p.model_reports_dir / MODEL_A_REPORT,
+                     p.model_reports_dir / MODEL_A_METRICS,
+                     p.model_reports_dir / MODEL_A_SUMMARY]),
     Stage("web_report", "HTML report: parameters, results, confidence cards",
-          run_web_report, lambda p: [web_report_path(p)]),
-    Stage("label_audit", "Label shortcut check: fraud rate by product x year",
-          run_label_audit,
-          lambda p: [p.reports_dir / LABEL_AUDIT_REPORT,
-                     *(p.reports_dir / t for t in LABEL_AUDIT_TABLES)]),
+          run_web_report, lambda p: [p.web_report]),
+    Stage("export_model", "Save Model A natively; check every saved model",
+          run_export_model, export_outputs),
 ]  # fmt: skip
 
 STAGE_NAMES = [s.name for s in STAGES]

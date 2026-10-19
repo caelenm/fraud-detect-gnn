@@ -17,6 +17,12 @@
 *.pt
 *.pth
 *.ckpt
+*.joblib
+*.cbm
+*.mat
+
+# Draft PR text for the user (never committed)
+PR_DESCRIPTION.md
 
 # Python
 __pycache__/

@@ -1,17 +1,27 @@
 [project]
 name = "fraud-detect"
 version = "0.1.0"
-description = "Explainable fraud complaint detection: tabular AutoML vs. graph neural networks"
+description = "Graph fraud detection on YelpChi and Amazon: tabular AutoML (df-analyze) vs. graph neural networks"
 readme = "README.md"
 license = "GPL-3.0-only"
 requires-python = ">=3.11"
 dependencies = [
-    "datasketch>=2.0.0",
     "numpy>=2.4.6",
     "pandas>=3.0.6",
     "pyarrow>=25.0.1",
     "pyyaml>=6.0.3",
     "scikit-learn>=1.9.1",
+    "scipy>=1.16",
+]
+
+[project.optional-dependencies]
+# Graph models (the gnn_embed stage): `uv sync --extra gnn`. torch stays at 2.9,
+# whose Linux wheels on PyPI are built for CUDA 12.8 like df-analyze's torch;
+# the latest ones are built for CUDA 13, which the group laptop's NVIDIA driver
+# (CUDA 12.8) cannot run. Plain PyG only: no torch_scatter/torch_sparse.
+gnn = [
+    "torch>=2.9,<2.10",
+    "torch-geometric>=2.6",
 ]
 
 [build-system]
@@ -30,6 +40,9 @@ select = ["E", "F", "W", "I", "B", "UP"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "gnn: needs the optional gnn extra (torch, torch_geometric); skipped without it",
+]
 
 [dependency-groups]
 dev = [

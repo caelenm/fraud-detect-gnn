@@ -1,5 +1,7 @@
-"""Stage 8: run only the 'df_analyze_input' stage
-(same as: uv run run.py --only df_analyze_input)."""
+"""Stage 8: run only the 'df_analyze_input' stage for one dataset.
+
+Same as: uv run run.py --dataset <yelpchi|amazon> --only df_analyze_input
+"""
 
 import sys
 
