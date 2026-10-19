@@ -14,6 +14,16 @@ dependencies = [
     "scipy>=1.16",
 ]
 
+[project.optional-dependencies]
+# Graph models (the gnn_embed stage): `uv sync --extra gnn`. torch stays at 2.9,
+# whose Linux wheels on PyPI are built for CUDA 12.8 like df-analyze's torch;
+# the latest ones are built for CUDA 13, which the group laptop's NVIDIA driver
+# (CUDA 12.8) cannot run. Plain PyG only: no torch_scatter/torch_sparse.
+gnn = [
+    "torch>=2.9,<2.10",
+    "torch-geometric>=2.6",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
@@ -30,6 +40,9 @@ select = ["E", "F", "W", "I", "B", "UP"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "gnn: needs the optional gnn extra (torch, torch_geometric); skipped without it",
+]
 
 [dependency-groups]
 dev = [
