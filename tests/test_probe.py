@@ -36,6 +36,16 @@ def test_probe_scores_each_block_set_and_notes_missing_blocks(tmp_path):
     assert "missing" in by_set.loc["own+gnnssl", "note"]
 
 
+def test_probe_covers_variant_sets(tmp_path):
+    _, train_ids, folds, _ = setup(tmp_path)
+    variants = {"x01": ["own__f01"]}
+    sets = probe.block_sets(variants)
+    assert sets["own_x01+nbr_x01"] == ["own_x01", "nbr_x01"]
+    table = probe.probe(tmp_path, train_ids, folds, 0, sets, variants).set_index("blocks")
+    assert table.loc["own_x01", "n_features"] == 2  # own without f01
+    assert "missing" in table.loc["own_x01+nbr_x01", "note"]  # nbr_x01 not built
+
+
 def test_probe_never_reads_test_or_unlabelled_rows(tmp_path):
     own, train_ids, folds, other_rows = setup(tmp_path)
     before = probe.probe(tmp_path, train_ids, folds, seed=0)

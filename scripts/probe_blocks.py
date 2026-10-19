@@ -46,9 +46,10 @@ def main(argv: list[str] | None = None) -> int:
                   file=sys.stderr)  # fmt: skip
             return 2
     start = time.monotonic()
+    variants = config.get("feature_variants") or {}
     table = probe.probe(
         p.features_dir, pd.read_csv(p.train_ids), pd.read_csv(p.cv_folds),
-        int(config["seed"]),
+        int(config["seed"]), probe.block_sets(variants), variants,
     )  # fmt: skip
     out = p.probe_dir / "probe_cv.csv"
     atomic_write_csv(out, table)

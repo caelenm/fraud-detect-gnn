@@ -34,6 +34,16 @@ BLOCK_SETS: dict[str, list[str]] = {
 }
 
 
+def block_sets(variants: Mapping[str, Sequence[str]]) -> dict[str, list[str]]:
+    """BLOCK_SETS, then the same sets for each input variant (own_no36, ...)."""
+    out = dict(BLOCK_SETS)
+    for v in variants:
+        for names in BLOCK_SETS.values():
+            renamed = [f"{b}_{v}" for b in names]
+            out["+".join(renamed)] = renamed
+    return out
+
+
 def training_rows(
     features: pd.DataFrame, train_ids: pd.DataFrame, folds: pd.DataFrame
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[str]]:
@@ -78,18 +88,23 @@ def probe(
     folds: pd.DataFrame,
     seed: int,
     block_sets: Mapping[str, Sequence[str]] = BLOCK_SETS,
+    variants: Mapping[str, Sequence[str]] | None = None,
 ) -> pd.DataFrame:
     """One row per block set whose blocks all exist; sets with a missing block
-    are listed with a note instead of scores."""
+    are listed with a note instead of scores. own_<variant> blocks are own
+    without the variant's columns (`variants`, the config's feature_variants)."""
     rows = []
     for name, names in block_sets.items():
-        absent = [b for b in names if not (features_dir / f"{b}.parquet").is_file()]
+        stored = [C.OWN_BLOCK if b.startswith(C.OWN_BLOCK) else b for b in names]
+        absent = [b for b in stored if not (features_dir / f"{b}.parquet").is_file()]
         if absent:
             rows.append(
                 {"blocks": name, "note": f"missing block(s): {', '.join(absent)}"}
             )
             continue
-        features = blocks.load_feature_set(features_dir, list(names))
+        features = blocks.load_feature_set(
+            features_dir, list(names), {k: list(v) for k, v in (variants or {}).items()}
+        )
         x, y, fold, columns = training_rows(features, train_ids, folds)
         rows.append(
             {
