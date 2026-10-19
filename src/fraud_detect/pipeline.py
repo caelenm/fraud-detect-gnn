@@ -24,7 +24,7 @@ from fraud_detect import columns as C
 from fraud_detect.config import REPO_ROOT, Paths, dataset_config, df_analyze_dir
 from fraud_detect.data import audit, care_gnn, download, split
 from fraud_detect.external import ExternalToolError, run_df_analyze_script
-from fraud_detect.features import blocks, own
+from fraud_detect.features import blocks, graph, own
 from fraud_detect.models import (
     df_analyze,
     df_analyze_report,
@@ -393,10 +393,62 @@ def _uses_block(ctx: Context, block: str) -> bool:
     return False
 
 
+def _relation_edges(ctx: Context) -> dict[str, np.ndarray]:
+    """The dataset's relations (not homo), in config order, as edge lists."""
+    p = ctx.paths
+    _require(p.graph_manifest)
+    return {r: load_edges(p.relation_file(r)) for r in ctx.data["relations"]}
+
+
+def _write_block(p: Paths, name: str, block: pd.DataFrame) -> dict[str, Any]:
+    """Validate a graph block, type its columns on the training nodes (as the
+    features stage does for own), and save both; the spec file is written
+    last and marks the block as finished."""
+    try:
+        blocks.validate_block(name, block)
+    except blocks.BlockError as e:
+        raise StageError(str(e)) from e
+    train_ids = pd.read_csv(p.train_ids)[C.NODE_ID].to_numpy()
+    spec = own.column_spec(block, train_ids)
+    if spec[own.CONSTANT]:
+        raise StageError(
+            f"Columns of block {name!r} constant on the training nodes: "
+            f"{spec[own.CONSTANT]}. Ask the group before dropping them."
+        )
+    atomic_write_parquet(p.block_file(name), block)
+    atomic_write_json(p.block_spec(name), spec)
+    return spec
+
+
+def _type_counts(spec: dict[str, Any]) -> str:
+    return ", ".join(
+        f"{len(spec[kind])} {kind}" for kind in (own.BINARY, own.ORDINAL, own.CONTINUOUS)
+    )
+
+
 def run_neighbour_agg(ctx: Context) -> None:
     if not _uses_block(ctx, C.NBR_BLOCK):
         return
-    raise StageError("The neighbour_agg stage is not implemented yet.")
+    p, cfg = ctx.paths, ctx.config["neighbour_agg"]
+    if list(cfg["statistics"]) != ["mean"]:
+        raise StageError(
+            f"neighbour_agg.statistics is {cfg['statistics']}; only [mean] is "
+            "implemented (1-hop max and 2-hop means are later ablations)."
+        )
+    _require(p.block_file(C.OWN_BLOCK), p.train_ids)
+    own_block = pd.read_parquet(p.block_file(C.OWN_BLOCK))
+    edges = _relation_edges(ctx)
+    try:
+        block = graph.build_nbr_block(
+            own_block, edges, log1p_degree=bool(cfg["log1p_degree"])
+        )
+    except ValueError as e:
+        raise StageError(str(e)) from e
+    spec = _write_block(p, C.NBR_BLOCK, block)
+    print(
+        f"nbr block: {block.shape[1] - 1} features for {len(block):,} nodes over "
+        f"relations {', '.join(edges)}; types from training nodes: {_type_counts(spec)}"
+    )
 
 
 def run_gnn_embed(ctx: Context) -> None:

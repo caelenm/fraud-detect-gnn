@@ -1,0 +1,113 @@
+"""Model 2's `nbr` block and the neighbour_agg stage (synthetic data only)."""
+
+from __future__ import annotations
+
+import json
+
+import numpy as np
+import pandas as pd
+import pytest
+from helpers import assert_label_blind, fake_dataset
+from synthetic import fake_feature_graph
+
+from fraud_detect import columns as C
+from fraud_detect.cli import main
+from fraud_detect.config import get_paths
+from fraud_detect.features import blocks
+from fraud_detect.features.graph import build_nbr_block
+from fraud_detect.models.df_analyze import df_analyze_names
+
+
+def five_nodes() -> tuple[pd.DataFrame, dict[str, np.ndarray]]:
+    """Two features on five nodes. Relation aaa: 0-1, 0-2, 2-3, node 4
+    isolated. Relation bbb: 0-4 only."""
+    own = pd.DataFrame(
+        {
+            C.NODE_ID: np.arange(5),
+            "own__f00": [1.0, 2.0, 3.0, 4.0, 5.0],
+            "own__f01": [10.0, 0.0, 0.0, 0.0, 0.0],
+        }
+    )
+    edges = {
+        "aaa": np.array([[0, 0, 2], [1, 2, 3]], dtype=np.int32),
+        "bbb": np.array([[0], [4]], dtype=np.int32),
+    }
+    return own, edges
+
+
+def test_hand_checked_means_and_degrees():
+    own, edges = five_nodes()
+    block = build_nbr_block(own, edges)
+    assert list(block.columns) == [
+        C.NODE_ID,
+        "nbr__aaa_mean_f00", "nbr__aaa_mean_f01", "nbr__aaa_log1p_degree",
+        "nbr__bbb_mean_f00", "nbr__bbb_mean_f01", "nbr__bbb_log1p_degree",
+    ]  # fmt: skip
+    b = block.set_index(C.NODE_ID)
+    # Node 0's aaa neighbours are 1 and 2; node 2's are 0 and 3; node 4 has none.
+    assert b["nbr__aaa_mean_f00"].tolist() == [2.5, 1.0, 2.5, 3.0, 0.0]
+    assert b["nbr__aaa_mean_f01"].tolist() == [0.0, 10.0, 5.0, 0.0, 0.0]
+    assert np.allclose(b["nbr__aaa_log1p_degree"], np.log1p([2, 1, 2, 1, 0]))
+    assert b["nbr__bbb_mean_f00"].tolist() == [5.0, 0.0, 0.0, 0.0, 1.0]
+    assert np.allclose(b["nbr__bbb_log1p_degree"], np.log1p([1, 0, 0, 0, 1]))
+
+
+def test_row_order_of_the_own_block_does_not_matter():
+    own, edges = five_nodes()
+    shuffled = own.sample(frac=1.0, random_state=0)
+    pd.testing.assert_frame_equal(build_nbr_block(shuffled, edges),
+                                  build_nbr_block(own, edges))  # fmt: skip
+
+
+def test_bad_inputs_fail():
+    own, edges = five_nodes()
+    with pytest.raises(ValueError, match="outside"):
+        build_nbr_block(own, {"aaa": np.array([[0], [5]])})
+    with pytest.raises(ValueError, match="one row per node"):
+        build_nbr_block(own.iloc[1:], edges)
+    with pytest.raises(ValueError, match="own__"):
+        build_nbr_block(own.assign(extra=1.0), edges)
+
+
+def test_nbr_block_is_label_blind_valid_and_complete():
+    nodes, own, edges = fake_feature_graph(n=80, width=3)
+    assert_label_blind(build_nbr_block, nodes, own, edges)
+    block = build_nbr_block(own, edges)
+    blocks.validate_block(C.NBR_BLOCK, block)  # prefixed, numeric, no nulls
+    assert len(block) == len(own) and block[C.NODE_ID].is_unique
+    assert block.shape[1] == 1 + 2 * (3 + 1)
+
+
+def test_graph_block_names_reach_df_analyze_without_collisions():
+    # The real column names of both datasets (Amazon 25 features, YelpChi 32).
+    for relations, width in ((("upu", "usu", "uvu"), 25), (("rur", "rtr", "rsr"), 32)):
+        names = [f"own__f{j:02d}" for j in range(width)]
+        for r in relations:
+            names += [f"nbr__{r}_mean_f{j:02d}" for j in range(width)]
+            names += [f"nbr__{r}_log1p_degree"]
+            names += [f"gnnssl__{r}_pc{k:02d}" for k in range(1, 9)]
+        renamed = df_analyze_names(names)  # raises on a collision
+        assert len(set(renamed.values())) == len(names)
+        r = relations[0]
+        assert renamed[f"nbr__{r}_mean_f00"] == f"nbr_{r}_mean_f00"
+        assert renamed[f"gnnssl__{r}_pc01"] == f"gnnssl_{r}_pc01"
+
+
+def test_neighbour_agg_stage_builds_the_block_only_when_used(tmp_path):
+    path, config = fake_dataset(tmp_path, n_nodes=120)
+    assert main(["--config", str(path), "--to", "neighbour_agg"]) == 0
+    p = get_paths(config)
+    assert not p.block_file(C.NBR_BLOCK).exists()  # m1_own does not use it
+
+    args = ["--config", str(path), "--to", "df_analyze_input",
+            "--set", "feature_set=m2_own_nbr"]  # fmt: skip
+    assert main(args) == 0
+    block = pd.read_parquet(p.block_file(C.NBR_BLOCK))
+    spec = json.loads(p.block_spec(C.NBR_BLOCK).read_text(encoding="utf-8"))
+    n_own = 5  # the fake dataset's features
+    assert block.shape == (120, 1 + 2 * (n_own + 1))  # relations aaa and bbb
+    assert set(spec["columns"]) == set(block.columns) - {C.NODE_ID}
+    m2 = get_paths({**config, "feature_set": "m2_own_nbr"})
+    train = pd.read_parquet(m2.df_analyze_input_dir / "train.parquet")
+    assert train.shape[1] == n_own + 2 * (n_own + 1) + 1  # + target
+    assert "nbr_aaa_mean_f00" in train.columns

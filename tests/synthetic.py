@@ -208,6 +208,37 @@ def fake_block(name: str, n: int = 10, width: int = 3, seed: int = 0) -> pd.Data
     return block
 
 
+def fake_edges(n: int, n_pairs: int, seed: int = 0) -> np.ndarray:
+    """Invented undirected edge list over nodes 0..n-1, shaped like the load
+    stage's output: (2, E) int32, src < dst, no self-loops, no repeats."""
+    rng = np.random.default_rng(seed)
+    pairs = rng.integers(0, n, size=(2, n_pairs))
+    pairs = pairs[:, pairs[0] != pairs[1]]
+    return np.unique(np.sort(pairs, axis=0), axis=1).astype(np.int32)
+
+
+def fake_feature_graph(
+    n: int = 60,
+    width: int = 4,
+    relations: tuple[str, ...] = ("aaa", "bbb"),
+    seed: int = 0,
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, np.ndarray]]:
+    """Invented graph for the graph-block tests: a node table whose first n/10
+    nodes are unlabelled and whose labelled nodes are split about 60/40 into
+    train/test at random; an own block (own__f00, ...) of noise; and one random
+    edge list per relation."""
+    rng = np.random.default_rng(seed)
+    nodes = fake_node_table(n=n, unlabelled=n // 10, seed=seed)
+    labelled = nodes[C.IS_LABELLED].to_numpy()
+    nodes.loc[labelled, C.SPLIT] = np.where(
+        rng.random(int(labelled.sum())) < 0.6, C.TRAIN, C.TEST
+    )
+    own = fake_block(C.OWN_BLOCK, n=n, width=width, seed=seed)
+    own.columns = [C.NODE_ID, *(f"own__f{j:02d}" for j in range(width))]
+    edges = {r: fake_edges(n, 3 * n, seed + i) for i, r in enumerate(relations)}
+    return nodes, own, edges
+
+
 def fake_inferred_types(kinds: dict[str, str]) -> pd.DataFrame:
     """Invented df-analyze inspection/inferred_types.csv: index feature_name,
     columns user, inferred, reason (as written by InspectionResults.basic_df)."""

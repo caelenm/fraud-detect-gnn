@@ -6,9 +6,12 @@ Nothing here is real data; the fake .mat contents come from synthetic.py.
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -23,12 +26,47 @@ from synthetic import (
     fake_shared_cv,
 )
 
+from fraud_detect import columns as C
 from fraud_detect.config import DEFAULT_CONFIG, load_config, with_dataset
 from fraud_detect.models import model_export
 
 
 def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def label_like(name: str) -> bool:
+    """A parameter name that looks like it carries labels: one of its
+    underscore-separated parts is `y` or starts with `label` or `target`
+    (y_train, labels, is_labelled; but not edges_by_relation)."""
+    parts = name.lower().split("_")
+    return any(p == "y" or p.startswith(("label", "target")) for p in parts)
+
+
+def assert_label_blind(
+    builder: Callable[[pd.DataFrame, Any], pd.DataFrame],
+    nodes: pd.DataFrame,
+    features: pd.DataFrame,
+    edges: Any,
+    seed: int = 0,
+) -> None:
+    """Fail unless graph feature `builder(features, edges)` takes no label
+    argument and gives identical output after the labels in `nodes` are
+    permuted in place (the label-blindness convention, plan §6). `edges` is an
+    edge list or a dict of them, passed as a copy each time."""
+    params = list(inspect.signature(builder).parameters)
+    assert not [p for p in params if label_like(p)], params
+    assert not set(features.columns) & (set(C.FORBIDDEN_FEATURE_COLUMNS) - {C.NODE_ID})
+    before = builder(features.copy(), edges.copy())
+    original = nodes[C.LABEL].copy()
+    rng = np.random.default_rng(seed)
+    try:
+        nodes[C.LABEL] = original.to_numpy()[rng.permutation(len(nodes))]
+        assert not nodes[C.LABEL].equals(original)  # the permutation changed labels
+        after = builder(features.copy(), edges.copy())
+    finally:
+        nodes[C.LABEL] = original
+    pd.testing.assert_frame_equal(before, after)
 
 
 def tmp_config(tmp_path: Path, dataset: str = "amazon", config: dict | None = None):
