@@ -173,6 +173,10 @@ class Paths:
         """Raw self-supervised embeddings and their training log (gnn_embed)."""
         return self.outputs_dir / "gnn_embed"
 
+    def raw_embedding(self, relation: str) -> Path:
+        """One relation's raw (n_nodes, out_dim) DGI embedding, before PCA."""
+        return self.gnn_embed_dir / f"raw_{relation}.npy"
+
     @property
     def probe_dir(self) -> Path:
         return self.outputs_dir / "probe"

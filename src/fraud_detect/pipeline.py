@@ -12,7 +12,7 @@ import json
 import os
 import shutil
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -33,7 +33,7 @@ from fraud_detect.models import (
     selection,
 )
 from fraud_detect.report import web
-from fraud_detect.runlog import git_commit
+from fraud_detect.runlog import git_commit, package_versions
 from fraud_detect.runstate import (
     CHECKPOINT_DIR,
     UnitStore,
@@ -42,6 +42,7 @@ from fraud_detect.runstate import (
     atomic_write_json,
     atomic_write_parquet,
     atomic_write_text,
+    config_fingerprint,
 )
 
 
@@ -451,10 +452,144 @@ def run_neighbour_agg(ctx: Context) -> None:
     )
 
 
+def split_masks(nodes: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
+    """In node order: `fit` = training nodes (scaler and PCA fits); `loss` = the
+    non-test nodes, train and unlabelled (the DGI loss). From the split
+    column only, never the labels."""
+    ordered = nodes.sort_values(C.NODE_ID)
+    if not np.array_equal(ordered[C.NODE_ID].to_numpy(), np.arange(len(ordered))):
+        raise StageError("nodes.parquet must have one row per node 0..n-1")
+    split = ordered[C.SPLIT].astype("string").fillna("").to_numpy(dtype=str)
+    unknown = sorted(set(split) - {C.TRAIN, C.TEST, C.UNLABELLED})
+    if unknown:
+        raise StageError(f"Nodes without a train/test/unlabelled split: {unknown}")
+    return split == C.TRAIN, split != C.TEST
+
+
+def gnn_embed_fingerprint(ctx: Context) -> str:
+    """What the gnnssl block depends on besides the data: its settings, the
+    seed and the relations. Recorded in meta.json and checked before use."""
+    return config_fingerprint(
+        {
+            "gnn_embed": ctx.config["gnn_embed"],
+            "seed": ctx.seed,
+            "relations": list(ctx.data["relations"]),
+        }
+    )
+
+
 def run_gnn_embed(ctx: Context) -> None:
+    """Self-supervised DGI embeddings, one unit per relation (graph/ssl.py),
+    then PCA per relation into the gnnssl block. The raw embeddings stay in
+    outputs/<dataset>/gnn_embed/ for the comparison page."""
     if not _uses_block(ctx, C.GNNSSL_BLOCK):
         return
-    raise StageError("The gnn_embed stage is not implemented yet.")
+    try:
+        from fraud_detect.graph import ssl  # noqa: PLC0415  (needs the gnn extra)
+    except ImportError as e:
+        raise StageError(
+            "The gnn_embed stage needs torch and torch_geometric. Install them with "
+            f"`uv sync --extra gnn` ({e})."
+        ) from e
+    p = ctx.paths
+    try:
+        cfg = ssl.SSLConfig.from_config(ctx.config["gnn_embed"], ctx.seed)
+        device = ssl.resolve_device(cfg.device)
+    except (TypeError, ValueError) as e:
+        raise StageError(f"gnn_embed settings: {e}") from e
+    _require(p.block_file(C.OWN_BLOCK), p.train_ids)
+    fit_mask, loss_mask = split_masks(read_nodes(p))
+    own_block = pd.read_parquet(p.block_file(C.OWN_BLOCK))
+    edges = _relation_edges(ctx)
+    try:
+        x = ssl.standardized_features(own_block, fit_mask)
+        ssl.check_masks(len(x), fit_mask, loss_mask)
+    except ValueError as e:
+        raise StageError(str(e)) from e
+    print(
+        f"DGI per relation on {device}: {len(x):,} nodes; loss over "
+        f"{int(loss_mask.sum()):,} non-test nodes; scaler and PCA fit on "
+        f"{int(fit_mask.sum()):,} training nodes",
+        flush=True,
+    )
+
+    store = ctx.unit_store("gnn_embed")
+    embeddings: dict[str, np.ndarray] = {}
+    logs: dict[str, dict[str, Any]] = {}
+    for relation, rel_edges in edges.items():
+        unit, path = f"relation/{relation}", p.raw_embedding(relation)
+        if store.done(unit) and path.is_file():
+            logs[relation] = store.load(unit)["log"]
+            embeddings[relation] = np.load(path)
+            print(f"  {relation}: finished in the interrupted run; kept")
+            continue
+        result = ssl.embed_relation(x, rel_edges, loss_mask, cfg, relation)
+        atomic_write(path, lambda tmp, z=result.embedding: np.save(tmp, z))
+        store.save(unit, {"log": result.log})
+        embeddings[relation], logs[relation] = result.embedding, result.log
+        log = result.log
+        print(
+            f"  {relation}: {log['n_edges_used']:,} edges, {log['epochs_run']} epochs "
+            f"(best {log['best_epoch']}, loss {log['best_loss']:.4f}) on "
+            f"{log['device']} in {log['seconds']:.1f} s",
+            flush=True,
+        )
+
+    try:
+        block, pca_info = ssl.pca_block(
+            embeddings, fit_mask, cfg.pca_components, cfg.seed
+        )
+    except ValueError as e:
+        raise StageError(str(e)) from e
+    versions = package_versions()
+    meta = {
+        "block": C.GNNSSL_BLOCK,
+        "method": "Deep Graph Infomax (torch_geometric.nn.DeepGraphInfomax), one "
+        "model per relation, no labels",
+        "encoder": f"{cfg.layers} rounds of GCN-normalised propagation over A + I, "
+        f"hidden {cfg.hidden}, output {cfg.out_dim}, PReLU",
+        "corruption": "row shuffle of the node features",
+        "loss_nodes": "non-test nodes (train and unlabelled); test nodes take part "
+        "in message passing only",
+        "fit_nodes": "the feature scaler and each PCA are fit on training nodes only",
+        "n_nodes": len(x),
+        "n_fit_nodes": int(fit_mask.sum()),
+        "n_loss_nodes": int(loss_mask.sum()),
+        "config": asdict(cfg),
+        "config_sha256": gnn_embed_fingerprint(ctx),
+        "versions": {
+            k: versions[k] for k in ("torch", "torch-geometric") if k in versions
+        },
+        "cuda_device": ssl.device_name(device),
+        "relations": {r: {**logs[r], **pca_info[r]} for r in edges},
+        "raw_embeddings": {r: p.raw_embedding(r).name for r in edges},
+        "columns": [c for c in block.columns if c != C.NODE_ID],
+        "created_utc": datetime.now(UTC).isoformat(timespec="seconds"),
+    }
+    atomic_write_json(p.gnn_embed_dir / GNN_EMBED_META, meta)
+    spec = _write_block(p, C.GNNSSL_BLOCK, block)
+    explained = ", ".join(
+        f"{r} {pca_info[r]['explained_variance_total']:.0%}" for r in edges
+    )
+    print(
+        f"gnnssl block: {block.shape[1] - 1} features for {len(block):,} nodes; PCA "
+        f"variance kept per relation: {explained}; types from training nodes: "
+        f"{_type_counts(spec)}"
+    )
+
+
+def check_gnn_embed_settings(ctx: Context) -> None:
+    """Warn when the gnnssl block was built with other gnn_embed settings, seed
+    or relations than the current config (rerun gnn_embed with --force)."""
+    meta_path = ctx.paths.gnn_embed_dir / GNN_EMBED_META
+    _require(meta_path)
+    if _read_json(meta_path).get("config_sha256") != gnn_embed_fingerprint(ctx):
+        print(
+            "WARNING: the gnnssl block was built with different gnn_embed settings, "
+            "seed or relations than the current config. Rebuild it with "
+            f"`uv run run.py --dataset {ctx.dataset} --only gnn_embed --force "
+            f"--set feature_set={ctx.config['feature_set']}` if that was not intended."
+        )
 
 
 # --------------------------------------------------------------------------
@@ -484,6 +619,8 @@ def run_df_analyze_input(ctx: Context) -> None:
     _require(p.train_ids, p.test_ids, p.column_spec)
     nodes = read_nodes(p)
     names = feature_set_blocks(ctx)
+    if C.GNNSSL_BLOCK in names:
+        check_gnn_embed_settings(ctx)
     try:
         features = blocks.load_feature_set(p.features_dir, names)
         train_ids, test_ids = pd.read_csv(p.train_ids), pd.read_csv(p.test_ids)
