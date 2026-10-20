@@ -572,7 +572,14 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
 
 ## 12. Status and next steps
 
-**Phase 2 (2026-10-19, branch `feat/gnn-embeddings`, local commits, not pushed).** Models 2 (`nbr`) and 5 (`gnnssl`) are implemented as feature blocks, each also without the four #36 features (`_no36`), with the comparison page (`scripts/compare_report.py`) and a CV probe. The Amazon pilot (six runs: three rungs × two variants, 10 trials, 3 classifiers) and its comparison pages are in §11. Tested on Linux (WSL2) with an NVIDIA GPU; 173 tests pass with the `gnn` extra, and without it the GNN tests are skipped.
+**State (2026-10-20).** Phase 2 is merged into `main` (PR #37). Models 2 (`nbr`) and 5 (`gnnssl`) are implemented as feature blocks, each also without the four #36 features (`_no36`), with the comparison page, a CV probe and the training-only checks. Results in §11:
+- the full Model A both ways (0.919 vs 0.518);
+- the six pilot rungs on 3 splits with pre-registered verdicts;
+- the random-graph control;
+- the #36 checks (a)–(b);
+- embedding sensitivity.
+
+`AGENTS.md` ("Current state") has the one-screen summary of what was run and what is known or unknown. Tested on Linux (WSL2) with an NVIDIA GPU; 179 tests pass with the `gnn` extra, and without it the GNN tests are skipped.
 
 **Next steps (phase 3; ask before starting):**
 0. **Settle issue #36 locally first.** (a) and (b) ran on 2026-10-20 (§11): (a) found no helpful-vote partner for f19; (b) is consistent with rating statistics. (c)–(e) remain. (training/labelled rows, aggregates only, minutes of CPU; scripts in `scripts/`, outputs under `outputs/amazon/`):

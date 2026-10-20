@@ -6,6 +6,42 @@ Instructions for AI coding agents (primarily Claude Code) working in this reposi
 
 We ask: **does using a graph improve fraud classification over the same kind of model without one, and can a GNN's representations improve a tabular AutoML pipeline (df-analyze)?** The datasets are two graph fraud benchmarks with tabular node features: **YelpChi** (main; nodes are hotel and restaurant reviews, labelled spam by Yelp's filter, three review–review relations) and **Amazon** (replication; nodes are users, labelled fraudulent or not, three user–user relations). Both come from the preprocessed `.mat` files of the CARE-GNN repository. The model ladder (plan §1) is: (1) df-analyze on each node's own features (Model A); (2) df-analyze plus label-free neighbour aggregates per relation; (3) GraphSAGE with all edges removed; (4) heterogeneous GraphSAGE over all relations; (5) df-analyze plus self-supervised GNN embeddings; (6) df-analyze plus supervised, out-of-fold GNN features (needs a rule change). Every model on a dataset is trained on the same split and scored on the same frozen, grouped test set. The headline metric is PR-AUC, always reported next to the no-skill baseline (the test positive rate). Model 1 and the interfaces the later rungs need (node table, relation edge lists, feature blocks, feature sets) were implemented first. Phase 2 ([`docs/PHASE2_GNN_PLAN.md`](docs/PHASE2_GNN_PLAN.md)) adds Models 2 and 5 as feature blocks (`nbr`, `gnnssl`) and a comparison page; GraphSAGE (Models 3–4) comes later.
 
+## Current state (2026-10-20): read this first
+
+The details are in [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md) §11 (decision log and every result) and §12 (next steps); a short summary is in the README ("Results").
+
+**What has been run (Amazon only, seed 555, one RTX 4060 laptop under WSL2).** Every df-analyze run passed the split and column-type checks.
+
+| Run or check | Configuration | Outcome (test PR-AUC unless stated) |
+|---|---|---|
+| Full Model A `m1_own` | 6 classifiers + dummy, 100 trials, split 0 | 0.919 [0.890, 0.942] |
+| Full Model A `m1_own_no36` (issue #36) | same, without `own__f13`, `own__f15`, `own__f18`, `own__f19` | 0.518 [0.465, 0.576]; paired Δ −0.401 |
+| Pilot ladder `pilot_m1/m2/m5` × all features / `_no36` | 10 trials; LightGBM, logistic regression, CatBoost; splits 0, 1, 2 (18 runs) | all features: m1 0.917–0.919, m2 0.923–0.938, m5 0.928–0.931; without #36: m1 0.524–0.574, m2 0.709–0.711, m5 0.665–0.688 |
+| Pre-registered 3-split verdicts (`scripts/repeat_summary.py`) | Δ > 0 on all splits, mean > SD, Nadeau–Bengio p < 0.05 over 15 CV folds | all features: m2 − m1 +0.010 supported; m5 − m1 +0.011 not distinguishable; m5 − m2 ≈ 0. Without #36: m2 − m1 +0.162 and m5 − m1 +0.129 supported; m5 − m2 −0.033 worse |
+| Training-only checks (`scripts/probe_blocks.py`, `progress_checks.py`, `feature_identity_checks.py`) | grouped CV folds of split 0 | random graph keeps most of the all-features gain and about half of the without-#36 gain; f19 alone 0.893 balanced accuracy; vote-ratio test negative; f13/f15/f18 consistent with rating statistics; embedding defaults mid-grid |
+
+**Known:**
+- The four #36 features carry most of Amazon's signal.
+- Without them, graph features help clearly on all 3 splits, and about half of that gain needs the real edges.
+- Simple neighbour means beat untuned DGI embeddings.
+- Published Amazon numbers use all 25 features.
+
+**Unknown:**
+- What f19 is. It is probably a helpfulness-vote count; the label is the share of helpful votes (< 20% fraud, > 80% benign), and `Amazon.mat` holds no votes.
+- Whether other columns are vote-derived.
+- Full-budget and tuned-embedding results for the graph methods.
+- YelpChi.
+- GraphSAGE (Models 3–4).
+
+**Not run yet:** #36 checks (c)–(e) in RESEARCH_PLAN §12, step 0; a variant without only the vote-derived columns; full-budget m2/m5; YelpChi beyond a smoke test; Models 3, 4, 6.
+
+**Where things are:**
+- **Code:** on `main`.
+- **Results:** in the WSL clone's `outputs/amazon*` and `data/processed/amazon*`. Split repeats 1–2 live in `outputs/amazon_repeat1/2`, which `pack_artifacts.py` does not pack (it packs repeat 0 only).
+- **Group bundle:** `fraud_artifacts_amazon_20261019T220559Z.tgz` (148 MB, split 0), on OneDrive.
+- **CFPB-era files** moved out of the clone to `~/projects/fraud-detect-gnn-cfpb-archive/`.
+- **Every Amazon comparison is reported both ways** (all features and `_no36`; decided 2026-10-19). GNN embeddings run on the CPU (`gnn_embed.device: cpu`).
+
 ## Datasets
 
 - **Source:** the CARE-GNN repository (Dou et al., CIKM 2020; Apache-2.0), commit `a64ff7523e187a24251f7ca88435d2c9d8f7dcd9`, folder `data/`: `YelpChi.zip` and `Amazon.zip`, each holding one `.mat` file. The SHA-256 checksums of the zips and the `.mat` files are in plan §2 and `configs/default.yaml`.
@@ -110,7 +146,7 @@ A clone that only unpacked a bundle has no raw data; the `download` stage counts
 
 Still to do (later branches; tracked as GitHub issues):
 
-- **Done in phase 2 (branch `feat/gnn-embeddings`):** Model 2 (`nbr` block) and Model 5 (`gnnssl` block), one block per kind covering every relation, their `_no36` variants, and the comparison page with paired group-bootstrap contrasts. Amazon pilot runs only.
+- **Done in phase 2 (merged to `main`, PR #37) and its validation (2026-10-20):** Model 2 (`nbr` block) and Model 5 (`gnnssl` block), one block per kind covering every relation, their `_no36` variants, the comparison page with paired group-bootstrap contrasts, 3-split pilot validation with pre-registered verdicts, and the #36 checks (a)–(b). See "Current state" above.
 - **Phase 3 (ask before starting):** embedding settings chosen on training CV only; full-budget runs; `split.n_repeats: 3` for every compared rung; YelpChi; ablations.
 - **Models 3 and 4:** GraphSAGE with all edges removed and heterogeneous GraphSAGE over all relations, the same code path, at least 5 seeds, one unit per (model, seed), early stopping on the saved CV folds.
 - **Model 6:** supervised out-of-fold GNN features, only if the group amends invariant 1.
