@@ -46,6 +46,25 @@ def test_probe_covers_variant_sets(tmp_path):
     assert "missing" in table.loc["own_x01+nbr_x01", "note"]  # nbr_x01 not built
 
 
+def test_vote_ratio_check_finds_the_helpful_vote_column():
+    """Synthetic votes: labels follow the helpful share, as in the Amazon rule."""
+    rng = np.random.default_rng(0)
+    n = 300
+    helpful = rng.integers(0, 50, n)
+    unhelpful = rng.integers(0, 50, n)
+    share = helpful / np.maximum(helpful + unhelpful, 1)
+    keep = (helpful + unhelpful > 0) & ((share < 0.2) | (share > 0.8))
+    own = pd.DataFrame({C.NODE_ID: np.arange(n), "own__f00": rng.normal(size=n) ** 2,
+                        "own__f01": helpful, "own__f19": unhelpful})  # fmt: skip
+    train = pd.DataFrame({C.NODE_ID: np.flatnonzero(keep),
+                          C.LABEL: (share[keep] < 0.2).astype(int)})  # fmt: skip
+    out = probe.vote_ratio_check(own, train, "own__f19")
+    best = out.iloc[0]
+    assert best["column"] == "own__f01" and best["ratio_auroc_benign"] == 1.0
+    assert best["fraud_below_low"] == 1.0 and best["benign_above_high"] == 1.0
+    assert out.set_index("column").loc["own__f00", "ratio_auroc_benign"] < 0.9
+
+
 def test_probe_never_reads_test_or_unlabelled_rows(tmp_path):
     own, train_ids, folds, other_rows = setup(tmp_path)
     before = probe.probe(tmp_path, train_ids, folds, seed=0)

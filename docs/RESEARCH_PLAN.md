@@ -515,6 +515,33 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
   A direct helpful-ratio column would reach AUROC ≈ 1.0 on labelled users, so none of the four is the ratio itself.
 
   **Recommended reading** (not yet decided by the group): don't headline 0.919 (likely leakage-inflated); report 0.518 as a conservative interim figure; the headline should be a run without every column shown to be vote-derived, which keeps the rating features. The checks that settle it are in §12. Published Amazon results built on these 25 features would inherit the same issue; the research cites CARE-GNN's own AUCs (Dou et al. 2020, Table 3) as an example, not verified here.
+- **2026-10-20 (overnight validation; only checks planned before any of their results).** Branch `exp/validation-repeats`. 26 steps, none failed, 187 min, one job at a time (01:40–04:48 UTC).
+  - **Split repeats 1 and 2 of the six pilot rungs:** 11 runs, mean 16 min each. Every run (18 with split 0) passed the split check (5,183 / 3,456, identical labels) and the type check (nothing dropped or coerced); no search hit its time limit.
+  - **Model A per split** (test PR-AUC):
+
+    | Rung | Split 0 | Split 1 | Split 2 |
+    |---|---|---|---|
+    | m1 | 0.917 | 0.919 | 0.919 |
+    | m2 | 0.926 | 0.938 | 0.923 |
+    | m5 | 0.929 | 0.931 | 0.928 |
+    | m1_no36 | 0.524 | 0.545 | 0.574 |
+    | m2_no36 | 0.710 | 0.711 | 0.709 |
+    | m5_no36 | 0.677 | 0.688 | 0.665 |
+
+  - **Verdicts under the pre-registered rule** (`compare/repeat_summary.md`; Δ mean ± SD across splits; Nadeau–Bengio corrected paired t-test over 15 grouped CV folds, training data only):
+    - all features: m2 − m1 +0.0104 ± 0.0079, p = 0.013, **supported**; m5 − m1 +0.0106 ± 0.0017, p = 0.090, not distinguishable from zero; m5 − m2 +0.0002 ± 0.0066, p = 0.55, not distinguishable;
+    - without #36: m2 − m1 +0.162 ± 0.026, p = 6e-7, **supported**; m5 − m1 +0.129 ± 0.034, p = 6e-6, **supported**; m5 − m2 −0.033 ± 0.010, p = 0.002, **worse**.
+  - **Caveats:**
+    - Each Model A was chosen on the same CV folds the t-test uses, which makes both sides' CV scores slightly optimistic.
+    - The all-features m2 gain is "supported" as a gain from the neighbour-aggregate columns. The random-graph control shows most of it survives rewiring, so it is not evidence of real graph structure.
+  - **Issue #36 identity checks** (`scripts/feature_identity_checks.py`, §12 step 0 a–b; training rows; `probe/feature_identity.md`):
+    - (a) **negative:** no column c makes c / (c + f19) reproduce the label rule (best AUROC 0.906, `f22`). The 25 features do not contain a helpful/unhelpful vote pair; f19 may still be a vote count whose partner column is absent.
+    - (b) **consistent:** f15 takes exactly the 9 half-star values 1–5, f18 ∈ [1, 5], f13 ∈ [0, 1], Spearman(f15, f18) = 0.908. That fits median rating, mean rating and a share; it is not proof.
+  - **Embedding sensitivity** (training CV probe; 3 sizes × 2 epoch caps × 3 PCA sizes; a check only, the runs keep the defaults):
+    - all features: default 0.934, grid 0.927–0.940 (median 0.933);
+    - without #36: default 0.672, grid 0.653–0.694 (median 0.679).
+
+    The default sits mid-grid; tuning could add about 0.01–0.02 on CV, and choosing settings this way is a phase-3 step on training data.
 - **2026-10-19 (issue #36: how published work handles these features; second research pass, not exhaustive).**
   - **All 25 features everywhere:** every paper found uses all 25 features (CARE-GNN, DIGNN, HA-GNN, a generative semi-supervised GAD paper; DGL and GADBench list 25). None drops columns or raises leakage. One noise-robustness paper (arXiv:2505.00946) lists Amazon with 24 dimensions; typo or dropped column, unverified.
   - **Fraud rate convention:** 6.87% = 821/11,944, counting unlabelled users as non-fraud; 9.5% = 821/8,639, labelled users only, which is our convention.
@@ -545,10 +572,17 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
 
 ## 12. Status and next steps
 
-**Phase 2 (2026-10-19, branch `feat/gnn-embeddings`, local commits, not pushed).** Models 2 (`nbr`) and 5 (`gnnssl`) are implemented as feature blocks, each also without the four #36 features (`_no36`), with the comparison page (`scripts/compare_report.py`) and a CV probe. The Amazon pilot (six runs: three rungs × two variants, 10 trials, 3 classifiers) and its comparison pages are in §11. Tested on Linux (WSL2) with an NVIDIA GPU; 173 tests pass with the `gnn` extra, and without it the GNN tests are skipped.
+**State (2026-10-20).** Phase 2 is merged into `main` (PR #37). Models 2 (`nbr`) and 5 (`gnnssl`) are implemented as feature blocks, each also without the four #36 features (`_no36`), with the comparison page, a CV probe and the training-only checks. Results in §11:
+- the full Model A both ways (0.919 vs 0.518);
+- the six pilot rungs on 3 splits with pre-registered verdicts;
+- the random-graph control;
+- the #36 checks (a)–(b);
+- embedding sensitivity.
+
+`AGENTS.md` ("Current state") has the one-screen summary of what was run and what is known or unknown. Tested on Linux (WSL2) with an NVIDIA GPU; 179 tests pass with the `gnn` extra, and without it the GNN tests are skipped.
 
 **Next steps (phase 3; ask before starting):**
-0. **Settle issue #36 locally first** (training/labelled rows, aggregates only, minutes of CPU; scripts in `scripts/`, outputs under `outputs/amazon/`):
+0. **Settle issue #36 locally first.** (a) and (b) ran on 2026-10-20 (§11): (a) found no helpful-vote partner for f19; (b) is consistent with rating statistics. (c)–(e) remain. (training/labelled rows, aggregates only, minutes of CPU; scripts in `scripts/`, outputs under `outputs/amazon/`):
     - (a) for every non-negative column c, does c / (c + f19) give < 0.2 for every fraud user and > 0.8 for every benign one? If so, c = helpful votes and f19 = unhelpful votes: leakage proven. Also check whether min(c + f19) ≥ 20, a minimum-vote filter;
     - (b) f15 ∈ {1, 1.5, …, 5}, f18 ∈ [1, 5], Spearman(f15, f18) > 0.8, and f18 / f13 against any five rating-level count columns (f18 = Σk·n_k / Σn_k, f13 = (n_4 + n_5) / Σn_k);
     - (c) sort all 25 columns into rating / vote / time / text families by such identities;

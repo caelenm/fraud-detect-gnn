@@ -103,7 +103,7 @@ One full Model 1 run (2026-10-13; seed 555, 100 tuning trials per model, one gro
 
 ## Results (phase 2 pilot, Amazon)
 
-**Pilot, not final:** 10 tuning trials, 3 classifiers (LightGBM, logistic regression, CatBoost) plus the dummy, one grouped split, seed 555, all six runs on the same RTX 4060 laptop on 2026-10-19. Each Model A was chosen by grouped CV on the training set only. Test PR-AUC with 95% group-bootstrap intervals (1,000 resamples, from each run's report; the comparison pages use 2,000, so their per-side intervals differ in the third decimal); no-skill PR-AUC 0.095.
+**Pilot, not final:** 10 tuning trials, 3 classifiers (LightGBM, logistic regression, CatBoost) plus the dummy, seed 555, all on the same RTX 4060 laptop. The tables below are split 0 (2026-10-19); the 3-split validation follows them. Each Model A was chosen by grouped CV on the training set only. Test PR-AUC with 95% group-bootstrap intervals (1,000 resamples, from each run's report; the comparison pages use 2,000, so their per-side intervals differ in the third decimal); no-skill PR-AUC 0.095.
 
 | Feature set | Features | Model A | Test PR-AUC [95% CI] | Test AUROC |
 |---|---|---|---|---|
@@ -134,7 +134,27 @@ Paired differences on the same test nodes (B − A, 2,000 resamples of whole tes
 - The `_no36` runs print the sanity-band warning (0.91 is the band for all features); that is expected, not a bug.
 - **What these numbers do not show:** variation across splits and seeds, or the effect of tuning the embeddings or the full df-analyze budget. That is phase 3.
 
-Each pair has a comparison page in `outputs/amazon/compare/` (in the bundle). Run times: 10.6–16.0 min per feature set, 85 min for all six; the CPU embeddings took 34 s (all features) and 22 s (without #36).
+**Validation over 3 splits (2026-10-20).** All six pilot rungs were rerun on two more independently seeded grouped splits, under a decision rule committed before the runs:
+1. the gain is positive on all 3 splits;
+2. its mean exceeds its SD across splits;
+3. a Nadeau–Bengio corrected paired t-test over the 15 grouped CV folds (training data only) gives p < 0.05.
+
+All 18 runs passed the split and type checks, and no search hit a time limit.
+
+| Variant | Contrast | Δ test PR-AUC, splits 0 / 1 / 2 | Mean ± SD | CV p | Verdict |
+|---|---|---|---|---|---|
+| All features | m2 − m1 | +0.009 / +0.019 / +0.003 | +0.010 ± 0.008 | 0.013 | supported |
+| All features | m5 − m1 | +0.012 / +0.012 / +0.009 | +0.011 ± 0.002 | 0.090 | not distinguishable from zero |
+| All features | m5 − m2 | +0.003 / −0.007 / +0.005 | +0.000 ± 0.007 | 0.55 | not distinguishable from zero |
+| Without #36 | m2 − m1 | +0.186 / +0.166 / +0.134 | +0.162 ± 0.026 | 6e-7 | supported |
+| Without #36 | m5 − m1 | +0.153 / +0.143 / +0.090 | +0.129 ± 0.034 | 6e-6 | supported |
+| Without #36 | m5 − m2 | −0.033 / −0.024 / −0.044 | −0.033 ± 0.010 | 0.002 | worse |
+
+- **Model 1 across splits:** test PR-AUC 0.917 / 0.919 / 0.919 with all features, and 0.524 / 0.545 / 0.574 without #36.
+- **With all features,** neighbour means give a small (about +0.01) but consistent gain that passes the rule. The random-graph control (below) shows that most of that gain survives random rewiring with the same degrees, so it supports "neighbour-aggregate columns help", not "real graph structure helps". The GNN's +0.011 is just as consistent but not significant on the CV folds.
+- **Without the #36 features,** both graph rungs clearly help: +0.16 for neighbour means and +0.13 for GNN embeddings. Neighbour means beat the untuned GNN embeddings on every split.
+
+Each pair has a comparison page per split (`outputs/amazon*/compare/`), and the verdict table is `outputs/amazon/compare/repeat_summary.md`. Run times: 10.6–16.0 min per feature set, 85 min for all six; the CPU embeddings took 34 s (all features) and 22 s (without #36).
 
 ## Graph feature blocks (Models 2 and 5)
 
@@ -383,7 +403,7 @@ fraud-detect-gnn/
     - 0.518 drops three probably legitimate features, and may keep other vote-derived columns with weaker individual signal.
     - The defensible headline is a run without every column shown to come from votes. Local checks that settle this, starting with "is some column c such that c / (c + f19) reproduces the label rule?", are listed in `docs/RESEARCH_PLAN.md` §12.
 - **GNN embedding settings are untuned** (64-d, up to 300 epochs, 8 PCA components per relation, the plan's defaults). Some relations were still improving at 300 epochs. Choosing them, on training CV only, is phase 3.
-- **The comparison is one split and one seed,** and the pilot uses a reduced budget (10 trials, 3 classifiers); see the pilot section.
+- **The graph comparison uses a reduced budget** (10 trials, 3 classifiers) on 3 seeded splits with one tuning seed; see the pilot section. The full-budget runs (6 classifiers, 100 trials) exist only for Model 1, on split 0.
 - **df-analyze's internal CV is not grouped.** Its tuning and feature-selection folds are random, so a YelpChi user's reviews can sit on both sides of them. This makes its tuning scores optimistic, which is one more reason Model A is chosen by our grouped CV. The test set is grouped, so final scores are not affected; the tuned hyperparameters may still be slightly over-fitted to user-level leakage.
 - **df-analyze scales continuous features over train and test together,** and infers types on both. No labels are used, but test rows influence the clip points. Our own type decisions use training nodes only.
 - **Single split by default.** Bootstrap intervals cover test-set sampling only. Amazon is small, and its scores vary across splits; `split.n_repeats` measures this at the cost of one df-analyze run per repeat.
