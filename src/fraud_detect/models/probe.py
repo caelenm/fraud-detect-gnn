@@ -94,6 +94,46 @@ def single_feature_check(
     return pd.DataFrame(rows)
 
 
+def vote_ratio_check(
+    own: pd.DataFrame, train_ids: pd.DataFrame, votes: str, low: float = 0.2,
+    high: float = 0.8,
+) -> pd.DataFrame:  # fmt: skip
+    """Issue #36: is some column c the 'helpful votes' to `votes`'s 'unhelpful
+    votes'? The label rule is helpful share < `low` = fraud, > `high` =
+    benign, so for that c the ratio c / (c + votes) separates the training
+    classes almost perfectly. One row per other non-negative column, best
+    first: AUROC of the ratio (higher = benign), the share of fraud users
+    below `low` and of benign users above `high` (users with c + votes = 0
+    count as neither), and the smallest c + votes. Training rows only."""
+    table = own.set_index(C.NODE_ID).loc[train_ids[C.NODE_ID].to_numpy()]
+    y = train_ids[C.LABEL].to_numpy(dtype=int)
+    v = table[votes].to_numpy(dtype=float)
+    rows = []
+    for col in table.columns:
+        c = table[col].to_numpy(dtype=float)
+        if col == votes or (c < 0).any():
+            continue
+        total = c + v
+        ratio = np.divide(c, total, out=np.full_like(c, np.nan), where=total > 0)
+        known = ~np.isnan(ratio)
+        auroc = (
+            float(roc_auc_score(1 - y[known], ratio[known]))
+            if len(np.unique(y[known])) == 2 else float("nan")
+        )  # fmt: skip
+        rows.append(
+            {
+                "column": col,
+                "ratio_auroc_benign": auroc,
+                "fraud_below_low": float((ratio[y == 1] < low).mean()),
+                "benign_above_high": float((ratio[y == 0] > high).mean()),
+                "share_with_no_votes": float((total == 0).mean()),
+                "min_total": float(total.min()),
+                "n_train": len(y),
+            }
+        )
+    return pd.DataFrame(rows).sort_values("ratio_auroc_benign", ascending=False)
+
+
 def cv_scores(x: np.ndarray, y: np.ndarray, fold: np.ndarray, seed: int) -> dict:
     """Mean and SD (ddof=1, as select_model) of the held-out folds' PR-AUC and
     AUROC for one fixed HistGradientBoostingClassifier per fold."""
