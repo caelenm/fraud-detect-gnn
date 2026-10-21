@@ -401,6 +401,7 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
 4. **Model 6 (later):** amend invariant 1 to allow supervised GNN features produced strictly out-of-fold on the saved CV folds, with test-node features from a GNN trained on all training nodes. Not needed for this branch.
 5. **Flagged shortcut features (after M4):** keep, drop, or report results both ways.
 6. **The CFPB result's place in the final report:** omit it, or mention it as the motivating pilot (README wording only).
+7. **Phase 3 (the professor's feedback, 2026-10-21):** questions D1–D5 in [`PHASE3_FEEDBACK_PLAN.md`](PHASE3_FEEDBACK_PLAN.md): what "DeepTune to reduce", "training the GNN" and "4 important features" mean; which new datasets and their split rules; backfilling the results database.
 
 ---
 
@@ -567,6 +568,11 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
     - **Random-graph control:** each relation's edges are rewired at random, keeping degrees approximately, and nbr/gnnssl are rebuilt from them. If the graph gain comes from real structure, it should mostly vanish.
     - **Single-feature #36 check:** how well each of `own__f13`, `own__f15`, `own__f18`, `own__f19` alone separates the training classes.
   - **Reporting:** both variants always side by side. Model A choice, thresholds and every setting come from training data only.
+- **2026-10-21 (professor's feedback and user decisions).**
+  - **Feedback:** "Find out size of gnn embeddings > Potentially use DEEPTUNE to reduce. See if training GNN helps. Run on just 4 important features. More datasets." The plan is [`PHASE3_FEEDBACK_PLAN.md`](PHASE3_FEEDBACK_PLAN.md); its readings of the feedback are for the group to confirm (D1–D3).
+  - **DeepTune** (`moayadeldin/deeptune` at `80e6d74`, read 2026-10-21): the StFX MIB lab's deep-learning AutoML tool for images, text, tabular data (GANDALF, TabPFN) and time series; no graph support. Its embeddings come from models trained on the label, so as df-analyze features they need the Model 6 amendment; its autoencoder is image-only. It pins torch 2.14.0 (CUDA 13), so it would need its own environment. No license file found.
+  - **Git:** no PR requirement; commits may go straight to `main` and need not pass the checks first. The never-commit list and the no-force-push rule stay.
+  - **Results database:** `results/runs/<run_id>/` (`meta.json` + `results.csv`), written by `scripts/results_db.py`; every agent records the runs it finishes. Created empty: none of the runs above is in it yet (D5).
 
 ---
 
@@ -581,7 +587,7 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
 
 `AGENTS.md` ("Current state") has the one-screen summary of what was run and what is known or unknown. Tested on Linux (WSL2) with an NVIDIA GPU; 179 tests pass with the `gnn` extra, and without it the GNN tests are skipped.
 
-**Next steps (phase 3; ask before starting):**
+**Next steps (phase 3; ask before starting):** the professor's feedback comes first ([`PHASE3_FEEDBACK_PLAN.md`](PHASE3_FEEDBACK_PLAN.md); Task 1 absorbs step 1 below). Record every run in the results database (`results/README.md`).
 0. **Settle issue #36 locally first.** (a) and (b) ran on 2026-10-20 (§11): (a) found no helpful-vote partner for f19; (b) is consistent with rating statistics. (c)–(e) remain. (training/labelled rows, aggregates only, minutes of CPU; scripts in `scripts/`, outputs under `outputs/amazon/`):
     - (a) for every non-negative column c, does c / (c + f19) give < 0.2 for every fraud user and > 0.8 for every benign one? If so, c = helpful votes and f19 = unhelpful votes: leakage proven. Also check whether min(c + f19) ≥ 20, a minimum-vote filter;
     - (b) f15 ∈ {1, 1.5, …, 5}, f18 ∈ [1, 5], Spearman(f15, f18) > 0.8, and f18 / f13 against any five rating-level count columns (f18 = Σk·n_k / Σn_k, f13 = (n_4 + n_5) / Σn_k);

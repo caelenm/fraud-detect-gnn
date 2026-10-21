@@ -316,3 +316,49 @@ def fake_oof_predictions(
                 )
             )
     return pd.concat(frames, ignore_index=True)
+
+
+def fake_results_table(n_rows: int = 3, seed: int = 0) -> pd.DataFrame:
+    """Invented aggregate results (one row per model), shaped like
+    model_a_metrics.csv, for the results database. The numbers describe no
+    real run."""
+    rng = np.random.default_rng(seed)
+    return pd.DataFrame(
+        {
+            "model": [f"fake_model_{i}" for i in range(n_rows)],
+            "selection": ["none"] * n_rows,
+            "cv_pr_auc": rng.uniform(0.1, 0.9, n_rows),
+            "cv_pr_auc_std": rng.uniform(0.0, 0.05, n_rows),
+            "pr_auc": rng.uniform(0.1, 0.9, n_rows),
+            "auroc": rng.uniform(0.5, 1.0, n_rows),
+        }
+    )
+
+
+def fake_model_a_summary(dataset: str = "amazon", feature_set: str = "m1_own") -> dict:
+    """Invented reports/model_a.json of the df_analyze_report stage."""
+    return {
+        "dataset": dataset,
+        "feature_set": feature_set,
+        "run": "20990101T000000Z",
+        "htune_trials": 3,
+        "seed": 1,
+        "n_train": 30,
+        "n_test": 20,
+        "test_positive_rate": 0.25,
+        "model_a": {
+            "model": "fake_model_0",
+            "selection": "none",
+            "pr_auc": 0.5,
+            "auroc": 0.7,
+            "cv_pr_auc": 0.45,
+            "cv_pr_auc_std": 0.02,
+            "f1": 0.4,
+            "threshold": 0.3,
+        },  # fmt: skip
+        "intervals": [
+            {"metric": "pr_auc", "estimate": 0.5, "low": 0.4, "high": 0.6},
+            {"metric": "auroc", "estimate": 0.7, "low": 0.6, "high": 0.8},
+        ],
+        "sanity_warning": None,
+    }
