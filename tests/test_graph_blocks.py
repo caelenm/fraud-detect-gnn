@@ -159,6 +159,69 @@ def test_a_variant_leaves_its_columns_out_of_own_and_graph_inputs(tmp_path):
     assert pd.read_parquet(t1.df_analyze_input_dir / "test.parquet").shape[1] == 5
 
 
+def test_a_keep_variant_uses_only_its_columns_everywhere(tmp_path):
+    path, config = fake_dataset(tmp_path, n_nodes=120)
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["feature_variants"]["k01"] = {"keep": ["own__f01", "own__f03"]}
+    raw["feature_sets"]["t2_k01"] = ["own_k01", "nbr_k01"]
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    args = ["--config", str(path), "--to", "df_analyze_input", "--set"]
+    assert main([*args, "feature_set=t2_k01"]) == 0
+    p = get_paths({**config, "feature_sets": raw["feature_sets"],
+                   "feature_variants": raw["feature_variants"],
+                   "feature_set": "t2_k01"})  # fmt: skip
+    nbr = pd.read_parquet(p.block_file("nbr_k01"))
+    assert list(nbr.columns)[1:4] == [
+        "nbr_k01__aaa_mean_f01", "nbr_k01__aaa_mean_f03", "nbr_k01__aaa_log1p_degree",
+    ]  # fmt: skip
+    train = pd.read_parquet(p.df_analyze_input_dir / "train.parquet")
+    own_cols = [c for c in train.columns if c.startswith("own_")]
+    assert own_cols == ["own_f01", "own_f03"]
+    assert train.shape[1] == 2 + 2 * (2 + 1) + 1  # own, nbr per relation, target
+
+
+def test_keep_and_leave_out_variants_list_the_same_columns():
+    own, _ = five_nodes()
+    keep = {"k": {"keep": ["own__f00"]}, "x": ["own__f01"]}
+    assert blocks.excluded_columns("own_k", keep, list(own.columns)) == ["own__f01"]
+    assert blocks.excluded_columns("own_x", keep) == ["own__f01"]
+    pd.testing.assert_frame_equal(blocks.own_view(own, "nbr_k", keep),
+                                  blocks.own_view(own, "nbr_x", keep))  # fmt: skip
+    with pytest.raises(blocks.BlockError, match="are needed"):
+        blocks.excluded_columns("own_k", keep)
+    with pytest.raises(blocks.BlockError, match="lacks"):
+        blocks.own_view(own, "own_k", {"k": {"keep": ["own__f09"]}})
+    config = load_config(DEFAULT_CONFIG)
+    for bad in ({"keep": []}, {"drop": ["own__f00"]}, "own__f00"):
+        config["feature_variants"]["bad"] = bad
+        with pytest.raises(ConfigError, match="feature_variants.bad"):
+            with_dataset(config, "amazon")
+
+
+def test_feature_ranking_reads_training_rows_only_and_finds_the_signal():
+    rng = np.random.default_rng(0)
+    n = 400
+    y = rng.integers(0, 2, n)
+    own = pd.DataFrame(
+        {
+            C.NODE_ID: np.arange(n),
+            "own__f00": y + rng.normal(0, 0.3, n),  # the signal
+            "own__f01": rng.normal(size=n),
+            "own__f02": rng.normal(size=n),
+        }
+    )
+    train = pd.DataFrame({C.NODE_ID: np.arange(300), C.LABEL: y[:300]})
+    folds = pd.DataFrame({C.NODE_ID: np.arange(300), "fold": np.arange(300) % 3})
+    table = probe.feature_ranking(own, train, folds, seed=0)
+    assert (
+        table.iloc[0]["column"] == "own__f00" and table.iloc[0]["rank_permutation"] == 1
+    )
+    assert table["univariate_auroc"].iloc[0] > 0.9
+    garbage = own.copy()
+    garbage.loc[300:, ["own__f00", "own__f01", "own__f02"]] = 1e6  # test rows
+    pd.testing.assert_frame_equal(table, probe.feature_ranking(garbage, train, folds, 0))
+
+
 def test_unknown_blocks_and_variants_are_refused():
     with pytest.raises(blocks.BlockError, match="Unknown block"):
         blocks.parse_block("xyz_no36")

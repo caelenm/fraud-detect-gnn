@@ -1,14 +1,17 @@
 """Ladder contrasts across split repeats, with the pre-registered verdict.
 
     uv run scripts/repeat_summary.py --dataset amazon --repeats 3 --prefix pilot_
+    uv run scripts/repeat_summary.py --dataset amazon --name gnnrand_summary \\
+        --pairs m5r_own_gnnrand:m5_own_gnnssl m1_own:m5r_own_gnnrand
 
-For each contrast (m2 − m1, m5 − m1, m5 − m2, with all features and _no36)
-it reads the test ΔPR-AUC of every split from compare_report.py's
+For each contrast (by default m2 − m1, m5 − m1, m5 − m2, with all features
+and _no36; or each --pairs A:B, read as B − A, feature-set names without the
+prefix) it reads the test ΔPR-AUC of every split from compare_report.py's
 compare_metrics.json (build those first, with --repeat k), and runs the
 Nadeau-Bengio corrected paired t-test over all splits' CV folds from the
 saved out-of-fold predictions (training data only). It writes
-outputs/<dataset>/compare/repeat_summary.csv and .md. See
-src/fraud_detect/models/contrasts.py for the decision rule.
+outputs/<dataset>/compare/<name>.csv and .md (default name repeat_summary).
+See src/fraud_detect/models/contrasts.py for the decision rule.
 """
 
 from __future__ import annotations
@@ -62,6 +65,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dataset", help="yelpchi or amazon")
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--prefix", default="pilot_", help="feature-set name prefix")
+    parser.add_argument(
+        "--pairs",
+        nargs="+",
+        metavar="A:B",
+        help="contrasts B − A, feature-set names without the prefix (default: the "
+        "ladder's m2 − m1, m5 − m1 and m5 − m2, with all features and _no36)",
+    )
+    parser.add_argument("--name", default="repeat_summary", help="output file stem")
     args = parser.parse_args(argv)
     try:
         config = with_dataset(load_config(args.config), args.dataset)
@@ -69,50 +80,61 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 2
     n_folds = int(config["split"]["cv_folds"])
+    if args.pairs:
+        if not all(pair.count(":") == 1 for pair in args.pairs):
+            print("error: --pairs takes A:B items", file=sys.stderr)
+            return 2
+        contrast_list = [
+            ("-", f"{b} - {a}", a, b) for a, b in (pair.split(":") for pair in args.pairs)
+        ]
+    else:
+        contrast_list = [
+            ("all features" if not variant else "without #36", f"{b_key} - {a_key}",
+             f"{RUNGS[a_key]}{variant}", f"{RUNGS[b_key]}{variant}")
+            for variant in VARIANTS for a_key, b_key in CONTRASTS
+        ]  # fmt: skip
     rows = []
-    for variant in VARIANTS:
-        for a_key, b_key in CONTRASTS:
-            a = f"{args.prefix}{RUNGS[a_key]}{variant}"
-            b = f"{args.prefix}{RUNGS[b_key]}{variant}"
-            test_deltas, fold_diffs, pr_a, pr_b = [], [], [], []
-            for k in range(args.repeats):
-                cfg = repeat_config(config, k, args.repeats)
-                path = get_paths(cfg).compare_dir(a, b) / "compare_metrics.json"
-                if not path.is_file():
-                    print(f"error: missing {path}; run compare_report.py --repeat {k}",
-                          file=sys.stderr)  # fmt: skip
-                    return 2
-                m = json.loads(path.read_text("utf-8"))
-                test_deltas.append(m["delta_pr_auc"]["estimate"])
-                pr_a.append(m["a"]["pr_auc"]["estimate"])
-                pr_b.append(m["b"]["pr_auc"]["estimate"])
-                (_, folds_a), (_, folds_b) = side(cfg, a), side(cfg, b)
-                fold_diffs += list((folds_b - folds_a).to_numpy())
-            test = contrasts.corrected_t_test(fold_diffs, 1.0 / (n_folds - 1))
-            d = np.asarray(test_deltas)
-            rows.append(
-                {
-                    "variant": "all features" if not variant else "without #36",
-                    "contrast": f"{b_key} - {a_key}",
-                    "a": a,
-                    "b": b,
-                    **{f"test_delta_split{k}": v for k, v in enumerate(test_deltas)},
-                    "test_delta_mean": float(d.mean()),
-                    "test_delta_sd": float(d.std(ddof=1)),
-                    "test_pr_auc_a_mean": float(np.mean(pr_a)),
-                    "test_pr_auc_a_sd": float(np.std(pr_a, ddof=1)),
-                    "test_pr_auc_b_mean": float(np.mean(pr_b)),
-                    "test_pr_auc_b_sd": float(np.std(pr_b, ddof=1)),
-                    "cv_folds": len(fold_diffs),
-                    "cv_delta_mean": test["mean"],
-                    "corrected_t": test["t"],
-                    "p": test["p"],
-                    "verdict": contrasts.verdict(test_deltas, test["p"]),
-                }
-            )
+    for variant_label, contrast_label, a_name, b_name in contrast_list:
+        a, b = f"{args.prefix}{a_name}", f"{args.prefix}{b_name}"
+        test_deltas, fold_diffs, pr_a, pr_b = [], [], [], []
+        for k in range(args.repeats):
+            cfg = repeat_config(config, k, args.repeats)
+            path = get_paths(cfg).compare_dir(a, b) / "compare_metrics.json"
+            if not path.is_file():
+                print(f"error: missing {path}; run compare_report.py --repeat {k}",
+                      file=sys.stderr)  # fmt: skip
+                return 2
+            m = json.loads(path.read_text("utf-8"))
+            test_deltas.append(m["delta_pr_auc"]["estimate"])
+            pr_a.append(m["a"]["pr_auc"]["estimate"])
+            pr_b.append(m["b"]["pr_auc"]["estimate"])
+            (_, folds_a), (_, folds_b) = side(cfg, a), side(cfg, b)
+            fold_diffs += list((folds_b - folds_a).to_numpy())
+        test = contrasts.corrected_t_test(fold_diffs, 1.0 / (n_folds - 1))
+        d = np.asarray(test_deltas)
+        rows.append(
+            {
+                "variant": variant_label,
+                "contrast": contrast_label,
+                "a": a,
+                "b": b,
+                **{f"test_delta_split{k}": v for k, v in enumerate(test_deltas)},
+                "test_delta_mean": float(d.mean()),
+                "test_delta_sd": float(d.std(ddof=1)),
+                "test_pr_auc_a_mean": float(np.mean(pr_a)),
+                "test_pr_auc_a_sd": float(np.std(pr_a, ddof=1)),
+                "test_pr_auc_b_mean": float(np.mean(pr_b)),
+                "test_pr_auc_b_sd": float(np.std(pr_b, ddof=1)),
+                "cv_folds": len(fold_diffs),
+                "cv_delta_mean": test["mean"],
+                "corrected_t": test["t"],
+                "p": test["p"],
+                "verdict": contrasts.verdict(test_deltas, test["p"]),
+            }
+        )
     table = pd.DataFrame(rows)
     out = get_paths(repeat_config(config, 0, args.repeats)).outputs_dir / "compare"
-    atomic_write_csv(out / "repeat_summary.csv", table)
+    atomic_write_csv(out / f"{args.name}.csv", table)
     lines = [
         f"# Ladder contrasts over {args.repeats} splits ({config['dataset']}, "
         f"{args.prefix or 'full'} runs)",
@@ -139,9 +161,9 @@ def main(argv: list[str] | None = None) -> int:
             f"{r['verdict']} |"
         )
     text = "\n".join(lines) + "\n"
-    atomic_write_text(out / "repeat_summary.md", text)
+    atomic_write_text(out / f"{args.name}.md", text)
     print(text)
-    print(f"Saved {out / 'repeat_summary.csv'} and repeat_summary.md")
+    print(f"Saved {out / f'{args.name}.csv'} and {args.name}.md")
     return 0
 
 

@@ -11,6 +11,12 @@ with A_hat = D^-1/2 (A + I) D^-1/2 stored as one sparse matrix. The full graph
 is processed at once (11,944 nodes on Amazon) and messages are never copied
 per edge: U-S-U alone has about 7.1M directed edges.
 
+The `gnnrand` block (phase 3, Task 3a) is the untrained control: the same
+encoder, scaler, edges, PCA and seed, but no training step. Its weights are
+the seeded initial weights, i.e. exactly where DGI training starts, so
+gnnssl - gnnrand measures what training adds over propagating the features
+through a random GNN.
+
 Leakage rules (AGENTS.md):
 - No label reaches this module (invariant 1). The entry point takes the own
   features, edge lists and two masks derived from the split column;
@@ -196,6 +202,21 @@ class RelationResult:
     log: dict[str, Any]  # loss curve, best epoch, device, timing, edges used
 
 
+def dgi_model(
+    in_dim: int, cfg: SSLConfig, summary: Any, corruption: Any
+) -> DeepGraphInfomax:
+    """The DGI model before training. Building it draws the encoder's initial
+    weights from torch's global generator (PyG re-initialises the encoder's
+    layers when it builds the model), so after torch.manual_seed(cfg.seed) the
+    weights depend only on the seed and the sizes."""
+    return DeepGraphInfomax(
+        cfg.out_dim,
+        encoder=GCNEncoder(in_dim, cfg.hidden, cfg.out_dim, cfg.layers),
+        summary=summary,
+        corruption=corruption,
+    )
+
+
 def train_dgi(
     x: np.ndarray,
     edges: np.ndarray,
@@ -222,12 +243,7 @@ def train_dgi(
     def summary(z: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         return torch.sigmoid(z[loss_idx].mean(dim=0))
 
-    model = DeepGraphInfomax(
-        cfg.out_dim,
-        encoder=GCNEncoder(x.shape[1], cfg.hidden, cfg.out_dim, cfg.layers),
-        summary=summary,
-        corruption=corruption,
-    ).to(device)
+    model = dgi_model(x.shape[1], cfg, summary, corruption).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.lr)
     losses: list[float] = []
     best_loss, best_epoch, best_state, waited = float("inf"), 0, None, 0
@@ -295,6 +311,39 @@ def embed_relation(
     return result
 
 
+def untrained_relation(
+    x: np.ndarray, edges: np.ndarray, cfg: SSLConfig, relation: str
+) -> RelationResult:
+    """One relation's gnnrand embedding: the encoder of the DGI model that
+    train_dgi would start from (the same seed, sizes and construction), with
+    no training. The edges are thinned as in embed_relation. No loss mask:
+    nothing is trained."""
+    start = time.perf_counter()
+    fraction = cfg.edge_fraction(relation)
+    used = sample_edges(edges, fraction, cfg.seed)
+    device = resolve_device(cfg.device)
+    torch.manual_seed(cfg.seed)
+    a_hat = normalized_adjacency(used, len(x), device)
+    features = torch.as_tensor(x, dtype=torch.float32, device=device)
+    unused = None  # summary and corruption are only called during training
+    encoder = dgi_model(x.shape[1], cfg, unused, unused).encoder.to(device)
+    encoder.eval()
+    with torch.no_grad():
+        z = encoder(features, a_hat).cpu().numpy().astype(np.float32)
+    return RelationResult(
+        embedding=z,
+        log={
+            "device": device,
+            "trained": False,
+            "relation": relation,
+            "n_edges": int(edges.shape[1]),
+            "n_edges_used": int(used.shape[1]),
+            "edge_fraction": fraction,
+            "seconds": round(time.perf_counter() - start, 2),
+        },
+    )
+
+
 def standardized_features(own_features: pd.DataFrame, fit_mask: np.ndarray) -> np.ndarray:
     """The own features in node order, standardised with a scaler fit on the
     training nodes only."""
@@ -360,5 +409,25 @@ def gnnssl_block(
     results = {r: embed_relation(x, e, loss_mask, config, r) for r, e in edges.items()}
     embeddings = {r: res.embedding for r, res in results.items()}
     block, pca_info = pca_block(embeddings, fit_mask, config.pca_components, config.seed)
+    logs = {r: {**res.log, **pca_info[r]} for r, res in results.items()}
+    return SSLResult(block=block, embeddings=embeddings, logs=logs)
+
+
+def gnnrand_block(
+    own_features: pd.DataFrame,
+    edges: Mapping[str, np.ndarray],
+    fit_mask: np.ndarray,
+    config: SSLConfig,
+    name: str = C.GNNRAND_BLOCK,
+) -> SSLResult:
+    """The whole gnnrand block in one call: gnnssl_block without the training
+    step (the gnn_embed stage runs the same steps with one unit per relation).
+    `fit_mask` marks the training nodes (scaler and PCA); no label is passed."""
+    x = standardized_features(own_features, fit_mask)
+    results = {r: untrained_relation(x, e, config, r) for r, e in edges.items()}
+    embeddings = {r: res.embedding for r, res in results.items()}
+    block, pca_info = pca_block(
+        embeddings, fit_mask, config.pca_components, config.seed, name=name
+    )
     logs = {r: {**res.log, **pca_info[r]} for r, res in results.items()}
     return SSLResult(block=block, embeddings=embeddings, logs=logs)

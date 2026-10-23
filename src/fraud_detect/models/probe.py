@@ -20,6 +20,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.inspection import permutation_importance
 from sklearn.metrics import average_precision_score, roc_auc_score
 
 from fraud_detect import columns as C
@@ -31,7 +32,10 @@ BLOCK_SETS: dict[str, list[str]] = {
     "own": [C.OWN_BLOCK],
     "own+nbr": [C.OWN_BLOCK, C.NBR_BLOCK],
     "own+gnnssl": [C.OWN_BLOCK, C.GNNSSL_BLOCK],
+    "own+gnnrand": [C.OWN_BLOCK, C.GNNRAND_BLOCK],
 }
+# Permutation importance (feature_ranking): shuffles per feature and fold.
+PERMUTATION_REPEATS = 10
 
 
 def block_sets(variants: Mapping[str, Sequence[str]]) -> dict[str, list[str]]:
@@ -153,6 +157,49 @@ def cv_scores(x: np.ndarray, y: np.ndarray, fold: np.ndarray, seed: int) -> dict
         "cv_auroc_std": float(np.std(roc, ddof=1)),
         "cv_pr_auc_folds": " ".join(f"{v:.4f}" for v in pr),
     }
+
+
+def feature_ranking(
+    own: pd.DataFrame, train_ids: pd.DataFrame, folds: pd.DataFrame, seed: int
+) -> pd.DataFrame:
+    """A training-only ranking of the own features (phase 3, Task 5): for each
+    saved CV fold, the probe's fixed HistGradientBoosting is fit on the other
+    training folds, and each feature's permutation importance is the drop in
+    the held-out fold's PR-AUC when that feature is shuffled; the importance
+    is averaged over folds. Next to it, each feature's univariate AUROC on the
+    training nodes. Never reads a test row."""
+    x, y, fold, columns = training_rows(own, train_ids, folds)
+    per_fold = []
+    for k in np.unique(fold):
+        held_out = fold == k
+        model = HistGradientBoostingClassifier(**PROBE_PARAMS, random_state=seed)
+        model.fit(x[~held_out], y[~held_out])
+        result = permutation_importance(
+            model, x[held_out], y[held_out], scoring="average_precision",
+            n_repeats=PERMUTATION_REPEATS, random_state=seed,
+        )  # fmt: skip
+        per_fold.append(result.importances_mean)
+    imp = np.vstack(per_fold)
+    table = pd.DataFrame(
+        {
+            "column": columns,
+            "perm_importance_mean": imp.mean(axis=0),
+            "perm_importance_sd": imp.std(axis=0, ddof=1),
+            "perm_importance_folds": [
+                " ".join(f"{v:.4f}" for v in imp[:, j]) for j in range(len(columns))
+            ],
+        }
+    )
+    single = single_feature_check(own, train_ids, columns).set_index("column")
+    table["univariate_auroc"] = table["column"].map(single["auroc"])
+    table["rank_permutation"] = (
+        table["perm_importance_mean"].rank(ascending=False, method="first").astype(int)
+    )
+    table["rank_univariate_auroc"] = (
+        table["univariate_auroc"].rank(ascending=False, method="first").astype(int)
+    )
+    table["n_train"] = len(y)
+    return table.sort_values("rank_permutation").reset_index(drop=True)
 
 
 def probe(

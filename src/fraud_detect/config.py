@@ -91,6 +91,13 @@ def check_feature_sets(config: dict[str, Any]) -> None:
     """Every block of every feature set is a known kind, optionally with a
     variant listed in feature_variants (e.g. own_no36, gnnssl_no36)."""
     variants = config.get("feature_variants") or {}
+    for variant, spec in variants.items():
+        keeps = isinstance(spec, dict) and set(spec) == {"keep"} and spec["keep"]
+        if not (keeps or isinstance(spec, list)) or "_" in variant:
+            raise ConfigError(
+                f"feature_variants.{variant}: a variant (a name without '_') is a list "
+                "of own columns to leave out, or {keep: [own columns to keep]}"
+            )
     for name, block_names in config["feature_sets"].items():
         for block in block_names:
             kind, _, variant = block.partition("_")
@@ -193,12 +200,15 @@ class Paths:
         return self.embed_dir("gnnssl")
 
     def embed_dir(self, block: str) -> Path:
-        """gnn_embed's folder for one gnnssl block: gnn_embed/ for `gnnssl`,
-        gnn_embed_<variant>/ for `gnnssl_<variant>`."""
-        return self.outputs_dir / ("gnn_embed" + block.removeprefix("gnnssl"))
+        """gnn_embed's folder for one block: gnn_embed/ for `gnnssl`,
+        gnn_embed_<variant>/ for `gnnssl_<variant>`, gnn_embed_<block>/ for the
+        other kinds (gnn_embed_gnnrand/, gnn_embed_gnnrand_no36/)."""
+        if block.startswith("gnnssl"):
+            return self.outputs_dir / ("gnn_embed" + block.removeprefix("gnnssl"))
+        return self.outputs_dir / f"gnn_embed_{block}"
 
     def raw_embedding(self, relation: str, block: str = "gnnssl") -> Path:
-        """One relation's raw (n_nodes, out_dim) DGI embedding, before PCA."""
+        """One relation's raw (n_nodes, out_dim) GNN embedding, before PCA."""
         return self.embed_dir(block) / f"raw_{relation}.npy"
 
     @property
