@@ -20,6 +20,8 @@ Verbatim, from the professor:
 
 The readings are ours, not the professor's; **questions D1–D3 below ask the group to confirm them.** Tasks 1, 3a and the probe in Task 5 need no decision (they are training-CV checks that take minutes), so they can start right away.
 
+**Status (2026-10-23):** Tasks 1, 3a and 5 are done at the pilot budget (`RESEARCH_PLAN.md` §11; README, "Results (phase 3 pilots)"). For D3, the two readings differ on Amazon, so both were run: `only36` (the #36 features) and `top4` (the training-ranked top 4, `f00`, `f18`, `f19`, `f23`). Tasks 2b–c, 4, 6 and 7 wait for D1, D2, D4 and the group.
+
 ## Questions for the group (ask before the tasks that depend on them)
 
 - **D1 (F1, before Task 2b–c):** what did the professor mean by "DeepTune to reduce"? What we found (below) is that DeepTune has no label-free tool that reduces tabular or graph embeddings. Ask the professor, or pick one of Task 2's options.
