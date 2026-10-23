@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "run_id": "20261023T044927Z_amazon_43983f",
+  "recorded_utc": "2026-10-23T04:53:16Z",
+  "started_utc": "2026-10-23T04:49:27Z",
+  "finished_utc": "2026-10-23T04:52:57Z",
+  "duration_min": 3.5,
+  "device": "rtx4060-laptop",
+  "device_details": {
+    "os": "Linux",
+    "platform": "Linux-5.10.16.3-microsoft-standard-WSL2-x86_64-with-glibc2.41",
+    "wsl": true,
+    "python": "3.13.15",
+    "cpu": "Intel(R) Core(TM) Ultra 9 185H",
+    "gpus": [
+      {
+        "name": "NVIDIA GeForce RTX 4060 Laptop GPU",
+        "driver": "571.96",
+        "memory": "8188 MiB"
+      }
+    ]
+  },
+  "description": "Phase 3 Task 1.2: probe of own + gnnssl over DGI size 16/32/64 and PCA k 1-32 or raw, all features and no36",
+  "kind": "probe",
+  "status": "ok",
+  "dataset": "amazon",
+  "feature_set": null,
+  "split_repeat": null,
+  "seed": null,
+  "git_commit": "1f236719f8ff945fd8233f09dd2d97a29c57128b",
+  "git_dirty": false,
+  "command": "scripts/feedback_probes.py --dataset amazon --task sizes",
+  "tags": [
+    "phase3"
+  ],
+  "notes": "Ran alongside the pilot queue (CPU contention affects time only). Pre-registered k at size 64: all 1, no36 16.",
+  "source": "outputs/amazon/probe/embedding_size_sweep.csv",
+  "results_rows": 40,
+  "results_columns": [
+    "variant",
+    "dgi_size",
+    "k",
+    "n_features",
+    "n_folds",
+    "cv_pr_auc_mean",
+    "cv_pr_auc_std",
+    "cv_auroc_mean",
+    "cv_auroc_std",
+    "cv_pr_auc_folds",
+    "default",
+    "chosen"
+  ]
+}

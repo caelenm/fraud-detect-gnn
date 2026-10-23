@@ -4,9 +4,13 @@ Instructions for AI coding agents (primarily Claude Code) working in this reposi
 
 ## Project in one paragraph
 
-We ask: **does using a graph improve fraud classification over the same kind of model without one, and can a GNN's representations improve a tabular AutoML pipeline (df-analyze)?** The datasets are two graph fraud benchmarks with tabular node features: **YelpChi** (main; nodes are hotel and restaurant reviews, labelled spam by Yelp's filter, three review–review relations) and **Amazon** (replication; nodes are users, labelled fraudulent or not, three user–user relations). Both come from the preprocessed `.mat` files of the CARE-GNN repository. The model ladder (plan §1) is: (1) df-analyze on each node's own features (Model A); (2) df-analyze plus label-free neighbour aggregates per relation; (3) GraphSAGE with all edges removed; (4) heterogeneous GraphSAGE over all relations; (5) df-analyze plus self-supervised GNN embeddings; (6) df-analyze plus supervised, out-of-fold GNN features (needs a rule change). Every model on a dataset is trained on the same split and scored on the same frozen, grouped test set. The headline metric is PR-AUC, always reported next to the no-skill baseline (the test positive rate). Model 1 and the interfaces the later rungs need (node table, relation edge lists, feature blocks, feature sets) were implemented first. Phase 2 ([`docs/PHASE2_GNN_PLAN.md`](docs/PHASE2_GNN_PLAN.md)) adds Models 2 and 5 as feature blocks (`nbr`, `gnnssl`) and a comparison page; GraphSAGE (Models 3–4) comes later.
+We ask: **does using a graph improve fraud classification over the same kind of model without one, and can a GNN's representations improve a tabular AutoML pipeline (df-analyze)?** The datasets are two graph fraud benchmarks with tabular node features: **YelpChi** (main; nodes are hotel and restaurant reviews, labelled spam by Yelp's filter, three review–review relations) and **Amazon** (replication; nodes are users, labelled fraudulent or not, three user–user relations). Both come from the preprocessed `.mat` files of the CARE-GNN repository. The model ladder (plan §1) is: (1) df-analyze on each node's own features (Model A); (2) df-analyze plus label-free neighbour aggregates per relation; (3) GraphSAGE with all edges removed; (4) heterogeneous GraphSAGE over all relations; (5) df-analyze plus self-supervised GNN embeddings; (6) df-analyze plus supervised, out-of-fold GNN features (needs a rule change). Every model on a dataset is trained on the same split and scored on the same frozen, grouped test set. The headline metric is PR-AUC, always reported next to the no-skill baseline (the test positive rate). Model 1 and the interfaces the later rungs need (node table, relation edge lists, feature blocks, feature sets) were implemented first. Phase 2 ([`docs/PHASE2_GNN_PLAN.md`](docs/PHASE2_GNN_PLAN.md)) adds Models 2 and 5 as feature blocks (`nbr`, `gnnssl`) and a comparison page; GraphSAGE (Models 3–4) comes later. **Phase 3 ([`docs/PHASE3_FEEDBACK_PLAN.md`](docs/PHASE3_FEEDBACK_PLAN.md)) is the current plan:** it answers the professor's feedback of 2026-10-21 (embedding size and DeepTune, whether training the GNN helps, the 4 important features, more datasets).
 
-## Current state (2026-10-20): read this first
+## Current state (2026-10-23): read this first
+
+**New on 2026-10-21:** the professor's feedback and the plan that answers it ([`docs/PHASE3_FEEDBACK_PLAN.md`](docs/PHASE3_FEEDBACK_PLAN.md); its open questions D1–D5 need the group); the [results database](#results-database) (`results/runs/`); and commits no longer need a PR ([Git workflow](#git-workflow)).
+
+**New on 2026-10-23 (branch `exp/phase3-feedback`):** phase 3 Tasks 1, 3a and 5 done at the pilot budget (README, "Results (phase 3 pilots)"; RESEARCH_PLAN §11). Added: the untrained-GNN block `gnnrand`, `{keep: [...]}` feature variants (`only36`, `top4`), and the scripts `top_features.py`, `feedback_probes.py`, `embedding_sizes.py` and `repeat_summary.py --pairs`. All 24 runs and 9 probes or summaries are in the results database (tag `phase3`).
 
 The details are in [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md) §11 (decision log and every result) and §12 (next steps); a short summary is in the README ("Results").
 
@@ -19,11 +23,13 @@ The details are in [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md) §11 (decisi
 | Pilot ladder `pilot_m1/m2/m5` × all features / `_no36` | 10 trials; LightGBM, logistic regression, CatBoost; splits 0, 1, 2 (18 runs) | all features: m1 0.917–0.919, m2 0.923–0.938, m5 0.928–0.931; without #36: m1 0.524–0.574, m2 0.709–0.711, m5 0.665–0.688 |
 | Pre-registered 3-split verdicts (`scripts/repeat_summary.py`) | Δ > 0 on all splits, mean > SD, Nadeau–Bengio p < 0.05 over 15 CV folds | all features: m2 − m1 +0.010 supported; m5 − m1 +0.011 not distinguishable; m5 − m2 ≈ 0. Without #36: m2 − m1 +0.162 and m5 − m1 +0.129 supported; m5 − m2 −0.033 worse |
 | Training-only checks (`scripts/probe_blocks.py`, `progress_checks.py`, `feature_identity_checks.py`) | grouped CV folds of split 0 | random graph keeps most of the all-features gain and about half of the without-#36 gain; f19 alone 0.893 balanced accuracy; vote-ratio test negative; f13/f15/f18 consistent with rating statistics; embedding defaults mid-grid |
+| Phase 3 pilots (2026-10-23): `pilot_m5r_own_gnnrand[_no36]`, `pilot_m{1,2,5}_*_only36`, `pilot_m{1,2,5}_*_top4` | pilot settings, splits 0, 1, 2 (24 runs) | m5 − m5r (DGI training) −0.004 all features, +0.012 without #36, neither significant; m1_only36 0.887 vs m1 0.918 (worse); m1_top4 0.922 (not distinguishable from m1); m5_top4 0.941–0.944 |
+| Phase 3 checks (`top_features.py`, `feedback_probes.py`, `embedding_sizes.py`) | training CV folds, split 0 | permutation top 4 = `f19`, `f00`, `f23`, `f18` (≠ #36; the 4th is `f12` on splits 1–2); DGI's 64 dimensions per relation have effective rank 8–27 |
 
 **Known:**
-- The four #36 features carry most of Amazon's signal.
-- Without them, graph features help clearly on all 3 splits, and about half of that gain needs the real edges.
-- Simple neighbour means beat untuned DGI embeddings.
+- The four #36 features carry most of Amazon's signal, but they are not the best four: `f13` and `f15` add nothing once `f18` and `f19` are known, and four features (`f00`, `f18`, `f19`, `f23`) match all 25.
+- Without the #36 features, graph features help clearly on all 3 splits, and about half of that gain needs the real edges.
+- Simple neighbour means beat untuned DGI embeddings, and DGI training adds nothing measurable over the same encoder with random weights.
 - Published Amazon numbers use all 25 features.
 
 **Unknown:**
@@ -36,7 +42,9 @@ The details are in [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md) §11 (decisi
 **Not run yet:** #36 checks (c)–(e) in RESEARCH_PLAN §12, step 0; a variant without only the vote-derived columns; full-budget m2/m5; YelpChi beyond a smoke test; Models 3, 4, 6.
 
 **Where things are:**
-- **Code:** on `main`.
+- **Code:** on `main`, except the phase 3 plan (branch `claude/awesome-wozniak-wm548a`) and the phase 3 work built on it (branch `exp/phase3-feedback`), neither merged yet.
+- **Results database:** `results/runs/` (committed; see [Results database](#results-database)). It holds the phase 3 runs of 2026-10-23; the earlier runs above have not been recorded in it (D5).
+- **Overnight queue (2026-10-23):** the job runner and its logs live in the WSL clone's `outputs/amazon/phase3_logs/` (never committed): `bin/runner.sh` runs each line of `queue.txt` not yet in `done.txt`, `bin/pilot.sh` runs one pilot rung and records it, and `bin/summary.sh` builds the comparison pages and a verdict table.
 - **Results:** in the WSL clone's `outputs/amazon*` and `data/processed/amazon*`. Split repeats 1–2 live in `outputs/amazon_repeat1/2`, which `pack_artifacts.py` does not pack (it packs repeat 0 only).
 - **Group bundle:** `fraud_artifacts_amazon_20261019T220559Z.tgz` (148 MB, split 0), on OneDrive.
 - **CFPB-era files** moved out of the clone to `~/projects/fraud-detect-gnn-cfpb-archive/`.
@@ -53,22 +61,36 @@ The details are in [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md) §11 (decisi
 - **Amazon has exact-duplicate feature rows** among labelled nodes; each set of identical rows is one split group.
 - Features are anonymized: `f00`, `f01`, … in the `.mat` column order, prefixed `own__` in feature tables.
 
-## Git workflow (mandatory)
+## Git workflow
 
-This is a **public** repository. Everything pushed is visible to anyone.
+This is a course project, not public software: **commits do not need a pull request, a review or passing checks.** The GitHub repository is publicly visible, though, so the [never-commit list](#never-commit) still applies in full.
 
-- **Never commit to `main`.** Never push to `main`.
-- For every task, create a branch from an up-to-date `main`, named `feat/<short-name>`, `fix/<short-name>`, `exp/<short-name>`, or `docs/<short-name>`.
-- Push the branch and open a pull request with `gh pr create`. **All changes reach `main` through a PR.** If the user or the active plan says not to push yet, commit locally and wait until the user says so. (`feat/review-fraud-pivot` was held back by plan §0 until the 2026-10-13 decision to open its PR.)
-- **Never merge PRs** (including your own), never force-push, never rewrite published history, never delete remote branches, and never create tags or releases.
-- Keep PRs small and focused on one stage or concern.
-- The PR description must include: what changed, why, how it was tested, and the [leakage checklist](#leakage-checklist-include-in-every-pr-that-touches-data-features-or-models) if the PR touches data, features, or models.
+- Commit directly to `main`, or to a branch (`feat/`, `fix/`, `exp/`, `docs/<short-name>`) when the work is experimental or long-running; either is fine. Pull before you start and push when you are done. If the user or the active plan says not to push yet, commit locally and wait.
+- Pull requests are optional (for example, to ask a teammate to look at something). If you open one, its author decides when it is merged.
+- Keep commits small and focused. The message says what changed and why; for a change to data, features or models, also which [leakage invariants](#leakage-checklist-check-before-committing-anything-that-touches-data-features-or-models) it touches and which platforms it ran on.
+- Running the [checks](#checks-recommended-before-committing) before committing is recommended, not required. If you know a commit breaks a test, say so in its message.
+- Never force-push, never rewrite published history, never delete remote branches, and never create tags or releases: teammates' clones depend on the shared history.
 - Before every commit, run `git status` and `git diff --staged` and confirm that nothing from the [never-commit list](#never-commit) is staged.
+
+## Results database
+
+Every run whose numbers anyone might quote is recorded in **`results/runs/`**, one folder per run (`meta.json` + `results.csv`), committed to git so the group can see everyone's runs. Format, fields and examples: [`results/README.md`](results/README.md). Always use the script, never hand-written files:
+
+- **After a pipeline run** (through `df_analyze_report`):
+  `uv run scripts/results_db.py add --from-run outputs/<dataset>[_repeat<k>]/<feature_set> --run-log outputs/<dataset>[_repeat<k>]/runs/<stamp> --device <machine label> --description "<one line>"`.
+  This fills in the dataset, feature set, split repeat, start and finish time (UTC), command, git commit, settings, Model A's headline numbers, and `results.csv` (`model_a_metrics.csv`: every tuned model's shared-CV and test metrics). `<stamp>` is the `run.py` invocation that ran `df_analyze`.
+- **After anything else** (a probe, a comparison, `repeat_summary.csv`, a check): `add --kind probe|compare|check|other --csv <summary.csv> --started-utc ...Z --finished-utc ...Z` plus `--dataset` and `--feature-set` when they apply.
+- Then `uv run scripts/results_db.py check` and commit the new folder (`git add results/runs/<run_id>`).
+- **`--device`** is a short label for the machine (e.g. `rtx4060-laptop`, `macbook-m2`), the same for every run on it; OS, CPU and GPU are detected automatically. No host or person names.
+- **Aggregate numbers only.** `results.csv` holds one row per model, contrast, fold or setting, never per node. The script refuses ID, label and prediction columns and tables over 1,000 rows; the test suite runs `check` on the committed folder.
+- **Append-only:** correct an entry by adding a new one with `--supersedes <run_id>` and `--notes`; never edit or delete an existing one. Record failed and partial runs too (`--status failed|partial`); tag pilots `--tag pilot`.
+- Reading: `list` (filters `--dataset`, `--device`, `--feature-set`, `--tag`), `show <run_id prefix>`, and `export` (writes `outputs/results_db/index.csv` and `all_results.csv`, never committed).
+- Recording is part of finishing a run: report the new `run_id` with the result. Do not backfill earlier runs unless the user asks.
 
 ## Never commit
 
 - Anything under `data/` or `outputs/` (raw `.zip`/`.mat` files, node tables, edge lists, feature blocks, df-analyze results, reports, checkpoints)
-- Row-level data from any dataset (node features, labels, IDs with their labels), including in tests, fixtures, notebooks, logs, or PR descriptions. Tests use small synthetic data built in memory (see [Required tests](#required-tests)).
+- Row-level data from any dataset (node features, labels, IDs with their labels), including in tests, fixtures, notebooks, logs, commit messages, PR descriptions, or the results database. Tests use small synthetic data built in memory (see [Required tests](#required-tests)).
 - Model weights and saved models (`*.pt`, `*.pth`, `*.ckpt`, `*.joblib`, `*.cbm`), `*.mat`, `*.parquet`, `*.npy`, `*.npz`, `*.pkl`, or large CSVs
 - `.env` files, API keys, tokens, or credentials
 - Notebook outputs (clear outputs before committing)
@@ -76,7 +98,7 @@ This is a **public** repository. Everything pushed is visible to anyone.
 - Output bundles from `pack_artifacts.py` (`fraud_artifacts_*.tgz`). They are shared outside git (see "Sharing outputs with the group" in the README).
 - `PR_DESCRIPTION.md` (a draft the user pastes into GitHub)
 
-If `.gitignore` does not already cover one of these, add the pattern in the same PR.
+If `.gitignore` does not already cover one of these, add the pattern in the same commit.
 
 ## Environments
 
@@ -96,11 +118,11 @@ There are two separate environments. Do not try to merge them.
   - Pass subprocess arguments as a list, and never use `shell=True`.
   - Do not depend on GNU-only command-line flags: macOS ships BSD versions of `sed`, `tar`, and similar tools. Inside Python code, use the standard library (`tarfile`, `zipfile`, `shutil`, `urllib`) instead of shelling out.
   - Never hard-code `cuda`. WSL2 and Linux laptops may have an NVIDIA GPU; Macs never do.
-  - Say in the PR which platforms a change was tested on.
+  - Say in the commit message which platforms a change was tested on.
 - The main development machine is a Linux laptop (or Windows with WSL2) with an NVIDIA GPU. Always check `torch.cuda.is_available()` and fall back to CPU; never hard-code `cuda`. In df-analyze, CatBoost and GANDALF use the GPU; `gpu.require` decides whether a missing GPU stops the run.
 - Hardware is limited. Ask before starting any job you expect to run longer than about 1 hour. Do not enable df-analyze's wrapper feature selection unless asked.
 
-## Leakage checklist (include in every PR that touches data, features, or models)
+## Leakage checklist (check before committing anything that touches data, features, or models)
 
 These are hard invariants. If a change would violate one, stop and ask.
 
@@ -147,7 +169,7 @@ A clone that only unpacked a bundle has no raw data; the `download` stage counts
 Still to do (later branches; tracked as GitHub issues):
 
 - **Done in phase 2 (merged to `main`, PR #37) and its validation (2026-10-20):** Model 2 (`nbr` block) and Model 5 (`gnnssl` block), one block per kind covering every relation, their `_no36` variants, the comparison page with paired group-bootstrap contrasts, 3-split pilot validation with pre-registered verdicts, and the #36 checks (a)–(b). See "Current state" above.
-- **Phase 3 (ask before starting):** embedding settings chosen on training CV only; full-budget runs; `split.n_repeats: 3` for every compared rung; YelpChi; ablations.
+- **Phase 3 (ask before starting; [`docs/PHASE3_FEEDBACK_PLAN.md`](docs/PHASE3_FEEDBACK_PLAN.md)):** the professor's feedback first (embedding size and reduction, untrained-GNN control and GraphSAGE, the 4-feature variant, new datasets); then embedding settings chosen on training CV only; full-budget runs; `split.n_repeats: 3` for every compared rung; YelpChi; ablations.
 - **Models 3 and 4:** GraphSAGE with all edges removed and heterogeneous GraphSAGE over all relations, the same code path, at least 5 seeds, one unit per (model, seed), early stopping on the saved CV folds.
 - **Model 6:** supervised out-of-fold GNN features, only if the group amends invariant 1.
 - **Explain:** SHAP on the tabular models, GNN explanations and relation ablations.
@@ -160,7 +182,8 @@ Ask before implementing anything that commits to one of these (plan §10):
 - **Which dataset is the main one.** Plan v2 calls YelpChi the main dataset. On 2026-10-08 YelpChi was described as being for pipeline validation, so whether Amazon takes the main role in the ladder's contrasts is for the group to confirm.
 - **Features flagged by the audit as possible shortcuts:** for Amazon ([#36](https://github.com/caelenm/fraud-detect-gnn/issues/36)) the user decided on 2026-10-19 to **report both ways** (see the decision log); keep #36 open until the group has seen both. A literature check (`docs/RESEARCH_PLAN.md` §11, 2026-10-19) suggests, without documentation, that `f19` is a helpfulness-vote count (leakage) and `f13`/`f15`/`f18` are rating statistics. Which variant is the headline, and whether to add a variant without every vote-derived column, is for the group after the local checks in §12. Never drop a feature without asking.
 - **The earlier pilot's place in the final report** (the state at `main@3336d87`, see the decision log): omit it, or mention it as the motivating pilot.
-- Adding any architecture beyond GraphSAGE and its graph-free control, any dataset beyond YelpChi and Amazon, or any text data.
+- Adding any architecture beyond GraphSAGE and its graph-free control, any dataset beyond YelpChi and Amazon, or any text data. The professor asked for more datasets on 2026-10-21; which ones is still the group's decision (plan D4).
+- **The phase 3 questions D1–D5** in [`docs/PHASE3_FEEDBACK_PLAN.md`](docs/PHASE3_FEEDBACK_PLAN.md) (what "DeepTune to reduce", "training the GNN" and "4 important features" mean, which datasets, backfilling the results database).
 
 Also ask before changing the metrics, the split proportions or grouping rule, the classifiers, or the tuning settings.
 
@@ -194,6 +217,10 @@ Also ask before changing the metrics, the split proportions or grouping rule, th
   - **Issue #36: report both.** Every Amazon rung is run with all 25 features and without `own__f13`, `own__f15`, `own__f18`, `own__f19` (`*_no36` feature sets; the config's `feature_variants.no36`). The four are also left out of the neighbour-aggregate and GNN inputs (`nbr_no36`, `gnnssl_no36`).
   - **GNN embeddings on the CPU** (`gnn_embed.device: cpu`). CUDA's sparse products differ by ~1e-7 between runs; the CPU is bit-identical.
   - **torch stays at 2.9** in the `gnn` extra: newer PyPI torch is built for CUDA 13, which the group laptop's driver (CUDA 12.8) cannot run.
+- **2026-10-21 (user decisions):**
+  - **No PR requirement.** Commits may go straight to `main`; unchecked commits are fine (it is a course project, not public software). The never-commit list, and never force-pushing or rewriting history, still apply.
+  - **Results database** in `results/runs/` (one folder per run, written by `scripts/results_db.py`); every agent records the runs it finishes. Created empty; earlier runs are not backfilled unless the user asks.
+  - **Professor's feedback** (embedding size, "potentially use DeepTune to reduce"; see if training the GNN helps; run on just the 4 important features; more datasets) is addressed by [`docs/PHASE3_FEEDBACK_PLAN.md`](docs/PHASE3_FEEDBACK_PLAN.md).
 - **Kept from earlier work:** Model A uses df-analyze classifiers **`lgbm`, `lr`, `catboost`, `gandalf`, `rf`, `knn`** (plus the automatic dummy; `mlp` is left out because it is CPU-only in df-analyze and adds about 4 h per run), 100 tuning trials, tuned on **balanced accuracy** for every model (`htune_cls_metric: bal-acc`; not `acc`, which suits imbalanced classes poorly; not `auroc`, which df-analyze applies inconsistently across models), with `--filter-pred-classify auroc` for the prediction-based feature filter; Model A is **chosen by shared 5-fold CV PR-AUC on the training set** (`select_model`), not by df-analyze's tuning score; CatBoost and GANDALF run on the GPU; `--df-tests-method` is never passed (it hits an enum bug in df-analyze 4.1.0).
 
 ## Code conventions
@@ -217,17 +244,18 @@ Tests use small synthetic data only. **All synthetic rows live in `tests/synthet
 - Feature-type decisions (`column_spec.json`) use training nodes only.
 - The decision threshold is chosen without test data, and the bootstrap resamples whole groups.
 - No node feature correlates perfectly with the label on synthetic data (a leakage smoke test).
+- Every committed results-database entry passes `scripts/results_db.py check` (no row-level columns, at most 1,000 rows, valid UTC times).
 
-## Before opening a PR
+## Checks (recommended before committing)
 
 ```bash
 uv run ruff check .
 uv run ruff format --check .
 uv run pytest
-git status          # confirm nothing from the never-commit list is staged
+git status          # required: confirm nothing from the never-commit list is staged
 ```
 
-All checks must pass. If a check fails and you cannot fix it, open the PR as a draft and explain the failure in the description.
+Running ruff and pytest before a commit is recommended but not required. If you commit with a failing check, say which one in the commit message. The `git status` / `git diff --staged` look is always required.
 
 ## Writing and documentation
 

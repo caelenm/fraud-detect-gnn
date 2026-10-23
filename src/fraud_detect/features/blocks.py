@@ -23,8 +23,9 @@ must pass.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -37,12 +38,15 @@ class BlockError(ValueError):
 
 
 # Block kinds. A block name is a kind, optionally followed by an input variant
-# (`<kind>_<variant>`, e.g. own_no36, nbr_no36): the config's feature_variants
-# lists the own columns the variant leaves out. own_<variant> is the own block
-# without those columns (read from own.parquet, own__ names kept); the graph
-# blocks nbr_<variant> and gnnssl_<variant> are built from that reduced input
-# and stored as their own files, with columns prefixed <block>__.
+# (`<kind>_<variant>`, e.g. own_no36, nbr_no36). The config's feature_variants
+# defines a variant by the own columns it leaves out (a list, e.g. no36) or by
+# the only own columns it keeps ({keep: [...]}, e.g. only36). own_<variant> is
+# the own block without the left-out columns (read from own.parquet, own__
+# names kept); the graph blocks nbr_<variant>, gnnssl_<variant> and
+# gnnrand_<variant> are built from that reduced input and stored as their own
+# files, with columns prefixed <block>__.
 BLOCK_KINDS = C.BLOCK_KINDS
+KEEP = "keep"
 
 
 def parse_block(name: str) -> tuple[str, str | None]:
@@ -60,24 +64,57 @@ def blocks_of_kind(names: Sequence[str], kind: str) -> list[str]:
     return [n for n in names if parse_block(n)[0] == kind]
 
 
-def excluded_columns(name: str, variants: dict[str, list[str]]) -> list[str]:
-    """The own columns a block's variant leaves out (none without a variant)."""
+def variant_spec(
+    name: str, variants: Mapping[str, Any]
+) -> list[str] | dict[str, list[str]] | None:
+    """The config entry of block `name`'s variant: None without a variant, the
+    list of own columns it leaves out, or {keep: [the own columns it keeps]}."""
     _, variant = parse_block(name)
     if variant is None:
-        return []
+        return None
     if variant not in variants:
         raise BlockError(
             f"Block {name!r} names variant {variant!r}, which is not in the config's "
             f"feature_variants ({', '.join(variants) or 'none'})"
         )
-    return list(variants[variant])
+    spec = variants[variant]
+    if isinstance(spec, Mapping):
+        if set(spec) != {KEEP} or not list(spec[KEEP]):
+            raise BlockError(
+                f"feature_variants.{variant} must be a list of own columns to leave "
+                f"out, or {{{KEEP}: [own columns to keep]}}"
+            )
+        return {KEEP: list(spec[KEEP])}
+    return list(spec)
 
 
-def own_view(
-    own: pd.DataFrame, name: str, variants: dict[str, list[str]]
-) -> pd.DataFrame:
+def excluded_columns(
+    name: str, variants: Mapping[str, Any], own_columns: Sequence[str] | None = None
+) -> list[str]:
+    """The own columns a block's variant leaves out (none without a variant).
+    A {keep: [...]} variant leaves out every other own column, so it needs
+    `own_columns`, the own block's columns."""
+    spec = variant_spec(name, variants)
+    if spec is None:
+        return []
+    if not isinstance(spec, dict):
+        return spec
+    if own_columns is None:
+        raise BlockError(
+            f"Block {name!r} keeps only some own columns; the own block's columns "
+            "are needed to list the others"
+        )
+    missing = sorted(set(spec[KEEP]) - set(own_columns))
+    if missing:
+        raise BlockError(
+            f"Variant of {name!r} keeps columns the own block lacks: {missing}"
+        )
+    return [c for c in own_columns if c not in spec[KEEP] and c != C.NODE_ID]
+
+
+def own_view(own: pd.DataFrame, name: str, variants: Mapping[str, Any]) -> pd.DataFrame:
     """The own block without the columns block `name`'s variant leaves out."""
-    drop = excluded_columns(name, variants)
+    drop = excluded_columns(name, variants, list(own.columns))
     missing = sorted(set(drop) - set(own.columns))
     if missing:
         raise BlockError(
@@ -122,7 +159,7 @@ def validate_block(name: str, block: pd.DataFrame) -> None:
 def load_feature_set(
     features_dir: Path,
     blocks: Sequence[str],
-    variants: dict[str, list[str]] | None = None,
+    variants: Mapping[str, Any] | None = None,
 ) -> pd.DataFrame:
     """Join a feature set's blocks on node_id (each block validated). An
     own_<variant> block is own.parquet without its variant's columns."""

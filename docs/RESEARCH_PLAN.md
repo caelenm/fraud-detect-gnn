@@ -401,6 +401,7 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
 4. **Model 6 (later):** amend invariant 1 to allow supervised GNN features produced strictly out-of-fold on the saved CV folds, with test-node features from a GNN trained on all training nodes. Not needed for this branch.
 5. **Flagged shortcut features (after M4):** keep, drop, or report results both ways.
 6. **The CFPB result's place in the final report:** omit it, or mention it as the motivating pilot (README wording only).
+7. **Phase 3 (the professor's feedback, 2026-10-21):** questions D1–D5 in [`PHASE3_FEEDBACK_PLAN.md`](PHASE3_FEEDBACK_PLAN.md): what "DeepTune to reduce", "training the GNN" and "4 important features" mean; which new datasets and their split rules; backfilling the results database.
 
 ---
 
@@ -567,6 +568,62 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
     - **Random-graph control:** each relation's edges are rewired at random, keeping degrees approximately, and nbr/gnnssl are rebuilt from them. If the graph gain comes from real structure, it should mostly vanish.
     - **Single-feature #36 check:** how well each of `own__f13`, `own__f15`, `own__f18`, `own__f19` alone separates the training classes.
   - **Reporting:** both variants always side by side. Model A choice, thresholds and every setting come from training data only.
+- **2026-10-21 (professor's feedback and user decisions).**
+  - **Feedback:** "Find out size of gnn embeddings > Potentially use DEEPTUNE to reduce. See if training GNN helps. Run on just 4 important features. More datasets." The plan is [`PHASE3_FEEDBACK_PLAN.md`](PHASE3_FEEDBACK_PLAN.md); its readings of the feedback are for the group to confirm (D1–D3).
+  - **DeepTune** (`moayadeldin/deeptune` at `80e6d74`, read 2026-10-21): the StFX MIB lab's deep-learning AutoML tool for images, text, tabular data (GANDALF, TabPFN) and time series; no graph support. Its embeddings come from models trained on the label, so as df-analyze features they need the Model 6 amendment; its autoencoder is image-only. It pins torch 2.14.0 (CUDA 13), so it would need its own environment. No license file found.
+  - **Git:** no PR requirement; commits may go straight to `main` and need not pass the checks first. The never-commit list and the no-force-push rule stay.
+  - **Results database:** `results/runs/<run_id>/` (`meta.json` + `results.csv`), written by `scripts/results_db.py`; every agent records the runs it finishes. Created empty: none of the runs above is in it yet (D5).
+- **2026-10-23 (phase 3 overnight: training-only probes, then pilot rungs; rules written before any pilot result).** Branch `exp/phase3-feedback`, on top of the phase 3 plan's branch (`claude/awesome-wozniak-wm548a`, not yet on `main`). The user asked for "the next set of experiments" overnight, which is the plan's "go" for the pilot rungs of Tasks 3a and 5. Split 0's training nodes and saved grouped folds only, unless stated; all probes use the fixed HistGradientBoosting of `models/probe.py`.
+  - **Task 5.1, which four features (`scripts/top_features.py`, `probe/top_features.csv`).** Permutation importance (drop in held-out-fold PR-AUC, 10 shuffles, mean over 5 folds): `f19` 0.759 ± 0.036, `f00` 0.074 ± 0.014, `f23` 0.010 ± 0.010, `f18` 0.007 ± 0.006, then `f12` 0.007 ± 0.005 (ranks 3–5 are within noise). `f13` and `f15` have about zero importance: once `f18` and `f19` are known they add nothing. By univariate AUROC the top 4 are the four #36 features. **So D3's two readings differ on Amazon.** Both are run as pilots, so the group can choose without another night: `only36` (the four #36 features) and `top4` (`f00`, `f18`, `f19`, `f23`, the permutation top 4, fixed now from this table).
+  - **Task 5.3 probe (`probe/only36_probe.csv`):** own / + nbr / + gnnssl: all 25 features 0.907 / 0.935 / 0.934; without #36 0.500 / 0.704 / 0.672; only36 0.876 / 0.918 / 0.912; top4 0.910 / 0.938 / 0.931. Four features carry the 25 features' result.
+  - **Task 3a probe (`probe/gnnrand_probe.csv`):** own + gnnrand (the gnnssl encoder with its seeded initial weights, no training) over 5 initialisation seeds: all features 0.933 ± 0.004 (gnnssl 0.934, nbr 0.935); without #36 0.677 ± 0.007 (gnnssl 0.672, nbr 0.704). On CV, DGI training adds nothing over random weights.
+  - **Task 1.1 (`scripts/embedding_sizes.py`, `gnn_embed/sizes.md`):** DGI gives 64 dimensions per relation (192 on Amazon); none is constant on the training nodes, but the effective rank (entropy of the singular values) is 27 / 8 / 15 (U-P-U / U-S-U / U-V-U; without #36 26 / 6 / 17). 90% of the variance needs 6 / 2 / 3 components, 99% needs 27 / 5 / 9. df-analyze receives 24 `gnnssl` columns (PCA 8 per relation) and both pilot `m5` Model As kept all 24 after feature selection; pilot `m2`'s Model A kept 13 of 78 `nbr` columns (all 66 without #36).
+  - **Runs (pilot settings: lgbm, lr, catboost, 10 trials, `bal-acc`, seed 555; splits 0, 1, 2; one at a time on the RTX 4060 laptop):** `pilot_m1_own_only36`, `pilot_m2_own_nbr_only36`, `pilot_m5_own_gnnssl_only36`; `pilot_m5r_own_gnnrand`, `pilot_m5r_own_gnnrand_no36`; `pilot_m1_own_top4`, `pilot_m2_own_nbr_top4`, `pilot_m5_own_gnnssl_top4`. 24 runs. Every graph block keeps the plan's default settings (DGI 64, ≤ 300 epochs, PCA 8); gnnrand uses the run seed, so it is exactly the encoder gnnssl's training starts from. The size sweep (Task 1.2) is a training-CV check and changes no run.
+  - **Contrasts** (B − A; test ΔPR-AUC per split from `compare_report.py`, verdict by the rule of 2026-10-19: Δ > 0 on all 3 splits, mean Δ > SD, Nadeau–Bengio p < 0.05 over the 15 CV folds; `scripts/repeat_summary.py --pairs`):
+    - Task 3a (`compare/gnnrand_summary.md`): m5 − m5r (does DGI training add anything over random weights?) and m5r − m1, each with all features and without #36.
+    - Task 5 (`compare/only36_summary.md`, `compare/top4_summary.md`): m1_only36 − m1 and m1_top4 − m1 (how much of the 25 features' result do four carry?), and within each variant m2 − m1, m5 − m1, m5 − m2.
+  - **Reading, fixed now:** "worse" for m1_only36 − m1 means the other 21 features add something measurable; "not distinguishable" means the four carry the result. For m5 − m5r, anything but "supported" means DGI training is not shown to help. No pilot result is compared with a full-budget run.
+- **2026-10-23 (phase 3 overnight: results).** Queue 04:40–09:32 UTC, one run at a time, 24 runs of 8.3–16.0 min. Every run passed the split check (5,183 / 3,456) and the type check, and no tuning search hit its time limit. The first run (`pilot_m1_own_only36`, split 0) finished at 04:49, 9 minutes before the rules above were committed (`1f23671`); its result was not read before then. Run IDs are in the results database (`results/runs/20261023T04*` to `T09*`, tag `phase3`).
+  - **Model A test PR-AUC, splits 0 / 1 / 2** (pilot budget; no-skill 0.095):
+
+    | Rung | Features | Split 0 | Split 1 | Split 2 |
+    |---|---|---|---|---|
+    | m1 (phase 2) | 25 | 0.917 | 0.919 | 0.919 |
+    | m1_only36 | 4 (#36) | 0.885 | 0.888 | 0.889 |
+    | m2_only36 | 4 + 15 nbr | 0.909 | 0.917 | 0.917 |
+    | m5_only36 | 4 + 24 gnnssl | 0.907 | 0.913 | 0.906 |
+    | m1_top4 | 4 (top 4) | 0.924 | 0.919 | 0.922 |
+    | m2_top4 | 4 + 15 nbr | 0.931 | 0.938 | 0.933 |
+    | m5_top4 | 4 + 24 gnnssl | 0.944 | 0.941 | 0.943 |
+    | m5 (phase 2) | 25 + 24 gnnssl | 0.929 | 0.931 | 0.928 |
+    | m5r | 25 + 24 gnnrand | 0.936 | 0.932 | 0.930 |
+    | m5_no36 (phase 2) | 21 + 24 gnnssl | 0.677 | 0.688 | 0.665 |
+    | m5r_no36 | 21 + 24 gnnrand | 0.656 | 0.679 | 0.659 |
+
+  - **Verdicts** (rule of 2026-10-19; `compare/only36_summary.md`, `gnnrand_summary.md`, `top4_summary.md`; results-DB entries `20261023T062119Z_amazon_11445b`, `20261023T074837Z_amazon_f1ed69`, `20261023T092759Z_amazon_f8430a`). The rule labels any negative mean "worse"; the p-value says whether it is also significant.
+
+    | Contrast | Δ splits 0 / 1 / 2 | Mean ± SD | CV p | Verdict |
+    |---|---|---|---|---|
+    | m5 − m5r (DGI training), all features | −0.007 / −0.002 / −0.002 | −0.004 ± 0.003 | 0.69 | worse (not significant) |
+    | m5 − m5r, without #36 | +0.021 / +0.009 / +0.005 | +0.012 ± 0.008 | 0.69 | not distinguishable from zero |
+    | m5r − m1, all features | +0.019 / +0.013 / +0.010 | +0.014 ± 0.004 | 0.028 | supported |
+    | m5r − m1, without #36 | +0.132 / +0.134 / +0.085 | +0.117 ± 0.028 | 5e-5 | supported |
+    | m1_only36 − m1 | −0.032 / −0.031 / −0.030 | −0.031 ± 0.001 | 1e-4 | worse |
+    | m2 − m1, only36 | +0.024 / +0.029 / +0.028 | +0.027 ± 0.003 | 3e-4 | supported |
+    | m5 − m1, only36 | +0.022 / +0.025 / +0.017 | +0.021 ± 0.004 | 0.006 | supported |
+    | m5 − m2, only36 | −0.002 / −0.004 / −0.011 | −0.006 ± 0.005 | 0.64 | worse (not significant) |
+    | m1_top4 − m1 | +0.006 / +0.001 / +0.003 | +0.003 ± 0.003 | 0.67 | not distinguishable from zero |
+    | m2 − m1, top4 | +0.007 / +0.019 / +0.011 | +0.012 ± 0.006 | 0.036 | supported |
+    | m5 − m1, top4 | +0.020 / +0.022 / +0.021 | +0.021 ± 0.001 | 0.095 | not distinguishable from zero |
+    | m5 − m2, top4 | +0.013 / +0.003 / +0.010 | +0.009 ± 0.005 | 0.89 | not distinguishable from zero |
+
+  - **Reading:**
+    - **F2 (a), does training the GNN help?** No, not measurably. Untrained random-weight embeddings do as well as DGI-trained ones with all features, and about 0.01 worse without #36, which is not significant. Untrained embeddings alone give the gain over m1 that passes the rule (+0.014 with all features, where DGI's +0.011 did not pass; +0.117 without #36). Most of what the GNN embeddings add comes from propagating the features over the graph, not from DGI's training.
+    - **F3, four features.** The four #36 features alone lose 0.031 against all 25 on every split (0.887 vs 0.918). The permutation top 4 (`f00`, `f18`, `f19`, `f23`) match all 25 (+0.003, not distinguishable). So four features carry Amazon's result, and the right four are not the four flagged in #36. Within either four-feature variant the graph still adds 0.01–0.03; `m5_top4` (0.941–0.944) is the highest pilot score so far, but its contrast with `m1_top4` is not significant on CV (p = 0.095).
+    - **F1, size** (Task 1, `gnn_embed/sizes.md`, size sweep `20261023T044927Z_amazon_43983f`): see the 2026-10-23 entry above. At DGI size 64, the pre-registered rule picks k = 1 per relation with all features and k = 16 without #36 (8 falls 0.002 short of the band). DGI sizes 16 and 32 do about as well as 64. Trained embeddings have a lower effective rank than untrained ones (8–27 vs 18–32 per relation): training compresses them without making them more useful to df-analyze.
+  - **Caveats:**
+    - Pilot budget, one seed per run. Each side's Model A was chosen on the same CV folds the t-test uses.
+    - **`top4` was chosen on split 0's training folds.** Splits 1 and 2 put some of those nodes in their test sets, so their `top4` results are mildly optimistic. Re-ranked on their own training folds (`outputs/amazon_repeat{1,2}/probe/top_features.csv`), splits 1 and 2 keep `f19`, `f00` and `f23` but pick `f12` for the fourth place instead of `f18` (ranks 3–5 are within noise). Split 0's contrast (+0.006 for m1_top4 − m1) has no such issue. The same caveat applies, more weakly, to the #36 set, flagged by the split-0 audit.
 
 ---
 
@@ -579,9 +636,11 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
 - the #36 checks (a)–(b);
 - embedding sensitivity.
 
-`AGENTS.md` ("Current state") has the one-screen summary of what was run and what is known or unknown. Tested on Linux (WSL2) with an NVIDIA GPU; 179 tests pass with the `gnn` extra, and without it the GNN tests are skipped.
+`AGENTS.md` ("Current state") has the one-screen summary of what was run and what is known or unknown. Tested on Linux (WSL2) with an NVIDIA GPU; 200 tests pass with the `gnn` extra, and without it the GNN tests are skipped.
 
-**Next steps (phase 3; ask before starting):**
+**Phase 3 status (2026-10-23, §11):** Task 1 (sizes and size sweep), Task 3a (untrained-GNN probe and pilot rungs) and Task 5 (ranking, probe, and pilot rungs for both readings of D3, `only36` and `top4`) are done at the pilot budget. Open for the group: D1 (Task 2b–c), D2 (Task 4, GraphSAGE), D3 (which four features: the results favour `top4`, though its fourth feature is unstable across splits), D4 (Task 6, datasets), D5 (backfilling), and whether any of the new rungs deserves a full-budget run.
+
+**Next steps (phase 3; ask before starting):** the professor's feedback comes first ([`PHASE3_FEEDBACK_PLAN.md`](PHASE3_FEEDBACK_PLAN.md); Task 1 absorbs step 1 below). Record every run in the results database (`results/README.md`).
 0. **Settle issue #36 locally first.** (a) and (b) ran on 2026-10-20 (§11): (a) found no helpful-vote partner for f19; (b) is consistent with rating statistics. (c)–(e) remain. (training/labelled rows, aggregates only, minutes of CPU; scripts in `scripts/`, outputs under `outputs/amazon/`):
     - (a) for every non-negative column c, does c / (c + f19) give < 0.2 for every fraud user and > 0.8 for every benign one? If so, c = helpful votes and f19 = unhelpful votes: leakage proven. Also check whether min(c + f19) ≥ 20, a minimum-vote filter;
     - (b) f15 ∈ {1, 1.5, …, 5}, f18 ∈ [1, 5], Spearman(f15, f18) > 0.8, and f18 / f13 against any five rating-level count columns (f18 = Σk·n_k / Σn_k, f13 = (n_4 + n_5) / Σn_k);

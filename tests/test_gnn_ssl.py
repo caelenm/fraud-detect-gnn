@@ -115,6 +115,54 @@ def test_masks_and_edge_sampling_rules():
     assert cfg.edge_fraction("usu") == 0.5 and cfg.edge_fraction("upu") == 1.0
 
 
+def test_gnnrand_is_label_blind_deterministic_and_shaped_like_gnnssl():
+    nodes, own, edges, fit_mask, _ = small_graph()
+
+    def builder(features: pd.DataFrame, edges: dict) -> pd.DataFrame:
+        return ssl.gnnrand_block(features, edges, fit_mask, CFG).block
+
+    assert_label_blind(builder, nodes, own, edges)
+    first = ssl.gnnrand_block(own, edges, fit_mask, CFG)
+    pd.testing.assert_frame_equal(first.block, builder(own, edges))
+    expected = [f"gnnrand__{r}_pc{k:02d}" for r in ("aaa", "bbb") for k in (1, 2, 3)]
+    assert list(first.block.columns) == [C.NODE_ID, *expected]
+    blocks.validate_block(C.GNNRAND_BLOCK, first.block)
+    other = ssl.gnnrand_block(own, edges, fit_mask, replace(CFG, seed=4))
+    assert not np.array_equal(first.embeddings["aaa"], other.embeddings["aaa"])
+    assert not first.logs["aaa"]["trained"]
+
+
+def test_gnnrand_is_where_dgi_training_starts():
+    # With one epoch, DGI keeps the weights that produced its first loss: the
+    # initial ones. gnnrand must give exactly those embeddings.
+    _, own, edges, fit_mask, loss_mask = small_graph()
+    start = ssl.gnnssl_block(own, edges, fit_mask, loss_mask, replace(CFG, max_epochs=1))
+    rand = ssl.gnnrand_block(own, edges, fit_mask, CFG)
+    trained = ssl.gnnssl_block(own, edges, fit_mask, loss_mask, CFG)
+    for relation in edges:
+        assert np.array_equal(start.embeddings[relation], rand.embeddings[relation])
+        assert not np.array_equal(trained.embeddings[relation], rand.embeddings[relation])
+
+
+def test_gnn_embed_stage_builds_a_gnnrand_block(tmp_path):
+    path, config = fake_dataset(tmp_path, n_nodes=120)
+    args = ["--config", str(path), "--set", "feature_set=pilot_m5r_own_gnnrand", *SMALL]
+    assert main([*args, "--to", "df_analyze_input"]) == 0
+    p = get_paths({**config, "feature_set": "pilot_m5r_own_gnnrand"})
+    block = pd.read_parquet(p.block_file(C.GNNRAND_BLOCK))
+    assert block.shape == (120, 1 + 2 * 3)
+    meta = json.loads((p.embed_dir("gnnrand") / "meta.json").read_text(encoding="utf-8"))
+    assert p.embed_dir("gnnrand").name == "gnn_embed_gnnrand"
+    assert meta["method"].startswith("untrained") and "corruption" not in meta
+    assert np.load(p.raw_embedding("aaa", "gnnrand")).shape == (120, 8)
+    assert not p.block_file(C.GNNSSL_BLOCK).exists()  # only the blocks it uses
+    train = pd.read_parquet(p.df_analyze_input_dir / "train.parquet")
+    assert "gnnrand_bbb_pc03" in train.columns
+    # Rebuilt with the same settings: identical (no training, fixed seed).
+    assert main([*args, "--only", "gnn_embed", "--force"]) == 0
+    pd.testing.assert_frame_equal(pd.read_parquet(p.block_file(C.GNNRAND_BLOCK)), block)
+
+
 def stage_args(path) -> list[str]:
     return ["--config", str(path), "--set", "feature_set=m5_own_gnnssl", *SMALL]
 

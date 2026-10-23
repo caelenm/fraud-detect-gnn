@@ -23,13 +23,18 @@ TARGET = "target"
 BLOCK_SEPARATOR = "__"
 OWN_BLOCK = "own"
 # Graph-derived blocks, one per kind, covering every relation of the dataset:
-# nbr__upu_mean_f00 (label-free neighbour means, Model 2) and gnnssl__upu_pc01
-# (self-supervised GNN embeddings, Model 5).
+# nbr__upu_mean_f00 (label-free neighbour means, Model 2), gnnssl__upu_pc01
+# (self-supervised GNN embeddings, Model 5) and gnnrand__upu_pc01 (the same
+# GNN encoder with its seeded initial weights and no training: the untrained
+# control of phase 3, Task 3a).
 NBR_BLOCK = "nbr"
 GNNSSL_BLOCK = "gnnssl"
+GNNRAND_BLOCK = "gnnrand"
+# The blocks the gnn_embed stage builds.
+GNN_BLOCK_KINDS: tuple[str, ...] = (GNNSSL_BLOCK, GNNRAND_BLOCK)
 # Every block name is one of these kinds, optionally followed by _<variant>
 # (see features/blocks.py).
-BLOCK_KINDS: tuple[str, ...] = (OWN_BLOCK, NBR_BLOCK, GNNSSL_BLOCK)
+BLOCK_KINDS: tuple[str, ...] = (OWN_BLOCK, NBR_BLOCK, *GNN_BLOCK_KINDS)
 
 # Columns that identify, label or place a node. They must never appear in any
 # feature block or model input (AGENTS.md leakage invariant 7).

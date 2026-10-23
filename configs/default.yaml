@@ -106,13 +106,35 @@ feature_sets:
   pilot_m1_own_no36: [own_no36]
   pilot_m2_own_nbr_no36: [own_no36, nbr_no36]
   pilot_m5_own_gnnssl_no36: [own_no36, gnnssl_no36]
+  # Phase 3 (docs/PHASE3_FEEDBACK_PLAN.md), pilot settings as above.
+  # Task 3a: the untrained-GNN control (Model 5r), the gnnssl encoder with its
+  # seeded initial weights and no training.
+  pilot_m5r_own_gnnrand: [own, gnnrand]
+  pilot_m5r_own_gnnrand_no36: [own_no36, gnnrand_no36]
+  # Task 5: the four #36 features alone, with and without the graph (the GNN
+  # and the neighbour means see only those four too).
+  pilot_m1_own_only36: [own_only36]
+  pilot_m2_own_nbr_only36: [own_only36, nbr_only36]
+  pilot_m5_own_gnnssl_only36: [own_only36, gnnssl_only36]
+  # Task 5, the other reading of "4 important features": the training-only
+  # top 4 by permutation importance (outputs/amazon/probe/top_features.csv).
+  pilot_m1_own_top4: [own_top4]
+  pilot_m2_own_nbr_top4: [own_top4, nbr_top4]
+  pilot_m5_own_gnnssl_top4: [own_top4, gnnssl_top4]
 
 # Input variants: a block named <kind>_<variant> (own_no36, nbr_no36,
-# gnnssl_no36) is built from the own features without these columns.
+# gnnssl_no36) is built from the own features without the variant's columns:
+# either the listed ones, or every column except the {keep: [...]} ones.
 feature_variants:
   # Amazon only: univariate AUROC 0.86-0.88 on its training nodes; they may
   # encode the helpfulness votes the labels come from (issue #36).
   no36: [own__f13, own__f15, own__f18, own__f19]
+  # Amazon only (phase 3, Task 5): only those four.
+  only36: {keep: [own__f13, own__f15, own__f18, own__f19]}
+  # Amazon only (phase 3, Task 5): the top 4 of the training-only permutation
+  # ranking (scripts/top_features.py, 2026-10-23). It differs from only36:
+  # f13 and f15 add little once f18 and f19 are known.
+  top4: {keep: [own__f00, own__f18, own__f19, own__f23]}
 
 neighbour_agg:
   # Model 2's `nbr` block. For each relation of the dataset (not homo): the

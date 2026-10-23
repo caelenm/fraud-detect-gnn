@@ -4,7 +4,7 @@
 
 Course project for CS555: Data Mining and Machine Learning, St. Francis Xavier University (StFX).
 
-> **Status:** Model 1 (df-analyze on each node's own features) is implemented end to end for both datasets, and **phase 1 (Amazon) is done** ([Results](#results-phase-1-amazon)). **Phase 2** ([`docs/PHASE2_GNN_PLAN.md`](docs/PHASE2_GNN_PLAN.md) is the plan; branch `feat/gnn-embeddings`) adds two graph rungs as feature blocks for df-analyze: **Model 2** (`nbr`, label-free neighbour means) and **Model 5** (`gnnssl`, self-supervised GNN embeddings), each also without the four features of issue [#36](https://github.com/caelenm/fraud-detect-gnn/issues/36), and a [comparison page](#comparing-two-feature-sets) that shows two rungs' Model A test node by test node. Amazon pilot results are in [Results (phase 2 pilot)](#results-phase-2-pilot-amazon). GraphSAGE (Models 3–4) and Model 6 are not built. The working plan is [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md). An earlier version of this project used CFPB complaint narratives; that state is preserved at commit `3336d87` on `main`.
+> **Status:** Model 1 (df-analyze on each node's own features) is implemented end to end for both datasets, and **phase 1 (Amazon) is done** ([Results](#results-phase-1-amazon)). **Phase 2** ([`docs/PHASE2_GNN_PLAN.md`](docs/PHASE2_GNN_PLAN.md) is the plan; branch `feat/gnn-embeddings`) adds two graph rungs as feature blocks for df-analyze: **Model 2** (`nbr`, label-free neighbour means) and **Model 5** (`gnnssl`, self-supervised GNN embeddings), each also without the four features of issue [#36](https://github.com/caelenm/fraud-detect-gnn/issues/36), and a [comparison page](#comparing-two-feature-sets) that shows two rungs' Model A test node by test node. Amazon pilot results are in [Results (phase 2 pilot)](#results-phase-2-pilot-amazon). GraphSAGE (Models 3–4) and Model 6 are not built. **Phase 3** ([`docs/PHASE3_FEEDBACK_PLAN.md`](docs/PHASE3_FEEDBACK_PLAN.md)) answers the professor's feedback of 2026-10-21: the size of the GNN embeddings and how to reduce them, whether training the GNN helps, the four important features alone, and more datasets. Every run is recorded in the [results database](#results-database). The working plan is [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md). An earlier version of this project used CFPB complaint narratives; that state is preserved at commit `3336d87` on `main`.
 
 ---
 
@@ -155,6 +155,18 @@ All 18 runs passed the split and type checks, and no search hit a time limit.
 - **Without the #36 features,** both graph rungs clearly help: +0.16 for neighbour means and +0.13 for GNN embeddings. Neighbour means beat the untuned GNN embeddings on every split.
 
 Each pair has a comparison page per split (`outputs/amazon*/compare/`), and the verdict table is `outputs/amazon/compare/repeat_summary.md`. Run times: 10.6–16.0 min per feature set, 85 min for all six; the CPU embeddings took 34 s (all features) and 22 s (without #36).
+
+## Results (phase 3 pilots, Amazon)
+
+Answers so far to the professor's feedback of 2026-10-21 ([`docs/PHASE3_FEEDBACK_PLAN.md`](docs/PHASE3_FEEDBACK_PLAN.md)). These are pilots with the same settings as phase 2: 3 classifiers, 10 trials, 3 splits, one RTX 4060 laptop, and the pre-registered verdict rule. Every number is in `docs/RESEARCH_PLAN.md` §11 (2026-10-23) and the [results database](results/README.md).
+
+| Question | Finding |
+|---|---|
+| **How big are the GNN embeddings?** | DGI gives 64 dimensions per relation (192 in total), but their effective rank is 8–27, and 2–6 principal components keep 90% of the variance. df-analyze receives 24 columns (8 per relation) and keeps all of them. On training CV, DGI sizes 16, 32 and 64 do about equally well. The pre-registered smallest-k rule picks 1 component per relation with all features and 16 without the #36 features. |
+| **Does training the GNN help?** | Not measurably. The same encoder with random, untrained weights (`gnnrand`) does as well as DGI with all features: m5 − m5r is −0.004 ± 0.003. Without #36 it is +0.012 ± 0.008, not distinguishable from zero. The untrained embeddings' own gain over m1 passes the rule (+0.014; +0.117 without #36). Most of the gain comes from propagating features over the graph. GraphSAGE trained on the labels (Models 3–4) is not built yet. |
+| **Just the 4 important features?** | The four #36 features alone score 0.885–0.889 test PR-AUC, 0.031 below all 25 on every split ("worse"). The top 4 by training-only permutation importance (`f00`, `f18`, `f19`, `f23`) score 0.919–0.924, the same as all 25 ("not distinguishable"). With four features the graph still adds 0.01–0.03. |
+
+Caveats: pilot budget and one seed per run. The top 4 were ranked on split 0's training folds, so splits 1 and 2 (whose test sets include some of those nodes) are mildly optimistic. On their own folds, those splits would swap `f18` for `f12`. Verdict tables: `outputs/amazon/compare/{only36,top4,gnnrand}_summary.md`.
 
 ## Graph feature blocks (Models 2 and 5)
 
@@ -309,6 +321,19 @@ df-analyze's runtime grows with the number of classifiers, the trials and the nu
 
 Ask the group before any run expected to take more than about an hour.
 
+### Results database
+
+Everyone's runs are recorded in [`results/runs/`](results/README.md), one committed folder per run: the device, start and finish time (UTC), a one-line description, the settings and git commit, the headline numbers, and the run's results table (aggregate metrics only, never row-level data). One folder per run means two people recording at once never conflict.
+
+```bash
+uv run scripts/results_db.py add --from-run outputs/amazon/pilot_m1_own \
+    --run-log outputs/amazon/runs/<stamp> --device rtx4060-laptop --description "..."
+uv run scripts/results_db.py list            # or: show <run_id>, export, check
+git add results/runs/<run_id> && git commit -m "Results: ..."
+```
+
+See [`results/README.md`](results/README.md) for every field and for recording probes, comparisons and checks.
+
 ### Sharing outputs with the group
 
 df-analyze takes hours, so one person can run it and share the results outside git:
@@ -349,6 +374,8 @@ uv run ruff format --check .
 uv run pytest
 ```
 
+Commits go straight to `main` (or to a branch); no pull request or review is needed, and running the checks first is recommended rather than required. See `AGENTS.md`, "Git workflow".
+
 Tests use only small synthetic data, all defined in [`tests/synthetic.py`](tests/synthetic.py) (including tiny fake `.mat` files written with `scipy.io.savemat`). Tests that need files write them to pytest's temporary directory. No data files, real or synthetic, are committed.
 
 ## Repository layout
@@ -361,6 +388,8 @@ fraud-detect-gnn/
 ├── docs/RESEARCH_PLAN.md
 ├── docs/PHASE1_AMAZON_PLAN.md  # phase 1: Amazon Model A end to end, shareable bundle
 ├── docs/PHASE2_GNN_PLAN.md     # phase 2: Models 2 and 5 as df-analyze blocks, comparison page
+├── docs/PHASE3_FEEDBACK_PLAN.md # phase 3: the professor's feedback (2026-10-21)
+├── results/             # results database: one committed folder per run (results/README.md)
 ├── download_dataset.sh  # runs the download stage for both datasets
 ├── run.py               # runs the pipeline stages in order
 ├── pack_artifacts.py / unpack_artifacts.py
@@ -379,8 +408,9 @@ fraud-detect-gnn/
 │   ├── external.py      # runs df-analyze scripts in their own environment
 │   ├── artifacts.py     # packing and unpacking output bundles
 │   ├── runstate.py      # stop/resume, atomic writes
+│   ├── results_db.py    # the results database (scripts/results_db.py is its command line)
 │   └── runlog.py        # seeds and run metadata
-├── scripts/             # NN_<stage>.py: run one stage; compare_report.py, probe_blocks.py
+├── scripts/             # NN_<stage>.py: run one stage; compare_report.py, probe_blocks.py, results_db.py
 │   └── dfa/             # run in df-analyze's env: cv_select, export_model, predict
 ├── tests/
 ├── data/                # local only, git-ignored

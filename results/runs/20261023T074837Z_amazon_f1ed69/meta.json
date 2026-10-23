@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "run_id": "20261023T074837Z_amazon_f1ed69",
+  "recorded_utc": "2026-10-23T07:52:57Z",
+  "started_utc": "2026-10-23T07:48:37Z",
+  "finished_utc": "2026-10-23T07:52:57Z",
+  "duration_min": 4.3,
+  "device": "rtx4060-laptop",
+  "device_details": {
+    "os": "Linux",
+    "platform": "Linux-5.10.16.3-microsoft-standard-WSL2-x86_64-with-glibc2.41",
+    "wsl": true,
+    "python": "3.13.15",
+    "cpu": "Intel(R) Core(TM) Ultra 9 185H",
+    "gpus": [
+      {
+        "name": "NVIDIA GeForce RTX 4060 Laptop GPU",
+        "driver": "571.96",
+        "memory": "8188 MiB"
+      }
+    ]
+  },
+  "description": "Phase 3 Task 3a: 3-split verdicts, DGI-trained vs untrained GNN embeddings, pilot rungs",
+  "kind": "compare",
+  "status": "ok",
+  "dataset": "amazon",
+  "feature_set": null,
+  "split_repeat": null,
+  "seed": null,
+  "git_commit": "1f236719f8ff945fd8233f09dd2d97a29c57128b",
+  "git_dirty": false,
+  "command": "scripts/repeat_summary.py --dataset amazon --repeats 3 --prefix pilot_ --name gnnrand_summary --pairs m5r_own_gnnrand:m5_own_gnnssl m1_own:m5r_own_gnnrand m5r_own_gnnrand_no36:m5_own_gnnssl_no36 m1_own_no36:m5r_own_gnnrand_no36",
+  "tags": [
+    "pilot",
+    "phase3"
+  ],
+  "source": "outputs/amazon/compare/gnnrand_summary.csv",
+  "results_rows": 4,
+  "results_columns": [
+    "variant",
+    "contrast",
+    "a",
+    "b",
+    "test_delta_split0",
+    "test_delta_split1",
+    "test_delta_split2",
+    "test_delta_mean",
+    "test_delta_sd",
+    "test_pr_auc_a_mean",
+    "test_pr_auc_a_sd",
+    "test_pr_auc_b_mean",
+    "test_pr_auc_b_sd",
+    "cv_folds",
+    "cv_delta_mean",
+    "corrected_t",
+    "p",
+    "verdict"
+  ]
+}

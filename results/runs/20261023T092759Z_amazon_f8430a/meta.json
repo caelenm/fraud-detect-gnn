@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "run_id": "20261023T092759Z_amazon_f8430a",
+  "recorded_utc": "2026-10-23T09:32:19Z",
+  "started_utc": "2026-10-23T09:27:59Z",
+  "finished_utc": "2026-10-23T09:32:18Z",
+  "duration_min": 4.3,
+  "device": "rtx4060-laptop",
+  "device_details": {
+    "os": "Linux",
+    "platform": "Linux-5.10.16.3-microsoft-standard-WSL2-x86_64-with-glibc2.41",
+    "wsl": true,
+    "python": "3.13.15",
+    "cpu": "Intel(R) Core(TM) Ultra 9 185H",
+    "gpus": [
+      {
+        "name": "NVIDIA GeForce RTX 4060 Laptop GPU",
+        "driver": "571.96",
+        "memory": "8188 MiB"
+      }
+    ]
+  },
+  "description": "Phase 3 Task 5: 3-split verdicts for the training-ranked top 4 (top4), pilot rungs",
+  "kind": "compare",
+  "status": "ok",
+  "dataset": "amazon",
+  "feature_set": null,
+  "split_repeat": null,
+  "seed": null,
+  "git_commit": "1f236719f8ff945fd8233f09dd2d97a29c57128b",
+  "git_dirty": false,
+  "command": "scripts/repeat_summary.py --dataset amazon --repeats 3 --prefix pilot_ --name top4_summary --pairs m1_own:m1_own_top4 m1_own_top4:m2_own_nbr_top4 m1_own_top4:m5_own_gnnssl_top4 m2_own_nbr_top4:m5_own_gnnssl_top4",
+  "tags": [
+    "pilot",
+    "phase3"
+  ],
+  "source": "outputs/amazon/compare/top4_summary.csv",
+  "results_rows": 4,
+  "results_columns": [
+    "variant",
+    "contrast",
+    "a",
+    "b",
+    "test_delta_split0",
+    "test_delta_split1",
+    "test_delta_split2",
+    "test_delta_mean",
+    "test_delta_sd",
+    "test_pr_auc_a_mean",
+    "test_pr_auc_a_sd",
+    "test_pr_auc_b_mean",
+    "test_pr_auc_b_sd",
+    "cv_folds",
+    "cv_delta_mean",
+    "corrected_t",
+    "p",
+    "verdict"
+  ]
+}
