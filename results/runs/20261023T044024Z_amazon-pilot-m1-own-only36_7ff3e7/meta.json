@@ -1,0 +1,132 @@
+{
+  "schema_version": 1,
+  "run_id": "20261023T044024Z_amazon-pilot-m1-own-only36_7ff3e7",
+  "recorded_utc": "2026-10-23T04:49:51Z",
+  "started_utc": "2026-10-23T04:40:24Z",
+  "finished_utc": "2026-10-23T04:49:41Z",
+  "duration_min": 9.3,
+  "device": "rtx4060-laptop",
+  "device_details": {
+    "os": "Linux",
+    "platform": "Linux-5.10.16.3-microsoft-standard-WSL2-x86_64-with-glibc2.41",
+    "wsl": true,
+    "python": "3.13.15",
+    "cpu": "Intel(R) Core(TM) Ultra 9 185H",
+    "gpus": [
+      {
+        "name": "NVIDIA GeForce RTX 4060 Laptop GPU",
+        "driver": "571.96",
+        "memory": "8188 MiB"
+      }
+    ]
+  },
+  "description": "Phase 3 Task 5: m1 on the four #36 features alone (only36), split 0, pilot (lgbm/lr/catboost, 10 trials)",
+  "kind": "pipeline",
+  "status": "ok",
+  "dataset": "amazon",
+  "feature_set": "pilot_m1_own_only36",
+  "split_repeat": 0,
+  "seed": 555,
+  "git_commit": "ec00a55f6c4ad5aec4e5364dd060d7cb1d2aa4c5",
+  "git_dirty": false,
+  "df_analyze_run": "20261023T044024Z",
+  "headline": {
+    "model_a": "catboost (assoc)",
+    "test_pr_auc": 0.8850311413577581,
+    "test_pr_auc_low": 0.8522895492241838,
+    "test_pr_auc_high": 0.9117234033584687,
+    "test_auroc": 0.9577020694279832,
+    "test_auroc_low": 0.9416355885773192,
+    "test_auroc_high": 0.9721212324903442,
+    "no_skill_pr_auc": 0.09490740740740741,
+    "cv_pr_auc": 0.8954195379376658,
+    "cv_pr_auc_std": 0.0392982979374759,
+    "f1": 0.8613376835236541,
+    "threshold": 0.3298361749810368,
+    "n_train": 5183,
+    "n_test": 3456
+  },
+  "settings": {
+    "htune_trials": 10,
+    "seed": 555,
+    "feature_set": "pilot_m1_own_only36",
+    "split.repeat": 0,
+    "split.n_repeats": 3,
+    "df_analyze.classifiers": [
+      "lgbm",
+      "lr",
+      "catboost"
+    ],
+    "df_analyze.htune_trials": 10,
+    "df_analyze.htune_cls_metric": "bal-acc",
+    "df_analyze.commit": "199e5638620693c267dac715784f1fd0e33fa796",
+    "gnn_embed": {
+      "layers": 2,
+      "hidden": 64,
+      "out_dim": 64,
+      "lr": 0.001,
+      "max_epochs": 300,
+      "patience": 20,
+      "pca_components": 8,
+      "device": "cpu",
+      "usu_edge_fraction": 1.0
+    },
+    "neighbour_agg": {
+      "statistics": [
+        "mean"
+      ],
+      "log1p_degree": true
+    },
+    "blocks": [
+      "own_only36"
+    ]
+  },
+  "source": "outputs/amazon/pilot_m1_own_only36",
+  "command": "--dataset amazon --set split.n_repeats=3 --set df_analyze.classifiers=[lgbm,lr,catboost] --set df_analyze.htune_trials=10 --set split.repeat=0 --set feature_set=pilot_m1_own_only36",
+  "packages": {
+    "numpy": "2.5.3",
+    "pandas": "3.0.6",
+    "pyarrow": "25.0.1",
+    "scikit-learn": "1.9.1",
+    "scipy": "1.18.1",
+    "pyyaml": "6.0.3",
+    "torch": "2.9.1",
+    "torch-geometric": "2.8.1"
+  },
+  "tags": [
+    "pilot",
+    "phase3"
+  ],
+  "results_rows": 16,
+  "results_columns": [
+    "model",
+    "selection",
+    "embed_selector",
+    "cv_pr_auc",
+    "cv_pr_auc_std",
+    "cv_auroc",
+    "cv_bal_acc",
+    "cv_pr_auc_default",
+    "cv_auroc_default",
+    "cv_tuning_gain",
+    "tuning_metric",
+    "tuning_score",
+    "pr_auc",
+    "auroc",
+    "f1",
+    "precision",
+    "recall",
+    "accuracy",
+    "balanced_accuracy",
+    "tp",
+    "fp",
+    "fn",
+    "tn",
+    "threshold",
+    "f1_at_05",
+    "precision_at_05",
+    "recall_at_05",
+    "accuracy_at_05",
+    "balanced_accuracy_at_05"
+  ]
+}
