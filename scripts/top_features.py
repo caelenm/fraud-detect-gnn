@@ -39,9 +39,19 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--dataset", help="yelpchi or amazon")
+    parser.add_argument(
+        "--repeat",
+        type=int,
+        default=0,
+        help="split repeat (0 = the usual folders; k = <dataset>_repeat<k>)",
+    )
     args = parser.parse_args(argv)
     try:
-        config = with_dataset(load_config(args.config), args.dataset)
+        config = load_config(args.config)
+        config["split"]["n_repeats"] = max(int(config["split"]["n_repeats"]),
+                                           args.repeat + 1)  # fmt: skip
+        config["split"]["repeat"] = args.repeat
+        config = with_dataset(config, args.dataset)
     except ConfigError as e:
         print(f"error: {e}", file=sys.stderr)
         return 2

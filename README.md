@@ -156,6 +156,18 @@ All 18 runs passed the split and type checks, and no search hit a time limit.
 
 Each pair has a comparison page per split (`outputs/amazon*/compare/`), and the verdict table is `outputs/amazon/compare/repeat_summary.md`. Run times: 10.6–16.0 min per feature set, 85 min for all six; the CPU embeddings took 34 s (all features) and 22 s (without #36).
 
+## Results (phase 3 pilots, Amazon)
+
+Answers so far to the professor's feedback of 2026-10-21 ([`docs/PHASE3_FEEDBACK_PLAN.md`](docs/PHASE3_FEEDBACK_PLAN.md)). These are pilots with the same settings as phase 2: 3 classifiers, 10 trials, 3 splits, one RTX 4060 laptop, and the pre-registered verdict rule. Every number is in `docs/RESEARCH_PLAN.md` §11 (2026-10-23) and the [results database](results/README.md).
+
+| Question | Finding |
+|---|---|
+| **How big are the GNN embeddings?** | DGI gives 64 dimensions per relation (192 in total), but their effective rank is 8–27, and 2–6 principal components keep 90% of the variance. df-analyze receives 24 columns (8 per relation) and keeps all of them. On training CV, DGI sizes 16, 32 and 64 do about equally well. The pre-registered smallest-k rule picks 1 component per relation with all features and 16 without the #36 features. |
+| **Does training the GNN help?** | Not measurably. The same encoder with random, untrained weights (`gnnrand`) does as well as DGI with all features: m5 − m5r is −0.004 ± 0.003. Without #36 it is +0.012 ± 0.008, not distinguishable from zero. The untrained embeddings' own gain over m1 passes the rule (+0.014; +0.117 without #36). Most of the gain comes from propagating features over the graph. GraphSAGE trained on the labels (Models 3–4) is not built yet. |
+| **Just the 4 important features?** | The four #36 features alone score 0.885–0.889 test PR-AUC, 0.031 below all 25 on every split ("worse"). The top 4 by training-only permutation importance (`f00`, `f18`, `f19`, `f23`) score 0.919–0.924, the same as all 25 ("not distinguishable"). With four features the graph still adds 0.01–0.03. |
+
+Caveats: pilot budget and one seed per run. The top 4 were ranked on split 0's training folds, so splits 1 and 2 (whose test sets include some of those nodes) are mildly optimistic. On their own folds, those splits would swap `f18` for `f12`. Verdict tables: `outputs/amazon/compare/{only36,top4,gnnrand}_summary.md`.
+
 ## Graph feature blocks (Models 2 and 5)
 
 The graph reaches df-analyze as extra columns per node, joined next to the own features; df-analyze then treats each node as a table row exactly as in Model 1. Every rung uses the same split, folds, tuning and test scoring; only the input columns differ.

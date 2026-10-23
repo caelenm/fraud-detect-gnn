@@ -583,6 +583,47 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
     - Task 3a (`compare/gnnrand_summary.md`): m5 − m5r (does DGI training add anything over random weights?) and m5r − m1, each with all features and without #36.
     - Task 5 (`compare/only36_summary.md`, `compare/top4_summary.md`): m1_only36 − m1 and m1_top4 − m1 (how much of the 25 features' result do four carry?), and within each variant m2 − m1, m5 − m1, m5 − m2.
   - **Reading, fixed now:** "worse" for m1_only36 − m1 means the other 21 features add something measurable; "not distinguishable" means the four carry the result. For m5 − m5r, anything but "supported" means DGI training is not shown to help. No pilot result is compared with a full-budget run.
+- **2026-10-23 (phase 3 overnight: results).** Queue 04:40–09:32 UTC, one run at a time, 24 runs of 8.3–16.0 min. Every run passed the split check (5,183 / 3,456) and the type check, and no tuning search hit its time limit. The first run (`pilot_m1_own_only36`, split 0) finished at 04:49, 9 minutes before the rules above were committed (`1f23671`); its result was not read before then. Run IDs are in the results database (`results/runs/20261023T04*` to `T09*`, tag `phase3`).
+  - **Model A test PR-AUC, splits 0 / 1 / 2** (pilot budget; no-skill 0.095):
+
+    | Rung | Features | Split 0 | Split 1 | Split 2 |
+    |---|---|---|---|---|
+    | m1 (phase 2) | 25 | 0.917 | 0.919 | 0.919 |
+    | m1_only36 | 4 (#36) | 0.885 | 0.888 | 0.889 |
+    | m2_only36 | 4 + 15 nbr | 0.909 | 0.917 | 0.917 |
+    | m5_only36 | 4 + 24 gnnssl | 0.907 | 0.913 | 0.906 |
+    | m1_top4 | 4 (top 4) | 0.924 | 0.919 | 0.922 |
+    | m2_top4 | 4 + 15 nbr | 0.931 | 0.938 | 0.933 |
+    | m5_top4 | 4 + 24 gnnssl | 0.944 | 0.941 | 0.943 |
+    | m5 (phase 2) | 25 + 24 gnnssl | 0.929 | 0.931 | 0.928 |
+    | m5r | 25 + 24 gnnrand | 0.936 | 0.932 | 0.930 |
+    | m5_no36 (phase 2) | 21 + 24 gnnssl | 0.677 | 0.688 | 0.665 |
+    | m5r_no36 | 21 + 24 gnnrand | 0.656 | 0.679 | 0.659 |
+
+  - **Verdicts** (rule of 2026-10-19; `compare/only36_summary.md`, `gnnrand_summary.md`, `top4_summary.md`; results-DB entries `20261023T062119Z_amazon_11445b`, `20261023T074837Z_amazon_f1ed69`, `20261023T092759Z_amazon_f8430a`). The rule labels any negative mean "worse"; the p-value says whether it is also significant.
+
+    | Contrast | Δ splits 0 / 1 / 2 | Mean ± SD | CV p | Verdict |
+    |---|---|---|---|---|
+    | m5 − m5r (DGI training), all features | −0.007 / −0.002 / −0.002 | −0.004 ± 0.003 | 0.69 | worse (not significant) |
+    | m5 − m5r, without #36 | +0.021 / +0.009 / +0.005 | +0.012 ± 0.008 | 0.69 | not distinguishable from zero |
+    | m5r − m1, all features | +0.019 / +0.013 / +0.010 | +0.014 ± 0.004 | 0.028 | supported |
+    | m5r − m1, without #36 | +0.132 / +0.134 / +0.085 | +0.117 ± 0.028 | 5e-5 | supported |
+    | m1_only36 − m1 | −0.032 / −0.031 / −0.030 | −0.031 ± 0.001 | 1e-4 | worse |
+    | m2 − m1, only36 | +0.024 / +0.029 / +0.028 | +0.027 ± 0.003 | 3e-4 | supported |
+    | m5 − m1, only36 | +0.022 / +0.025 / +0.017 | +0.021 ± 0.004 | 0.006 | supported |
+    | m5 − m2, only36 | −0.002 / −0.004 / −0.011 | −0.006 ± 0.005 | 0.64 | worse (not significant) |
+    | m1_top4 − m1 | +0.006 / +0.001 / +0.003 | +0.003 ± 0.003 | 0.67 | not distinguishable from zero |
+    | m2 − m1, top4 | +0.007 / +0.019 / +0.011 | +0.012 ± 0.006 | 0.036 | supported |
+    | m5 − m1, top4 | +0.020 / +0.022 / +0.021 | +0.021 ± 0.001 | 0.095 | not distinguishable from zero |
+    | m5 − m2, top4 | +0.013 / +0.003 / +0.010 | +0.009 ± 0.005 | 0.89 | not distinguishable from zero |
+
+  - **Reading:**
+    - **F2 (a), does training the GNN help?** No, not measurably. Untrained random-weight embeddings do as well as DGI-trained ones with all features, and about 0.01 worse without #36, which is not significant. Untrained embeddings alone give the gain over m1 that passes the rule (+0.014 with all features, where DGI's +0.011 did not pass; +0.117 without #36). Most of what the GNN embeddings add comes from propagating the features over the graph, not from DGI's training.
+    - **F3, four features.** The four #36 features alone lose 0.031 against all 25 on every split (0.887 vs 0.918). The permutation top 4 (`f00`, `f18`, `f19`, `f23`) match all 25 (+0.003, not distinguishable). So four features carry Amazon's result, and the right four are not the four flagged in #36. Within either four-feature variant the graph still adds 0.01–0.03; `m5_top4` (0.941–0.944) is the highest pilot score so far, but its contrast with `m1_top4` is not significant on CV (p = 0.095).
+    - **F1, size** (Task 1, `gnn_embed/sizes.md`, size sweep `20261023T044927Z_amazon_43983f`): see the 2026-10-23 entry above. At DGI size 64, the pre-registered rule picks k = 1 per relation with all features and k = 16 without #36 (8 falls 0.002 short of the band). DGI sizes 16 and 32 do about as well as 64. Trained embeddings have a lower effective rank than untrained ones (8–27 vs 18–32 per relation): training compresses them without making them more useful to df-analyze.
+  - **Caveats:**
+    - Pilot budget, one seed per run. Each side's Model A was chosen on the same CV folds the t-test uses.
+    - **`top4` was chosen on split 0's training folds.** Splits 1 and 2 put some of those nodes in their test sets, so their `top4` results are mildly optimistic. Re-ranked on their own training folds (`outputs/amazon_repeat{1,2}/probe/top_features.csv`), splits 1 and 2 keep `f19`, `f00` and `f23` but pick `f12` for the fourth place instead of `f18` (ranks 3–5 are within noise). Split 0's contrast (+0.006 for m1_top4 − m1) has no such issue. The same caveat applies, more weakly, to the #36 set, flagged by the split-0 audit.
 
 ---
 
@@ -595,7 +636,9 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
 - the #36 checks (a)–(b);
 - embedding sensitivity.
 
-`AGENTS.md` ("Current state") has the one-screen summary of what was run and what is known or unknown. Tested on Linux (WSL2) with an NVIDIA GPU; 179 tests pass with the `gnn` extra, and without it the GNN tests are skipped.
+`AGENTS.md` ("Current state") has the one-screen summary of what was run and what is known or unknown. Tested on Linux (WSL2) with an NVIDIA GPU; 200 tests pass with the `gnn` extra, and without it the GNN tests are skipped.
+
+**Phase 3 status (2026-10-23, §11):** Task 1 (sizes and size sweep), Task 3a (untrained-GNN probe and pilot rungs) and Task 5 (ranking, probe, and pilot rungs for both readings of D3, `only36` and `top4`) are done at the pilot budget. Open for the group: D1 (Task 2b–c), D2 (Task 4, GraphSAGE), D3 (which four features: the results favour `top4`, though its fourth feature is unstable across splits), D4 (Task 6, datasets), D5 (backfilling), and whether any of the new rungs deserves a full-budget run.
 
 **Next steps (phase 3; ask before starting):** the professor's feedback comes first ([`PHASE3_FEEDBACK_PLAN.md`](PHASE3_FEEDBACK_PLAN.md); Task 1 absorbs step 1 below). Record every run in the results database (`results/README.md`).
 0. **Settle issue #36 locally first.** (a) and (b) ran on 2026-10-20 (§11): (a) found no helpful-vote partner for f19; (b) is consistent with rating statistics. (c)–(e) remain. (training/labelled rows, aggregates only, minutes of CPU; scripts in `scripts/`, outputs under `outputs/amazon/`):

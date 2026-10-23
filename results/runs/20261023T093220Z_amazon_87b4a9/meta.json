@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "run_id": "20261023T093220Z_amazon_87b4a9",
+  "recorded_utc": "2026-10-23T09:32:27Z",
+  "started_utc": "2026-10-23T09:32:20Z",
+  "finished_utc": "2026-10-23T09:32:26Z",
+  "duration_min": 0.1,
+  "device": "rtx4060-laptop",
+  "device_details": {
+    "os": "Linux",
+    "platform": "Linux-5.10.16.3-microsoft-standard-WSL2-x86_64-with-glibc2.41",
+    "wsl": true,
+    "python": "3.13.15",
+    "cpu": "Intel(R) Core(TM) Ultra 9 185H",
+    "gpus": [
+      {
+        "name": "NVIDIA GeForce RTX 4060 Laptop GPU",
+        "driver": "571.96",
+        "memory": "8188 MiB"
+      }
+    ]
+  },
+  "description": "Phase 3 Task 1.1: raw GNN embedding sizes, ranks and PCA variance per block and relation, split 0",
+  "kind": "check",
+  "status": "ok",
+  "dataset": "amazon",
+  "feature_set": null,
+  "split_repeat": null,
+  "seed": null,
+  "git_commit": "1f236719f8ff945fd8233f09dd2d97a29c57128b",
+  "git_dirty": false,
+  "command": "scripts/embedding_sizes.py --dataset amazon",
+  "tags": [
+    "phase3"
+  ],
+  "source": "outputs/amazon/gnn_embed/sizes.csv",
+  "results_rows": 18,
+  "results_columns": [
+    "block",
+    "relation",
+    "epochs_run",
+    "pca_columns_in_block",
+    "n_nodes",
+    "dim",
+    "constant_dims_on_train",
+    "numerical_rank",
+    "effective_rank",
+    "var_k1",
+    "var_k2",
+    "var_k4",
+    "var_k8",
+    "var_k16",
+    "var_k32",
+    "var_k64",
+    "k_for_90pct",
+    "k_for_95pct",
+    "k_for_99pct"
+  ]
+}

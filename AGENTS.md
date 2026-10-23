@@ -6,9 +6,11 @@ Instructions for AI coding agents (primarily Claude Code) working in this reposi
 
 We ask: **does using a graph improve fraud classification over the same kind of model without one, and can a GNN's representations improve a tabular AutoML pipeline (df-analyze)?** The datasets are two graph fraud benchmarks with tabular node features: **YelpChi** (main; nodes are hotel and restaurant reviews, labelled spam by Yelp's filter, three review–review relations) and **Amazon** (replication; nodes are users, labelled fraudulent or not, three user–user relations). Both come from the preprocessed `.mat` files of the CARE-GNN repository. The model ladder (plan §1) is: (1) df-analyze on each node's own features (Model A); (2) df-analyze plus label-free neighbour aggregates per relation; (3) GraphSAGE with all edges removed; (4) heterogeneous GraphSAGE over all relations; (5) df-analyze plus self-supervised GNN embeddings; (6) df-analyze plus supervised, out-of-fold GNN features (needs a rule change). Every model on a dataset is trained on the same split and scored on the same frozen, grouped test set. The headline metric is PR-AUC, always reported next to the no-skill baseline (the test positive rate). Model 1 and the interfaces the later rungs need (node table, relation edge lists, feature blocks, feature sets) were implemented first. Phase 2 ([`docs/PHASE2_GNN_PLAN.md`](docs/PHASE2_GNN_PLAN.md)) adds Models 2 and 5 as feature blocks (`nbr`, `gnnssl`) and a comparison page; GraphSAGE (Models 3–4) comes later. **Phase 3 ([`docs/PHASE3_FEEDBACK_PLAN.md`](docs/PHASE3_FEEDBACK_PLAN.md)) is the current plan:** it answers the professor's feedback of 2026-10-21 (embedding size and DeepTune, whether training the GNN helps, the 4 important features, more datasets).
 
-## Current state (2026-10-21): read this first
+## Current state (2026-10-23): read this first
 
-**New on 2026-10-21:** the professor's feedback and the plan that answers it ([`docs/PHASE3_FEEDBACK_PLAN.md`](docs/PHASE3_FEEDBACK_PLAN.md); its open questions D1–D5 need the group); the [results database](#results-database) (`results/runs/`, empty so far); and commits no longer need a PR ([Git workflow](#git-workflow)).
+**New on 2026-10-21:** the professor's feedback and the plan that answers it ([`docs/PHASE3_FEEDBACK_PLAN.md`](docs/PHASE3_FEEDBACK_PLAN.md); its open questions D1–D5 need the group); the [results database](#results-database) (`results/runs/`); and commits no longer need a PR ([Git workflow](#git-workflow)).
+
+**New on 2026-10-23 (branch `exp/phase3-feedback`):** phase 3 Tasks 1, 3a and 5 done at the pilot budget (README, "Results (phase 3 pilots)"; RESEARCH_PLAN §11). Added: the untrained-GNN block `gnnrand`, `{keep: [...]}` feature variants (`only36`, `top4`), and the scripts `top_features.py`, `feedback_probes.py`, `embedding_sizes.py` and `repeat_summary.py --pairs`. All 24 runs and 9 probes or summaries are in the results database (tag `phase3`).
 
 The details are in [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md) §11 (decision log and every result) and §12 (next steps); a short summary is in the README ("Results").
 
@@ -21,11 +23,13 @@ The details are in [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md) §11 (decisi
 | Pilot ladder `pilot_m1/m2/m5` × all features / `_no36` | 10 trials; LightGBM, logistic regression, CatBoost; splits 0, 1, 2 (18 runs) | all features: m1 0.917–0.919, m2 0.923–0.938, m5 0.928–0.931; without #36: m1 0.524–0.574, m2 0.709–0.711, m5 0.665–0.688 |
 | Pre-registered 3-split verdicts (`scripts/repeat_summary.py`) | Δ > 0 on all splits, mean > SD, Nadeau–Bengio p < 0.05 over 15 CV folds | all features: m2 − m1 +0.010 supported; m5 − m1 +0.011 not distinguishable; m5 − m2 ≈ 0. Without #36: m2 − m1 +0.162 and m5 − m1 +0.129 supported; m5 − m2 −0.033 worse |
 | Training-only checks (`scripts/probe_blocks.py`, `progress_checks.py`, `feature_identity_checks.py`) | grouped CV folds of split 0 | random graph keeps most of the all-features gain and about half of the without-#36 gain; f19 alone 0.893 balanced accuracy; vote-ratio test negative; f13/f15/f18 consistent with rating statistics; embedding defaults mid-grid |
+| Phase 3 pilots (2026-10-23): `pilot_m5r_own_gnnrand[_no36]`, `pilot_m{1,2,5}_*_only36`, `pilot_m{1,2,5}_*_top4` | pilot settings, splits 0, 1, 2 (24 runs) | m5 − m5r (DGI training) −0.004 all features, +0.012 without #36, neither significant; m1_only36 0.887 vs m1 0.918 (worse); m1_top4 0.922 (not distinguishable from m1); m5_top4 0.941–0.944 |
+| Phase 3 checks (`top_features.py`, `feedback_probes.py`, `embedding_sizes.py`) | training CV folds, split 0 | permutation top 4 = `f19`, `f00`, `f23`, `f18` (≠ #36; the 4th is `f12` on splits 1–2); DGI's 64 dimensions per relation have effective rank 8–27 |
 
 **Known:**
-- The four #36 features carry most of Amazon's signal.
-- Without them, graph features help clearly on all 3 splits, and about half of that gain needs the real edges.
-- Simple neighbour means beat untuned DGI embeddings.
+- The four #36 features carry most of Amazon's signal, but they are not the best four: `f13` and `f15` add nothing once `f18` and `f19` are known, and four features (`f00`, `f18`, `f19`, `f23`) match all 25.
+- Without the #36 features, graph features help clearly on all 3 splits, and about half of that gain needs the real edges.
+- Simple neighbour means beat untuned DGI embeddings, and DGI training adds nothing measurable over the same encoder with random weights.
 - Published Amazon numbers use all 25 features.
 
 **Unknown:**
@@ -38,8 +42,9 @@ The details are in [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md) §11 (decisi
 **Not run yet:** #36 checks (c)–(e) in RESEARCH_PLAN §12, step 0; a variant without only the vote-derived columns; full-budget m2/m5; YelpChi beyond a smoke test; Models 3, 4, 6.
 
 **Where things are:**
-- **Code:** on `main`.
-- **Results database:** `results/runs/` (committed; see [Results database](#results-database)). Empty so far: the runs above have not been recorded in it.
+- **Code:** on `main`, except the phase 3 plan (branch `claude/awesome-wozniak-wm548a`) and the phase 3 work built on it (branch `exp/phase3-feedback`), neither merged yet.
+- **Results database:** `results/runs/` (committed; see [Results database](#results-database)). It holds the phase 3 runs of 2026-10-23; the earlier runs above have not been recorded in it (D5).
+- **Overnight queue (2026-10-23):** the job runner and its logs live in the WSL clone's `outputs/amazon/phase3_logs/` (never committed): `bin/runner.sh` runs each line of `queue.txt` not yet in `done.txt`, `bin/pilot.sh` runs one pilot rung and records it, and `bin/summary.sh` builds the comparison pages and a verdict table.
 - **Results:** in the WSL clone's `outputs/amazon*` and `data/processed/amazon*`. Split repeats 1–2 live in `outputs/amazon_repeat1/2`, which `pack_artifacts.py` does not pack (it packs repeat 0 only).
 - **Group bundle:** `fraud_artifacts_amazon_20261019T220559Z.tgz` (148 MB, split 0), on OneDrive.
 - **CFPB-era files** moved out of the clone to `~/projects/fraud-detect-gnn-cfpb-archive/`.
