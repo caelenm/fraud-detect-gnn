@@ -155,7 +155,7 @@ Stages (plan §7):
 3. **`split`:** grouped, stratified 60/40 train/test split and 5 grouped CV folds on train (`StratifiedGroupKFold`, seeded); `train_ids.csv`, `test_ids.csv`, `cv_folds.csv`, `split_summary.json`; the split and fold are added to `nodes.parquet`.
 4. **`features`:** the `own` feature block (`features/own.parquet`) and `column_spec.json` (binary / ordinal / continuous, decided on training nodes only).
 5. **`audit`:** counts and statistics only: counts against plan §2, per-feature statistics and univariate AUROC (≥ 0.85 flagged as a possible shortcut), duplicate rows within and across splits, group sizes, edge counts, degrees and training-only edge homophily (`outputs/<dataset>/reports/audit.md`).
-6. **`neighbour_agg`:** the `nbr` block (Model 2) and `features/nbr.spec.json`, for feature sets that use it.
+6. **`neighbour_agg`:** the `nbr` block (Model 2) and `features/nbr.spec.json`, and the degree-only `deg` block (null-graph control N1: log1p(degree) per relation), for feature sets that use them.
 7. **`gnn_embed`:** the `gnnssl` block (Model 5), `features/gnnssl.spec.json` and `outputs/<dataset>/gnn_embed/`, for feature sets that use it.
 8. **`df_analyze_input`:** train/test tables for the active feature set, joining its blocks on `node_id` in the order of the saved IDs, with only feature columns and `target`. Column types come from `column_spec.json` (`own`) and each other block's `<block>.spec.json`.
 9. **`df_analyze`:** run df-analyze with `--df-train` / `--df-tests`, then **verify** that its exported `X_train`/`X_test`/`y_*` match our saved split row for row, and that its inferred column types match `column_spec.json` with no feature dropped. If either check fails, stop and ask.

@@ -22,7 +22,7 @@ from fraud_detect.config import (
 )
 from fraud_detect.features import blocks
 from fraud_detect.features import graph as graph_module
-from fraud_detect.features.graph import build_nbr_block
+from fraud_detect.features.graph import build_deg_block, build_nbr_block
 from fraud_detect.models import probe
 from fraud_detect.models.df_analyze import df_analyze_names
 
@@ -85,6 +85,58 @@ def test_nbr_block_is_label_blind_valid_and_complete():
     blocks.validate_block(C.NBR_BLOCK, block)  # prefixed, numeric, no nulls
     assert len(block) == len(own) and block[C.NODE_ID].is_unique
     assert block.shape[1] == 1 + 2 * (3 + 1)
+
+
+def test_deg_block_is_nbr_degrees_only_label_blind_and_deterministic():
+    nodes, own, edges = fake_feature_graph(n=80, width=3)
+    assert_label_blind(build_deg_block, nodes, own, edges)
+    block = build_deg_block(own, edges)
+    blocks.validate_block(C.DEG_BLOCK, block)
+    assert list(block.columns) == [C.NODE_ID, *(f"deg__{r}_log1p_degree" for r in edges)]
+    pd.testing.assert_frame_equal(block, build_deg_block(own, edges))
+    nbr = build_nbr_block(own, edges)
+    for r in edges:
+        assert np.array_equal(
+            block[f"deg__{r}_log1p_degree"], nbr[f"nbr__{r}_log1p_degree"]
+        )
+    # Only the node set matters, never a feature value.
+    zeros = own.assign(**{c: 0.0 for c in own.columns if c != C.NODE_ID})
+    pd.testing.assert_frame_equal(build_deg_block(zeros, edges), block)
+
+
+def test_neighbour_agg_stage_builds_the_deg_block(tmp_path):
+    path, config = fake_dataset(tmp_path, n_nodes=120)
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["feature_sets"]["n1_own_deg"] = [C.OWN_BLOCK, C.DEG_BLOCK]
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    args = ["--config", str(path), "--to", "df_analyze_input",
+            "--set", "feature_set=n1_own_deg"]  # fmt: skip
+    assert main(args) == 0
+    p = get_paths(config)
+    block = pd.read_parquet(p.block_file(C.DEG_BLOCK))
+    assert list(block.columns) == [
+        C.NODE_ID, "deg__aaa_log1p_degree", "deg__bbb_log1p_degree"
+    ]  # fmt: skip
+    assert not p.block_file(C.NBR_BLOCK).exists()  # n1 uses no nbr block
+    n1 = get_paths({**config, "feature_set": "n1_own_deg"})
+    train = pd.read_parquet(n1.df_analyze_input_dir / "train.parquet")
+    assert train.shape[1] == 5 + 2 + 1  # own, two degrees, target
+
+
+def test_a_per_repeat_variant_keeps_that_repeats_columns():
+    from fraud_detect.config import resolve_variants
+
+    config = load_config(DEFAULT_CONFIG)
+    config["split"]["n_repeats"] = 3
+    spec = config["feature_variants"]["top4no19"]["keep_by_repeat"]
+    for k in range(3):
+        config["split"]["repeat"] = k
+        resolved = with_dataset(config, "amazon")["feature_variants"]
+        assert resolved["top4no19"] == {"keep": spec[k]}
+        assert resolved["no19"] == ["own__f19"]  # plain variants unchanged
+        assert "own__f19" not in spec[k]
+    with pytest.raises(ConfigError, match="split repeat 1"):
+        resolve_variants({"x": {"keep_by_repeat": {0: ["own__f00"]}}}, 1)
 
 
 def test_rewiring_keeps_degrees_roughly_and_changes_partners():

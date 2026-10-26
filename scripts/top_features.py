@@ -10,6 +10,11 @@ Next to it, each feature's univariate AUROC on the training nodes. Writes
 outputs/<dataset>/probe/top_features.csv and says whether the top 4 are the
 config's `no36` features (issue #36). Never reads a test row; a check, not a
 result.
+
+With --variant no19 (F5, 2026-10-26) the probe is fit on that variant's own
+columns only (here the 24 other than f19), and the table is written to
+top_features_<variant>.csv; its top 4 is fixed in the config before any run
+uses it.
 """
 
 from __future__ import annotations
@@ -29,6 +34,7 @@ from fraud_detect.config import (
     load_config,
     with_dataset,
 )
+from fraud_detect.features import blocks
 from fraud_detect.models import probe
 from fraud_detect.runstate import atomic_write_csv
 
@@ -45,6 +51,9 @@ def main(argv: list[str] | None = None) -> int:
         default=0,
         help="split repeat (0 = the usual folders; k = <dataset>_repeat<k>)",
     )
+    parser.add_argument(
+        "--variant", help="rank only this feature variant's own columns, e.g. no19"
+    )
     args = parser.parse_args(argv)
     try:
         config = load_config(args.config)
@@ -58,12 +67,21 @@ def main(argv: list[str] | None = None) -> int:
     p = get_paths(config)
     start = time.monotonic()
     own = pd.read_parquet(p.block_file(C.OWN_BLOCK))
+    variants = config.get("feature_variants") or {}
+    if args.variant:
+        name = f"{C.OWN_BLOCK}_{args.variant}"
+        try:
+            own = blocks.own_view(own, name, variants)
+        except blocks.BlockError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
     table = probe.feature_ranking(
         own, pd.read_csv(p.train_ids), pd.read_csv(p.cv_folds), int(config["seed"])
     )
-    flagged = set((config.get("feature_variants") or {}).get("no36") or [])
+    flagged = set(variants.get("no36") or [])
     table["in_no36"] = table["column"].isin(flagged)
-    out = p.probe_dir / "top_features.csv"
+    suffix = f"_{args.variant}" if args.variant else ""
+    out = p.probe_dir / f"top_features{suffix}.csv"
     atomic_write_csv(out, table)
     shown = ["column", "perm_importance_mean", "perm_importance_sd", "univariate_auroc",
              "rank_permutation", "rank_univariate_auroc", "in_no36"]  # fmt: skip

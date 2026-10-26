@@ -28,13 +28,19 @@ OWN_BLOCK = "own"
 # GNN encoder with its seeded initial weights and no training: the untrained
 # control of phase 3, Task 3a).
 NBR_BLOCK = "nbr"
+# deg__upu_log1p_degree: log1p(degree) per relation and nothing else, the
+# degree-only null-graph control N1 (2026-10-26). Same values as nbr's
+# log1p_degree columns, so N1 - B is the degree part of the nbr gain.
+DEG_BLOCK = "deg"
 GNNSSL_BLOCK = "gnnssl"
 GNNRAND_BLOCK = "gnnrand"
+# The blocks the neighbour_agg stage builds.
+NBR_BLOCK_KINDS: tuple[str, ...] = (NBR_BLOCK, DEG_BLOCK)
 # The blocks the gnn_embed stage builds.
 GNN_BLOCK_KINDS: tuple[str, ...] = (GNNSSL_BLOCK, GNNRAND_BLOCK)
 # Every block name is one of these kinds, optionally followed by _<variant>
 # (see features/blocks.py).
-BLOCK_KINDS: tuple[str, ...] = (OWN_BLOCK, NBR_BLOCK, *GNN_BLOCK_KINDS)
+BLOCK_KINDS: tuple[str, ...] = (OWN_BLOCK, *NBR_BLOCK_KINDS, *GNN_BLOCK_KINDS)
 
 # Columns that identify, label or place a node. They must never appear in any
 # feature block or model input (AGENTS.md leakage invariant 7).

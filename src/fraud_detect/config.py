@@ -77,6 +77,7 @@ def with_dataset(config: dict[str, Any], dataset: str | None) -> dict[str, Any]:
     repeat, n_repeats = int(out["split"]["repeat"]), int(out["split"]["n_repeats"])
     if not 0 <= repeat < max(n_repeats, 1):
         raise ConfigError(f"split.repeat {repeat} is outside 0..{n_repeats - 1}")
+    out["feature_variants"] = resolve_variants(out.get("feature_variants") or {}, repeat)
     feature_set = out.get("feature_set")
     if feature_set not in out["feature_sets"]:
         raise ConfigError(
@@ -84,6 +85,26 @@ def with_dataset(config: dict[str, Any], dataset: str | None) -> dict[str, Any]:
             + ", ".join(out["feature_sets"])
         )
     check_feature_sets(out)
+    return out
+
+
+KEEP_BY_REPEAT = "keep_by_repeat"
+
+
+def resolve_variants(variants: dict[str, Any], repeat: int) -> dict[str, Any]:
+    """A {keep_by_repeat: {0: [...], 1: [...]}} variant keeps other own columns
+    on each split repeat (F5: a top 4 ranked on each split's own training
+    folds). It becomes {keep: [...]} for the active repeat; others are kept."""
+    out: dict[str, Any] = {}
+    for name, spec in variants.items():
+        if isinstance(spec, dict) and set(spec) == {KEEP_BY_REPEAT}:
+            by_repeat = {int(k): v for k, v in (spec[KEEP_BY_REPEAT] or {}).items()}
+            if repeat not in by_repeat:
+                raise ConfigError(
+                    f"feature_variants.{name} lists no columns for split repeat {repeat}"
+                )
+            spec = {"keep": list(by_repeat[repeat])}
+        out[name] = spec
     return out
 
 

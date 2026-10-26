@@ -121,6 +121,16 @@ feature_sets:
   pilot_m1_own_top4: [own_top4]
   pilot_m2_own_nbr_top4: [own_top4, nbr_top4]
   pilot_m5_own_gnnssl_top4: [own_top4, gnnssl_top4]
+  # 2026-10-26 (RQ1-RQ3, RESEARCH_PLAN §11): without the leaked vote column f19,
+  # the candidate Amazon headline. B, E1, E2, E3 and the degree-only null-graph
+  # control N1 (deg needs no variant: it uses no feature value).
+  pilot_m1_own_no19: [own_no19]
+  pilot_m2_own_nbr_no19: [own_no19, nbr_no19]
+  pilot_m5_own_gnnssl_no19: [own_no19, gnnssl_no19]
+  pilot_m5r_own_gnnrand_no19: [own_no19, gnnrand_no19]
+  pilot_n1_own_deg_no19: [own_no19, deg]
+  # F5: B on the per-split top 4 without f19 (feature_variants.top4no19).
+  pilot_m1_own_top4no19: [own_top4no19]
 
 # Input variants: a block named <kind>_<variant> (own_no36, nbr_no36,
 # gnnssl_no36) is built from the own features without the variant's columns:
@@ -135,6 +145,19 @@ feature_variants:
   # ranking (scripts/top_features.py, 2026-10-23). It differs from only36:
   # f13 and f15 add little once f18 and f19 are known.
   top4: {keep: [own__f00, own__f18, own__f19, own__f23]}
+  # Amazon only (2026-10-26): f19 alone. It is GraphRfi column 30, the minimum
+  # number of unhelpful votes on one of the user's reviews, and the label is
+  # built from those votes (RESEARCH_PLAN §11, #36 checks (c)-(d)).
+  no19: [own__f19]
+  # Amazon only (2026-10-26, F5): the top 4 of the 24 columns other than f19
+  # by permutation importance, ranked on each split's own training folds
+  # (scripts/top_features.py --variant no19 --repeat k; outputs/amazon*/probe/
+  # top_features_no19.csv). Fixed here before any run used them.
+  top4no19:
+    keep_by_repeat:
+      0: [own__f07, own__f15, own__f18, own__f23]
+      1: [own__f15, own__f18, own__f23, own__f24]
+      2: [own__f13, own__f18, own__f23, own__f24]
 
 neighbour_agg:
   # Model 2's `nbr` block. For each relation of the dataset (not homo): the

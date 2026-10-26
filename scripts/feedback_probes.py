@@ -20,6 +20,12 @@ embeddings run on the CPU. Tables go to outputs/<dataset>/probe/:
   raw embedding without PCA, for all features and no36. The pre-registered
   choice (plan Task 1.3) is marked at DGI size 64: the smallest k whose mean CV
   PR-AUC is within one standard error (SD / sqrt(folds)) of the best k's.
+- `z1` (RQ3, Z1, 2026-10-26) -> z1_size_sweep_<variant>.csv: on one variant
+  (--variant, default no19), own + gnnssl (E2, DGI size 64) and own + gnnrand
+  (E3, 5 initialisation seeds) at d = 2, 4, 8, 16, 32, 64 PCA components per
+  relation and raw, next to own alone, with each raw embedding's effective
+  rank per relation. The same one-standard-error rule marks the chosen d per
+  block (for gnnrand, on the mean over the initialisation seeds).
 
 Checks on training folds only, not results: no test row is read.
 """
@@ -48,11 +54,21 @@ from fraud_detect.models import probe
 from fraud_detect.pipeline import load_edges, split_masks
 from fraud_detect.runstate import atomic_write_csv
 
-TASKS = ("only36", "gnnrand", "sizes")
+TASKS = ("only36", "gnnrand", "sizes", "z1")
 INIT_SEEDS = 5  # gnnrand: seeds seed, seed + 1, ...
 DIMS, PCA_KS = (16, 32, 64), (1, 2, 4, 8, 16, 32)
+Z1_KS = (2, 4, 8, 16, 32, 64)
 DEFAULT_DIM = 64
 RAW = "raw"
+
+
+def effective_rank(z: np.ndarray, fit_mask: np.ndarray) -> float:
+    """exp(entropy) of the normalised singular values of the centred training
+    rows, as in scripts/embedding_sizes.py."""
+    train = z[fit_mask].astype(np.float64)
+    s = np.linalg.svd(train - train.mean(axis=0), compute_uv=False)
+    p = s / s.sum()
+    return float(np.exp(-(p[p > 0] * np.log(p[p > 0])).sum()))
 
 
 def probe_row(own_input, extra, train_ids, folds, seed, **labels) -> dict:
@@ -89,6 +105,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--dataset", help="yelpchi or amazon")
     parser.add_argument("--task", nargs="+", choices=TASKS, default=list(TASKS))
+    parser.add_argument("--variant", default="no19", help="feature variant for z1")
     args = parser.parse_args(argv)
     try:
         config = with_dataset(load_config(args.config), args.dataset)
@@ -108,8 +125,8 @@ def main(argv: list[str] | None = None) -> int:
     edges = {r: load_edges(p.relation_file(r)) for r in relations}
     cfg = replace(ssl.SSLConfig.from_config(config["gnn_embed"], seed), device="cpu")
     inputs = {"all": own}
-    for v in ("no36", "only36", "top4"):
-        if v in variants:
+    for v in ("no36", "only36", "top4", args.variant):
+        if v in variants and v not in inputs:
             inputs[v] = blocks.own_view(own, f"own_{v}", variants)
     common = (train_ids, folds, seed)
 
@@ -191,6 +208,48 @@ def main(argv: list[str] | None = None) -> int:
         atomic_write_csv(p.probe_dir / "embedding_size_sweep.csv", table)
         print(table[["variant", "dgi_size", "k", "n_features", "cv_pr_auc_mean",
                      "cv_pr_auc_std", "chosen"]].to_string(index=False))  # fmt: skip
+
+    if "z1" in args.task:
+        variant = args.variant
+        if variant not in inputs:
+            print(f"error: no feature variant {variant!r}", file=sys.stderr)
+            return 2
+        own_input = inputs[variant]
+        rows = [probe_row(own_input, None, *common, variant=variant, block="own")]
+        embeddings = {(C.GNNSSL_BLOCK, seed): dgi(variant, DEFAULT_DIM)}
+        for i in range(INIT_SEEDS):
+            rand = ssl.gnnrand_block(own_input, edges, fit_mask,
+                                     replace(cfg, seed=seed + i))  # fmt: skip
+            embeddings[C.GNNRAND_BLOCK, seed + i] = rand.embeddings
+        for (kind, init), emb in embeddings.items():
+            labels = {"variant": variant, "block": kind, "init_seed": init}
+            labels |= {
+                f"eff_rank_{r}": effective_rank(z, fit_mask) for r, z in emb.items()
+            }
+            for k in Z1_KS:
+                block, _ = ssl.pca_block(emb, fit_mask, k, seed)
+                rows.append(probe_row(own_input, block, *common, k=k, **labels))
+            rows.append(
+                probe_row(own_input, raw_block(emb, kind), *common, k=RAW, **labels)
+            )
+            print(f"  z1 {kind} init {init} done ({time.monotonic() - start:.0f} s)",
+                  flush=True)  # fmt: skip
+        table = pd.DataFrame(rows)
+        table["chosen"] = False
+        for kind in (C.GNNSSL_BLOCK, C.GNNRAND_BLOCK):
+            sub = table[table["block"] == kind]
+            mean = sub.groupby("k", sort=False).agg(
+                cv_pr_auc_mean=("cv_pr_auc_mean", "mean"),
+                cv_pr_auc_std=("cv_pr_auc_std", "mean"),
+                n_folds=("n_folds", "first"),
+            )
+            k = choose_k(mean.reset_index())
+            table.loc[sub.index[sub["k"] == k], "chosen"] = True
+            print(
+                f"{variant} {kind}: pre-registered choice d = {k}; CV PR-AUC by d "
+                + ", ".join(f"{d}: {v:.4f}" for d, v in mean["cv_pr_auc_mean"].items())
+            )
+        atomic_write_csv(p.probe_dir / f"z1_size_sweep_{variant}.csv", table)
 
     print(f"Saved to {p.probe_dir} in {time.monotonic() - start:.0f} s. Training folds "
           "only; checks, not results.")  # fmt: skip

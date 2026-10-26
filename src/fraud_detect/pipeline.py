@@ -457,16 +457,19 @@ def run_neighbour_agg(ctx: Context) -> None:
             f"neighbour_agg.statistics is {cfg['statistics']}; only [mean] is "
             "implemented (1-hop max and 2-hop means are later ablations)."
         )
-    names = _blocks_to_build(ctx, C.NBR_BLOCK)
+    names = _blocks_to_build(ctx, *C.NBR_BLOCK_KINDS)
     if not names:
         return
     edges = _relation_edges(ctx)
     for name in names:
         own_input = _own_input(ctx, name)
         try:
-            block = graph.build_nbr_block(
-                own_input, edges, log1p_degree=bool(cfg["log1p_degree"]), name=name
-            )
+            if blocks.parse_block(name)[0] == C.DEG_BLOCK:
+                block = graph.build_deg_block(own_input, edges, name=name)
+            else:
+                block = graph.build_nbr_block(
+                    own_input, edges, log1p_degree=bool(cfg["log1p_degree"]), name=name
+                )
         except ValueError as e:
             raise StageError(str(e)) from e
         spec = _write_block(p, name, block)
@@ -1317,8 +1320,9 @@ STAGES: list[Stage] = [
                      *(p.reports_dir / t for t in AUDIT_TABLES)]),
     # The graph blocks come right after audit and count as done when the
     # active feature set does not use them (see block_outputs).
-    Stage("neighbour_agg", "nbr block: label-free neighbour means per relation",
-          run_neighbour_agg, block_outputs(C.NBR_BLOCK)),
+    Stage("neighbour_agg", "nbr block: label-free neighbour means per relation "
+          "(and the degree-only deg control)", run_neighbour_agg,
+          lambda p: [f for k in C.NBR_BLOCK_KINDS for f in block_outputs(k)(p)]),
     Stage("gnn_embed", "gnnssl block: self-supervised DGI embeddings per relation "
           "(and the untrained gnnrand control)", run_gnn_embed, gnn_embed_outputs),
     Stage("df_analyze_input", "df-analyze train/test tables for the feature set",

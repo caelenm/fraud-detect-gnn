@@ -102,3 +102,20 @@ def build_nbr_block(
         if log1p_degree:
             out[f"{name}{sep}{relation}_log1p_degree"] = np.log1p(degree)
     return pd.DataFrame(out)
+
+
+def build_deg_block(
+    features: pd.DataFrame,
+    edges_by_relation: Mapping[str, np.ndarray],
+    name: str = C.DEG_BLOCK,
+) -> pd.DataFrame:
+    """The `deg` block (null-graph control N1): log1p of each node's degree per
+    relation, with the same values as the nbr block's log1p_degree columns.
+    The own block only fixes the nodes; none of its values is used."""
+    x, _ = own_matrix(features)
+    n = len(x)
+    out: dict[str, np.ndarray] = {C.NODE_ID: np.arange(n, dtype=np.int64)}
+    for relation, edges in edges_by_relation.items():
+        degree = np.asarray(adjacency(edges, n).sum(axis=1)).ravel()
+        out[f"{name}{C.BLOCK_SEPARATOR}{relation}_log1p_degree"] = np.log1p(degree)
+    return pd.DataFrame(out)
