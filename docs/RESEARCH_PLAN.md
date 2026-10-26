@@ -681,6 +681,16 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
     - N1 − B "supported" means degree alone accounts for part of the graph gain. E1 − N1 "supported" means neighbour means add something beyond degree. Whether that something is real structure is N2's question, not tonight's.
     - F5 "not distinguishable" or positive means four non-vote columns carry the 24-column result. "Worse" means they do not.
   - **Not run tonight:** N2 (needs `igraph` or a decision on the rewiring tool), V1, GraphSAGE, E4, YelpChi, full-budget runs.
+  - **Status:** Caelen put the queue on hold the same day. It was stopped 2 minutes into the Z1 probe, before any df-analyze run; nothing was recorded.
+- **2026-10-26 (N2 probe, RQ2; training CV of split 0 only, no19; `scripts/null_graph_probe.py`; results DB `20261026T150141Z_amazon_dd4a8c`).**
+  - **Rewiring.** `features/graph.py` `swap_rewire`: double-edge swaps (a-b, c-d → a-d, c-b), 10 per edge, rejecting self-loops, existing edges and repeats. It is NumPy only, so no `igraph` is needed. Every node keeps exactly its degree in every relation, which the script checks each time.
+  - **How random the rewired graphs are.** Real edges still present after rewiring: U-P-U 22%, U-S-U 36%, U-V-U 16%. U-S-U is dense (3.57M edges on 11,944 nodes), so a random graph with the same degrees necessarily shares many of its edges. U-S-U takes about 55 s per rewiring on one CPU.
+  - **Probe CV PR-AUC** (the fixed HistGradientBoosting probe on 5 grouped folds): B 0.498; N1 (+ deg) 0.630; N2 (+ nbr on the rewired graph) 0.627 ± 0.016 over 5 rewiring seeds (0.607–0.649); E1 (+ nbr on the real graph) 0.719.
+  - **Split of E1 − B = +0.221:** degree (N1 − B) +0.132; neighbour columns on a random graph (N2 − N1) −0.004; real structure (E1 − N2) +0.092.
+  - **Reading** (a training-CV check, not a result; the pre-registered pilots decide). Without `f19`, degree alone gives about 60% of the neighbour-mean gain. Neighbour means on a degree-matched random graph add nothing beyond degree. The real edges add about 0.09 on top. Because the rewired U-S-U keeps 36% of the real edges, E1 − N2 probably understates the real-structure part.
+  - **Side finding:** own features without `f19` score 0.498 on CV, the same as without all four #36 features (0.500, 2026-10-19). That fits the column map: `f13`, `f15` and `f18` can be computed from the star counts `f02`–`f06`, so dropping them loses nothing, and `f19` alone carries the #36 signal.
+  - **Not done:** N2 pilot runs need a pipeline block of neighbour means on the rewired graph, with the rewiring seed tied to the split repeat and the graph saved for N3. That block is not built, and the runs need a go. The question of which rewiring tool to use (`igraph`) is moot if the group accepts this implementation.
+  - **Recording note:** the results-DB entry's `git_dirty` is true. The only uncommitted change at the time was README text; the probe code was committed (`b75f377`).
 
 ---
 
