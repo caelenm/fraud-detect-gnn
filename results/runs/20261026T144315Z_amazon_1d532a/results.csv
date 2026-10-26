@@ -1,0 +1,15 @@
+identity,n_users,share_holding,max_abs_error
+f02 + ... + f06 = f00,5183,1.0,0.0
+f07 + ... + f11 = 1,5183,1.0,1.1102230246251563e-16
+f12 = f07 + f08,5183,1.0,0.0
+f13 = f10 + f11,5183,1.0,0.0
+"f14 = entropy(f07..f11), natural log, within 1e-4",5183,1.0,4.999869671329371e-05
+"f14 = entropy(f07..f11), log2, within 1e-4",5183,0.6465367547752267,0.701437527837727
+f07 = f02 / f00,5183,1.0,0.0
+f16 >= f15 >= f17 (max >= median >= min),5183,1.0,
+f16 >= f18 >= f17 (max >= mean >= min),5183,1.0,
+f22 = 1 exactly when f20 = 0,5183,1.0,
+"f22 in {0, 1}",5183,1.0,
+"f24 in {-1, 0, 1}",5183,1.0,
+f19 is a non-negative integer,5183,1.0,
+"f00, f02..f06 are non-negative integers",5183,1.0,

@@ -46,3 +46,6 @@ kaggle.json
 .DS_Store
 .vscode/
 .idea/
+
+# Draft issue/PR text for a person to post; never committed
+docs/drafts/

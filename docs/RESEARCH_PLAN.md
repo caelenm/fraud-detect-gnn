@@ -635,6 +635,34 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
     - **Z1:** E2 and E3 at d ∈ {2, 4, 8, 16, 32, 64} and raw, with effective rank (training-CV probe).
     - Others (V1 rebuilding `f19` from the raw reviews, P1 GADBench, S1 an ungrouped YelpChi split, FB full budget) need a decision first.
   - **Out of scope until decided:** V1, `igraph` for N2, P1, S1, GraphSAGE (E5, E6, N3), E4, any YelpChi run, backfilling the results database.
+- **2026-10-26 (issue #36 checks (c) and (d): the Amazon column map).**
+  - **(d) CARE-GNN's script.** `amazon_preprocess.py` at `a64ff75` (Apache-2.0; SHA-256 `af235d9c…a7233`; read through the GitHub API, not cloned) builds 36 GraphRfi-style features per user (`build_features`, lines 230–271; `cal_votes`, lines 107–125). Columns 19–30 are vote statistics: 19–20 total helpful and unhelpful votes, 21–24 helpful and unhelpful ratio and mean, 25–30 the median, max and min of helpful votes, then of unhelpful votes. The saved file keeps:
+
+    ```python
+    # filter polluted features
+    new_features = features[:, :19]
+    new_features = np.hstack([new_features, features[:, 30:]])
+    ```
+
+    So the 25 columns are 0–18 and 30–35, and **`f19` is column 30, `min(unhelp)`: the smallest number of unhelpful votes on any one of the user's reviews.** The filter meant to drop the vote columns but is off by one. The label (lines 284–296) uses the same votes: users with ≥ 20 votes, helpful / total > 0.8 benign and < 0.2 fraud. One caveat: the script loads a saved `amz_features_36.npz` (line 316) instead of calling `build_features`, so the map is checked against our data below.
+  - **(c) Identities on split 0's training users** (`scripts/feature_identity_checks.py`, `probe/column_map_check.csv`, results DB `20261026T144315Z_amazon_1d532a`): all hold for 5,183 / 5,183 users. f02 + … + f06 = f00 and f07 = f02 / f00 exactly; f07 + … + f11 = 1; f12 = f07 + f08 and f13 = f10 + f11 exactly; f14 = the natural-log entropy of f07–f11 within 1e-4 (stored to 4 decimals; log2 fails); f16 ≥ f15, f18 ≥ f17; f22 = 1 exactly when f20 = 0; f24 ∈ {−1, 0, 1}; f19 is a non-negative integer.
+  - **Column map (confirmed by (c) and (d)):**
+
+    | Column | Meaning (GraphRfi column) | Family |
+    |---|---|---|
+    | f00 | number of products the user rated (0) | activity |
+    | f01 | length of the username (1) | profile |
+    | f02–f06 | number of 1- to 5-star ratings (2–6) | rating |
+    | f07–f11 | share of 1- to 5-star ratings (7–11) | rating |
+    | f12, f13 | share of negative (1–2 star) and positive (4–5 star) ratings (12–13) | rating |
+    | f14 | entropy of the rating shares (14) | rating |
+    | f15–f18 | median, max, min and mean rating (15–18) | rating |
+    | **f19** | **minimum unhelpful votes on any one review (30)** | **vote: the label is built from votes** |
+    | f20–f22 | days between first and last review; time entropy; all reviews on one date (31–33) | time |
+    | f23 | mean summary length (34) | text |
+    | f24 | review sentiment, −1 / 0 / 1 (35) | text |
+
+  - **Reading.** `f19` is label-derived by construction and is the only vote column left. `f13`, `f15` and `f18` are rating statistics: close in meaning to a "downvoted user" label, but not built from votes, so they are not leaks. `no19` is the leak-controlled variant; `no36` stays as the stricter one. What remains unproven without the raw reviews (V1): that `amz_features_36.npz` was built by this `build_features`; the identities make that very likely for columns 0–18 and 31–35, but none of them tests column 30 directly.
 
 ---
 
