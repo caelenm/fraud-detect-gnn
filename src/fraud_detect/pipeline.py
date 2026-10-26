@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -450,6 +451,60 @@ def _type_counts(spec: dict[str, Any]) -> str:
     )
 
 
+def rewired_edges(
+    ctx: Context, edges: dict[str, np.ndarray], n_nodes: int
+) -> dict[str, np.ndarray]:
+    """N2's null graph: each relation rewired by double-edge swaps so every
+    node keeps exactly its degree (features/graph.py swap_rewire). The seed is
+    tied to the split repeat (the split seed, plus the relation's index), and
+    the graph is saved under graph_rewired/seed<split seed>/ and reused while
+    its manifest matches, so a later GNN control (N3) sees the same graph.
+    Built from the edge lists only, never a label or a feature."""
+    p, seed = ctx.paths, ctx.split_seed
+    swaps = float(ctx.config["neighbour_agg"]["rewire_swaps_per_edge"])
+    folder = p.rewired_dir(seed)
+    manifest = folder / "manifest.json"
+    source = json.loads(p.graph_manifest.read_text(encoding="utf-8"))
+    settings = {
+        "split_seed": seed,
+        "swaps_per_edge": swaps,
+        "n_nodes": n_nodes,
+        "mat_sha256": source.get("mat_sha256"),
+        "relations": {
+            r: {"seed": seed + j, "n_edges": int(e.shape[1])}
+            for j, (r, e) in enumerate(edges.items())
+        },  # fmt: skip
+    }
+    if manifest.is_file():
+        saved = json.loads(manifest.read_text(encoding="utf-8"))
+        if saved.get("settings") == settings:
+            print(f"Reusing the rewired graph in {folder}")
+            return {r: load_edges(folder / f"{r}.npz") for r in edges}
+    out: dict[str, np.ndarray] = {}
+    stats: dict[str, dict[str, float]] = {}
+    for r, e in edges.items():
+        start = time.monotonic()
+        new, made = graph.swap_rewire(e, n_nodes, settings["relations"][r]["seed"], swaps)
+        before = np.bincount(e.ravel(), minlength=n_nodes)
+        if new.shape != e.shape or not np.array_equal(
+            before, np.bincount(new.ravel(), minlength=n_nodes)
+        ):
+            raise StageError(f"Rewiring {r} changed the edge count or a degree")
+        key = n_nodes  # (src, dst) -> one integer, to count surviving real edges
+        kept = np.isin(new[0].astype(np.int64) * key + new[1],
+                       e[0].astype(np.int64) * key + e[1]).mean()  # fmt: skip
+        atomic_write(folder / f"{r}.npz",
+                     lambda tmp, x=new: np.savez_compressed(tmp, edges=x))  # fmt: skip
+        stats[r] = {"swaps_made": made, "swaps_per_edge_made": made / max(e.shape[1], 1),
+                    "real_edges_kept": float(kept),
+                    "seconds": round(time.monotonic() - start, 1)}  # fmt: skip
+        out[r] = new
+        print(f"Rewired {r}: {made / max(e.shape[1], 1):.1f} swaps per edge, "
+              f"{kept:.1%} of real edges kept, every degree unchanged")  # fmt: skip
+    atomic_write_json(manifest, {"settings": settings, "stats": stats})
+    return out
+
+
 def run_neighbour_agg(ctx: Context) -> None:
     p, cfg = ctx.paths, ctx.config["neighbour_agg"]
     if list(cfg["statistics"]) != ["mean"]:
@@ -461,14 +516,21 @@ def run_neighbour_agg(ctx: Context) -> None:
     if not names:
         return
     edges = _relation_edges(ctx)
+    rewired: dict[str, np.ndarray] | None = None
     for name in names:
         own_input = _own_input(ctx, name)
+        kind = blocks.parse_block(name)[0]
         try:
-            if blocks.parse_block(name)[0] == C.DEG_BLOCK:
+            if kind == C.DEG_BLOCK:
                 block = graph.build_deg_block(own_input, edges, name=name)
             else:
+                if kind == C.NBRRW_BLOCK and rewired is None:
+                    rewired = rewired_edges(ctx, edges, len(own_input))
                 block = graph.build_nbr_block(
-                    own_input, edges, log1p_degree=bool(cfg["log1p_degree"]), name=name
+                    own_input,
+                    rewired if kind == C.NBRRW_BLOCK else edges,
+                    log1p_degree=bool(cfg["log1p_degree"]),
+                    name=name,
                 )
         except ValueError as e:
             raise StageError(str(e)) from e

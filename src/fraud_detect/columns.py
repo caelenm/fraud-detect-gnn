@@ -32,10 +32,13 @@ NBR_BLOCK = "nbr"
 # degree-only null-graph control N1 (2026-10-26). Same values as nbr's
 # log1p_degree columns, so N1 - B is the degree part of the nbr gain.
 DEG_BLOCK = "deg"
+# nbrrw__upu_mean_f00: the nbr block built on a graph rewired so every node
+# keeps exactly its degree, the null-graph control N2 (2026-10-26).
+NBRRW_BLOCK = "nbrrw"
 GNNSSL_BLOCK = "gnnssl"
 GNNRAND_BLOCK = "gnnrand"
 # The blocks the neighbour_agg stage builds.
-NBR_BLOCK_KINDS: tuple[str, ...] = (NBR_BLOCK, DEG_BLOCK)
+NBR_BLOCK_KINDS: tuple[str, ...] = (NBR_BLOCK, DEG_BLOCK, NBRRW_BLOCK)
 # The blocks the gnn_embed stage builds.
 GNN_BLOCK_KINDS: tuple[str, ...] = (GNNSSL_BLOCK, GNNRAND_BLOCK)
 # Every block name is one of these kinds, optionally followed by _<variant>

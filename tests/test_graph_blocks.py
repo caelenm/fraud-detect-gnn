@@ -123,6 +123,72 @@ def test_neighbour_agg_stage_builds_the_deg_block(tmp_path):
     assert train.shape[1] == 5 + 2 + 1  # own, two degrees, target
 
 
+def test_neighbour_agg_stage_builds_nbrrw_on_a_saved_rewired_graph(tmp_path):
+    path, config = fake_dataset(tmp_path, n_nodes=120)
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["feature_sets"]["n2_own_nbrrw"] = [C.OWN_BLOCK, C.NBRRW_BLOCK]
+    raw["feature_sets"]["m2_n2"] = [C.OWN_BLOCK, C.NBR_BLOCK, C.NBRRW_BLOCK]
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    args = ["--config", str(path), "--to", "df_analyze_input",
+            "--set", "feature_set=n2_own_nbrrw"]  # fmt: skip
+    assert main(args) == 0
+    p = get_paths(config)
+    seed = int(config["seed"])  # split repeat 0: the split seed is the seed
+    folder = p.rewired_dir(seed)
+    manifest = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["settings"]["relations"]["bbb"]["seed"] == seed + 1
+    n = 120
+    for r in ("aaa", "bbb"):
+        real = graph_module_load(p.relation_file(r))
+        rewired = graph_module_load(folder / f"{r}.npz")
+        assert rewired.shape == real.shape and (rewired[0] < rewired[1]).all()
+        assert np.array_equal(np.bincount(real.ravel(), minlength=n),
+                              np.bincount(rewired.ravel(), minlength=n))  # fmt: skip
+        assert not np.array_equal(rewired, real)
+    block = pd.read_parquet(p.block_file(C.NBRRW_BLOCK))
+    assert block.shape == (n, 1 + 2 * (5 + 1))
+    assert "nbrrw__aaa_mean_f00" in block.columns
+    # The same means as the nbr builder on the saved rewired graph.
+    own = pd.read_parquet(p.block_file(C.OWN_BLOCK))
+    saved = {r: graph_module_load(folder / f"{r}.npz") for r in ("aaa", "bbb")}
+    expected = build_nbr_block(own, saved, name=C.NBRRW_BLOCK)
+    pd.testing.assert_frame_equal(block, expected)
+
+    # Rebuilding from scratch with the same split seed gives the same graph;
+    # a run that also builds nbr reuses the saved graph.
+    first = graph_module_load(folder / "aaa.npz")
+    for f in folder.iterdir():
+        f.unlink()
+    p.block_file(C.NBRRW_BLOCK).unlink()
+    assert main([*args[:-1], "feature_set=m2_n2"]) == 0
+    assert np.array_equal(first, graph_module_load(folder / "aaa.npz"))
+    pd.testing.assert_frame_equal(block, pd.read_parquet(p.block_file(C.NBRRW_BLOCK)))
+    # With the graph saved, rebuilding the block reuses it (nothing rewritten).
+    stamp = (folder / "aaa.npz").stat().st_mtime_ns
+    p.block_file(C.NBRRW_BLOCK).unlink()
+    assert main(args) == 0
+    assert (folder / "aaa.npz").stat().st_mtime_ns == stamp
+    pd.testing.assert_frame_equal(block, pd.read_parquet(p.block_file(C.NBRRW_BLOCK)))
+
+
+def test_the_rewiring_seed_follows_the_split_repeat(tmp_path):
+    from fraud_detect.pipeline import Context
+
+    _, config = fake_dataset(tmp_path, n_nodes=60)
+    seeds = []
+    for k in range(3):
+        c = {**config, "split": {**config["split"], "n_repeats": 3, "repeat": k}}
+        ctx = Context(config=c, paths=get_paths(c), run_dir=tmp_path)
+        seeds.append(ctx.paths.rewired_dir(ctx.split_seed).name)
+    assert seeds == [f"seed{int(config['seed']) + 1000 * k}" for k in range(3)]
+
+
+def graph_module_load(path):
+    from fraud_detect.pipeline import load_edges
+
+    return load_edges(path)
+
+
 def test_a_per_repeat_variant_keeps_that_repeats_columns():
     from fraud_detect.config import resolve_variants
 

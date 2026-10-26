@@ -183,6 +183,11 @@ class Paths:
     def relation_file(self, relation: str) -> Path:
         return self.graph_dir / f"{relation}.npz"
 
+    def rewired_dir(self, seed: int) -> Path:
+        """Every relation rewired so each node keeps exactly its degree (the
+        null graph of control N2), for one rewiring seed."""
+        return self.processed_dir / "graph_rewired" / f"seed{seed}"
+
     @property
     def train_ids(self) -> Path:
         return self.processed_dir / "train_ids.csv"
