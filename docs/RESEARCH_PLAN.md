@@ -663,6 +663,24 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
     | f24 | review sentiment, −1 / 0 / 1 (35) | text |
 
   - **Reading.** `f19` is label-derived by construction and is the only vote column left. `f13`, `f15` and `f18` are rating statistics: close in meaning to a "downvoted user" label, but not built from votes, so they are not leaks. `no19` is the leak-controlled variant; `no36` stays as the stricter one. What remains unproven without the raw reviews (V1): that `amz_features_36.npz` was built by this `build_features`; the identities make that very likely for columns 0–18 and 31–35, but none of them tests column 30 directly.
+- **2026-10-26 (overnight queue: rules written BEFORE any of these runs).** Caelen's message of 2026-10-26 is the "go" for these runs only. One job at a time on the RTX 4060 laptop (`outputs/amazon/rq_logs/queue.txt`, `bin/runner.sh`); pilot settings as every earlier pilot (lgbm, lr, catboost; 10 trials; `bal-acc`; seed 555; splits 0, 1, 2 with `split.n_repeats: 3`).
+  - **New inputs (branch `exp/rq-plan`):** the variant `no19` (`own__f19` left out of own, nbr and gnnssl/gnnrand inputs); the `deg` block (log1p(degree) per relation, 3 columns, built in the `neighbour_agg` stage; the same values as nbr's `log1p_degree` columns; label-blind and deterministic by test); the per-split variant `top4no19` (`keep_by_repeat`, resolved for the active split repeat).
+  - **F5's four features, fixed now** (`scripts/top_features.py --variant no19 --repeat k`: the probe is fit on the 24 columns other than `f19`, permutation importance on each split's own training folds; `outputs/amazon*/probe/top_features_no19.csv`): split 0 `f07`, `f15`, `f18`, `f23`; split 1 `f15`, `f18`, `f23`, `f24`; split 2 `f13`, `f18`, `f23`, `f24`. Only `f18` and `f23` are in all three. Unlike 2026-10-23's `top4`, each split's list comes from its own training folds only.
+  - **Z1 probe** (`scripts/feedback_probes.py --task z1 --variant no19`; split 0 training CV; recorded with `--kind probe`): own + gnnssl (E2, DGI size 64) and own + gnnrand (E3, 5 initialisation seeds) at d = 2, 4, 8, 16, 32, 64 PCA components per relation and raw, with each raw embedding's effective rank. The chosen d per block is the smallest d whose mean CV PR-AUC is within one standard error of the best d's (for gnnrand, on the mean over seeds). It changes no run tonight; the chosen d and raw 64 go to later pilot rungs (Step 2, item 5).
+  - **Runs:** `pilot_m1_own_no19` (B), `pilot_m2_own_nbr_no19` (E1), `pilot_m5_own_gnnssl_no19` (E2), `pilot_n1_own_deg_no19` (N1) on splits 0–2 (12 runs); `pilot_m1_own_top4no19` (F5) on splits 0–2 (3 runs); then, only if nothing failed, `pilot_m5r_own_gnnrand_no19` (E3) on splits 0–2 (3 runs). B on all 25 features is phase 2's `pilot_m1_own` (same settings and machine).
+  - **Primary contrasts** (test ΔPR-AUC per split, B − A as written; `repeat_summary.py --pairs`):
+    - **F4** = B_no19 − B_all (`no19_summary`);
+    - **E1 − B**, **E2 − B**, **N1 − B**, all on no19 (`no19_summary`);
+    - **F5** = B_top4no19 − B_no19 (`f5_summary`);
+    - if E3 runs: **E3 − B** on no19 (`e3_summary`).
+  - **Secondary contrasts** (labelled secondary in every table): E1 − N1 on no19 (what neighbour means add beyond degree; not yet beyond a random graph, which needs N2); if E3 runs, E2 − E3 on no19.
+  - **Verdict rule** (unchanged from 2026-10-19): **supported** if test Δ > 0 on all 3 splits, the mean Δ exceeds its SD across splits, and the Nadeau–Bengio corrected paired t-test over the 15 CV folds gives p < 0.05; otherwise a positive mean is **not distinguishable from zero** and a negative mean is **worse**.
+  - **Readings, fixed now:**
+    - F4 "worse" means `f19` carries signal the other 24 columns do not; its size is RQ1's headline number for df-analyze.
+    - E1 − B or E2 − B "supported" on no19 means the graph helps once the leak is gone. Comparing that Δ with the all-features Δ (+0.010, +0.011) and the no36 Δ (+0.162, +0.129) says how far the leak hid the graph's benefit.
+    - N1 − B "supported" means degree alone accounts for part of the graph gain. E1 − N1 "supported" means neighbour means add something beyond degree. Whether that something is real structure is N2's question, not tonight's.
+    - F5 "not distinguishable" or positive means four non-vote columns carry the 24-column result. "Worse" means they do not.
+  - **Not run tonight:** N2 (needs `igraph` or a decision on the rewiring tool), V1, GraphSAGE, E4, YelpChi, full-budget runs.
 
 ---
 
