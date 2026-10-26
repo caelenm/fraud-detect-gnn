@@ -691,6 +691,23 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
   - **Side finding:** own features without `f19` score 0.498 on CV, the same as without all four #36 features (0.500, 2026-10-19). That fits the column map: `f13`, `f15` and `f18` can be computed from the star counts `f02`–`f06`, so dropping them loses nothing, and `f19` alone carries the #36 signal.
   - **Not done:** N2 pilot runs need a pipeline block of neighbour means on the rewired graph, with the rewiring seed tied to the split repeat and the graph saved for N3. That block is not built, and the runs need a go. The question of which rewiring tool to use (`igraph`) is moot if the group accepts this implementation.
   - **Recording note:** the results-DB entry's `git_dirty` is true. The only uncommitted change at the time was README text; the probe code was committed (`b75f377`).
+- **2026-10-26 (amendment to the overnight pre-registration: N2 added, written BEFORE any pilot run; the queue is still on hold).** Caelen asked for the N2 block and its pilots.
+  - **Block:** `nbrrw` is the `nbr` block (1-hop means of every own feature plus log1p(degree), per relation) built on a rewired graph. Stage `neighbour_agg`, `features/graph.py` `swap_rewire`, 10 double-edge swaps per edge.
+  - **Rewiring seed:** tied to the split repeat. It is the split seed plus the relation index: split 0 uses 555 / 556 / 557, split 1 uses 1555 / 1556 / 1557, split 2 uses 2555 / 2556 / 2557.
+  - **Saved graph:** `data/processed/amazon*/graph_rewired/seed<split seed>/`, with a manifest, and reused while the settings match, so a later GraphSAGE control (N3) sees the same graph.
+  - **Built and checked on split 0:** 99 columns, no `f19`, every degree unchanged; 22% / 36% / 16% of real edges kept. This is the same graph as the N2 probe's seed 555.
+  - **Runs added:** `pilot_n2_own_nbrrw_no19` (N2) on splits 0, 1, 2, each right after that split's N1 run (3 runs, about 40 minutes).
+  - **Contrasts (primary for RQ2, `n2_summary`; B − A as written):**
+    - **E1 − N2:** real structure;
+    - **N2 − N1:** neighbour columns on a degree-matched random graph;
+    - **N2 − B.**
+
+    These use the same verdict rule as the entry above.
+  - **What was known when this was written:** only the training-CV probe of split 0 (N2 0.627 vs E1 0.719 and N1 0.630). No test-set number for any no19 rung exists yet. The probe chose nothing here: the swap count, the seed rule and the block are the plan's, fixed before the probe.
+  - **Readings, fixed now:**
+    - E1 − N2 "supported" means the real edges add something that a degree-matched random graph does not.
+    - N2 − N1 "worse" or "not distinguishable" means that, on a random graph, neighbour means add nothing beyond degree.
+    - Because the rewired U-S-U keeps 36% of the real edges, a positive E1 − N2 is a lower bound on the real-structure part.
 
 ---
 
