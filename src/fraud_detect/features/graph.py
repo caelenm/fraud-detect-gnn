@@ -62,6 +62,70 @@ def rewire_edges(edges: np.ndarray, n_nodes: int, seed: int) -> np.ndarray:
     return out
 
 
+def _contains(sorted_keys: np.ndarray, query: np.ndarray) -> np.ndarray:
+    idx = np.searchsorted(sorted_keys, query).clip(max=max(len(sorted_keys) - 1, 0))
+    return sorted_keys[idx] == query if len(sorted_keys) else np.zeros(len(query), bool)
+
+
+def swap_rewire(
+    edges: np.ndarray,
+    n_nodes: int,
+    seed: int,
+    swaps_per_edge: float = 10.0,
+    max_rounds: int = 500,
+) -> tuple[np.ndarray, int]:
+    """A random graph in which every node keeps exactly its degree: the null
+    graph of control N2 (2026-10-26).
+
+    Double-edge swaps (a-b, c-d -> a-d, c-b) are repeated until about
+    `swaps_per_edge` x E were made, or `max_rounds` batches ran out. A swap is
+    made only if it creates no self-loop and no edge that already exists, so
+    the graph stays simple and the edge count stays E. Each batch proposes
+    swaps on disjoint pairs of edges and drops any two that would create the
+    same edge, so the work is vectorised. Takes only the edge list, never a
+    feature or a label. Returns the new edge list in the load stage's format
+    (src < dst, sorted, int32) and the number of swaps made."""
+    edges = np.asarray(edges)
+    src, dst = edges[0].astype(np.int64), edges[1].astype(np.int64)
+    m = len(src)
+    target = int(round(swaps_per_edge * m))
+    rng = np.random.default_rng(seed)
+
+    def keys(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+        return np.minimum(a, b) * n_nodes + np.maximum(a, b)
+
+    existing = np.sort(keys(src, dst))
+    if len(np.unique(existing)) != m or (src == dst).any():
+        raise ValueError("Rewiring needs a simple graph: no repeated edges or self-loops")
+    done = 0
+    for _ in range(max_rounds):
+        if done >= target or m < 2:
+            break
+        perm = rng.permutation(m)
+        half = m // 2
+        i, j = perm[:half], perm[half : 2 * half]
+        flip = rng.random(half) < 0.5  # both ways of reconnecting a pair
+        a, b = src[i], dst[i]
+        c, d = np.where(flip, dst[j], src[j]), np.where(flip, src[j], dst[j])
+        k1, k2 = keys(a, d), keys(c, b)
+        ok = (a != d) & (c != b) & (k1 != k2)
+        ok &= ~_contains(existing, k1) & ~_contains(existing, k2)
+        # No two swaps of one batch may create the same edge.
+        idx = np.flatnonzero(ok)
+        new = np.concatenate([k1[idx], k2[idx]])
+        _, inverse, counts = np.unique(new, return_inverse=True, return_counts=True)
+        repeated = counts[inverse] > 1
+        ok[idx[repeated[: len(idx)] | repeated[len(idx) :]]] = False
+        accepted = np.flatnonzero(ok)[: target - done]
+        src[i[accepted]], dst[i[accepted]] = a[accepted], d[accepted]
+        src[j[accepted]], dst[j[accepted]] = c[accepted], b[accepted]
+        done += len(accepted)
+        existing = np.sort(keys(src, dst))
+    out = np.sort(np.vstack([src, dst]), axis=0)
+    out = out[:, np.lexsort((out[1], out[0]))].astype(np.int32)
+    return out, done
+
+
 def own_matrix(features: pd.DataFrame) -> tuple[np.ndarray, list[str]]:
     """The own block as a matrix in node order (row i = node i), and its
     feature names without the block prefix (f00, f01, ...)."""

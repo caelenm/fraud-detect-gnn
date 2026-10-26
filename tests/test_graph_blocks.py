@@ -153,6 +153,42 @@ def test_rewiring_keeps_degrees_roughly_and_changes_partners():
     assert len(shared) < 0.1 * e.shape[1]
 
 
+def test_swap_rewiring_keeps_every_degree_exactly():
+    _, _, edges = fake_feature_graph(n=300, width=2, seed=3)
+    e = edges["aaa"]
+    r, swaps = graph_module.swap_rewire(e, 300, seed=1)
+    assert swaps == 10 * e.shape[1]  # the target number of swaps was reached
+    assert r.shape == e.shape and r.dtype == np.int32
+    assert (r[0] < r[1]).all()  # no self-loops, load-stage orientation
+    assert len({tuple(p) for p in r.T}) == r.shape[1]  # no repeated edges
+    assert np.array_equal(np.bincount(e.ravel(), minlength=300),
+                          np.bincount(r.ravel(), minlength=300))  # fmt: skip
+    shared = {tuple(p) for p in e.T} & {tuple(p) for p in r.T}
+    assert len(shared) < 0.1 * e.shape[1]  # partners changed
+    again, _ = graph_module.swap_rewire(e, 300, seed=1)
+    other, _ = graph_module.swap_rewire(e, 300, seed=2)
+    assert np.array_equal(r, again) and not np.array_equal(r, other)  # seeded
+
+
+def test_swap_rewiring_terminates_when_no_swap_is_possible():
+    star = np.array([[0, 0, 0, 0], [1, 2, 3, 4]], dtype=np.int32)
+    r, swaps = graph_module.swap_rewire(star, 5, seed=0, max_rounds=20)
+    assert swaps == 0 and np.array_equal(r, star)
+    with pytest.raises(ValueError, match="simple graph"):
+        graph_module.swap_rewire(np.array([[0, 0], [1, 1]]), 3, seed=0)
+
+
+def test_nbr_block_on_a_rewired_graph_is_label_blind():
+    nodes, own, edges = fake_feature_graph(n=80, width=3)
+
+    def nbr_on_rewired(features, edge_lists):
+        rewired = {r: graph_module.swap_rewire(e, len(features), seed=7)[0]
+                   for r, e in edge_lists.items()}  # fmt: skip
+        return build_nbr_block(features, rewired)
+
+    assert_label_blind(nbr_on_rewired, nodes, own, edges)
+
+
 def test_single_feature_check_uses_training_rows_only():
     own = pd.DataFrame({C.NODE_ID: range(6), "own__f00": [0, 1, 5, 6, 100, -100.0]})
     train = pd.DataFrame({C.NODE_ID: [0, 1, 2, 3], C.LABEL: [0, 0, 1, 1]})
