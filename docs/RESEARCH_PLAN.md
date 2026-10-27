@@ -727,6 +727,92 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
     - For the professor's "size of GNN embeddings", the smallest size whose E − B is supported and whose E_d − E_8 is not "supported" is enough.
     - For "does training help", E2_d − E3_d must be supported at some size.
     - For "4 important features", E1/E2 − B_top4no19 "supported" means the graph still adds to the four non-vote columns.
+- **2026-10-27 (overnight results, RQ1–RQ3; Amazon, pilot settings above, RTX 4060 laptop).** The queue ran from 01:41 to 10:45 UTC.
+  - **Coverage:**
+    - 32 of 39 queued pilot runs finished, all exit 0.
+    - Raw-64 runs took 23–26 min each, against 13–16 min for the others, so the queue ran late.
+    - The guard skipped `pilot_m5r_own_gnnrand_no19raw` on split 2: it would have started at 10:43, after the 10:30 cutoff.
+    - The four-feature graph runs (`pilot_m2_own_nbr_top4no19`, `pilot_m5_own_gnnssl_top4no19`, 6 runs) and `top4no19_summary` never started.
+    - `sizeraw_summary` then failed (exit 1) on the missing split-2 Model A and left no aggregate.
+    - At 10:46 it was rerun with only the two DGI pairs (E2raw − B, E2raw − E2₈), which are complete on all 3 splits.
+    - E3raw − B, E2raw − E3raw and E3raw − E3₈ have no verdict. E3raw's splits 0 and 1 are reported below as numbers only.
+  - **Test PR-AUC per split (0 / 1 / 2),** no-skill 0.095:
+
+    | Setup | Feature set | Test PR-AUC |
+    |---|---|---|
+    | B | `pilot_m1_own_no19` | 0.516 / 0.535 / 0.565 |
+    | F5 | `pilot_m1_own_top4no19` | 0.504 / 0.531 / 0.553 |
+    | E1 | `pilot_m2_own_nbr_no19` | 0.703 / 0.699 / 0.706 |
+    | E2 (d 8) | `pilot_m5_own_gnnssl_no19` | 0.662 / 0.674 / 0.671 |
+    | E2 (d 16) | `pilot_m5_own_gnnssl_no19d16` | 0.681 / 0.677 / 0.676 |
+    | E2 (raw 64) | `pilot_m5_own_gnnssl_no19raw` | 0.672 / 0.699 / 0.677 |
+    | E3 (d 8) | `pilot_m5r_own_gnnrand_no19` | 0.651 / 0.676 / 0.672 |
+    | E3 (d 16) | `pilot_m5r_own_gnnrand_no19d16` | 0.647 / 0.646 / 0.687 |
+    | E3 (raw 64) | `pilot_m5r_own_gnnrand_no19raw` | 0.693 / 0.694 / skipped |
+    | N1 | `pilot_n1_own_deg_no19` | 0.650 / 0.652 / 0.652 |
+    | N2 | `pilot_n2_own_nbrrw_no19` | 0.619 / 0.628 / 0.631 |
+
+  - **Verdicts** (test Δ, B − A as written; mean ± SD over 3 splits; Nadeau–Bengio p, two-sided; "worse" = negative mean, significant only if p < 0.05):
+
+    | Contrast | Role | Δ 0 / 1 / 2 | Mean ± SD | p | Verdict |
+    |---|---|---|---|---|---|
+    | F4: B_no19 − B_all | primary | −0.401 / −0.384 / −0.354 | −0.379 ± 0.024 | 3.4e-11 | worse (significant) |
+    | E1 − B | primary | +0.187 / +0.163 / +0.140 | +0.163 ± 0.023 | 9.7e-06 | supported |
+    | E2 − B | primary | +0.146 / +0.139 / +0.105 | +0.130 ± 0.022 | 0.0011 | supported |
+    | N1 − B | primary | +0.134 / +0.116 / +0.086 | +0.112 ± 0.024 | 0.0003 | supported |
+    | E1 − N1 | secondary | +0.053 / +0.047 / +0.054 | +0.051 ± 0.004 | 0.0009 | supported |
+    | E1 − N2 | primary | +0.084 / +0.070 / +0.074 | +0.076 ± 0.007 | 0.00069 | supported |
+    | N2 − N1 | primary | −0.031 / −0.023 / −0.020 | −0.025 ± 0.006 | 0.10 | worse (not significant) |
+    | N2 − B | primary | +0.102 / +0.093 / +0.066 | +0.087 ± 0.019 | 4.5e-05 | supported |
+    | F5: B_top4no19 − B_no19 | primary | −0.013 / −0.005 / −0.012 | −0.010 ± 0.004 | 0.60 | worse (not significant) |
+    | E3 − B | primary | +0.135 / +0.141 / +0.107 | +0.127 ± 0.018 | 0.00033 | supported |
+    | E2 − E3 | secondary | +0.011 / −0.002 / −0.001 | +0.003 ± 0.007 | 0.85 | not distinguishable |
+    | E2₁₆ − B | primary | +0.165 / +0.142 / +0.111 | +0.139 ± 0.027 | 0.00038 | supported |
+    | E3₁₆ − B | primary | +0.130 / +0.110 / +0.122 | +0.121 ± 0.010 | 8.7e-05 | supported |
+    | E2₁₆ − E3₁₆ | secondary | +0.035 / +0.031 / −0.011 | +0.018 ± 0.025 | 0.76 | not distinguishable |
+    | E2₁₆ − E2₈ | secondary | +0.019 / +0.003 / +0.005 | +0.009 ± 0.009 | 0.46 | not distinguishable |
+    | E3₁₆ − E3₈ | secondary | −0.004 / −0.030 / +0.015 | −0.007 ± 0.023 | 0.54 | worse (not significant) |
+    | E2raw − B | primary | +0.156 / +0.164 / +0.112 | +0.144 ± 0.028 | 7e-05 | supported |
+    | E2raw − E2₈ | secondary | +0.010 / +0.025 / +0.006 | +0.014 ± 0.010 | 0.47 | not distinguishable |
+
+  - **Readings** (by the rules fixed before the runs):
+    - **RQ1.**
+      - Dropping `f19` costs 0.38 PR-AUC (F4).
+      - With `f19` the graph adds +0.010 (E1) and +0.011 (E2). Without it, it adds +0.163 and +0.130. The leak hides almost all of the graph's benefit.
+      - Every no19 number is within 0.01 of its no36 counterpart (B 0.539 vs 0.548, E1 0.702 vs 0.710, E2 0.669 vs 0.676). This fits the column map: `f19` carries the #36 signal.
+    - **RQ2** (without `f19`). E1's +0.163 splits into three parts:
+      - degree alone: +0.112 (N1 − B, supported);
+      - neighbour columns on a degree-matched random graph: −0.025 (N2 − N1, lower on all splits but not significant);
+      - real structure: +0.076 (E1 − N2, supported).
+
+      About two thirds of the graph gain is degree, and the real edges add the rest. Because the rewired U-S-U keeps 36% of the real edges, +0.076 is a lower bound. The test split matches the training-CV probe of 2026-10-26 (+0.132 / −0.004 / +0.092).
+    - **RQ3 / professor, embedding size.**
+      - At every size, both embeddings beat B (supported).
+      - A larger size does not measurably beat 8 per relation: E2₁₆ − E2₈ and E2raw − E2₈ are not distinguishable, and E3₁₆ − E3₈ is negative.
+      - By the size rule, **8 components per relation (24 columns) is enough** for both blocks.
+      - E3 raw scored 0.693 and 0.694 on splits 0 and 1, the highest embedding numbers on those splits. With split 2 missing, it has no verdict.
+    - **RQ3 / professor, training.**
+      - E2 − E3 is not supported at any tested size (8: +0.003; 16: +0.018 ± 0.025).
+      - Training the encoder with DGI does not measurably help over the same encoder with random weights. This repeats 2026-10-23's finding without `f19`.
+      - The raw-64 pair has no verdict.
+    - **Professor, four features.**
+      - Each split's top four non-`f19` columns score 0.010 below the 24 (F5).
+      - That is lower on all 3 splits, so the rule labels it "worse", but p = 0.60.
+      - By the reading fixed beforehand, the four do not carry the 24-column result, although the gap is small.
+      - Whether the graph still adds to these four is not known: those runs did not start.
+    - **Not pre-registered, descriptive only:** neighbour means (E1, 0.702) score above every embedding rung at d 8 or 16 without `f19`, as without #36 on 2026-10-20.
+  - **Results DB:**
+    - Summaries:
+      - `20261027T060614Z_amazon_01f812` (no19)
+      - `20261027T061152Z_amazon_4f749a` (N2)
+      - `20261027T061515Z_amazon_9aaac3` (F5)
+      - `20261027T065806Z_amazon_cff161` (E3)
+      - `20261027T083511Z_amazon_384e37` (size 16)
+      - `20261027T104610Z_amazon_6ca8b3` (raw 64, DGI only)
+    - Z1 probe: `20261027T014148Z_amazon_1552db`.
+    - The 32 pilot runs are tagged `rq-plan` (`uv run scripts/results_db.py list --tag rq-plan`).
+    - The one-page summary is `uv run scripts/rq_report.py --dataset amazon` → `outputs/amazon/compare/rq_results.md`, copied to [`RQ_RESULTS.md`](RQ_RESULTS.md).
+  - **Still to run** (each needs a go): the four-feature graph runs and their summary (about 2 h); E3 raw on split 2 and its summary (about 25 min).
 
 ---
 

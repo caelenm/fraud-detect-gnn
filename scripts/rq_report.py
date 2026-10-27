@@ -146,7 +146,7 @@ def find(frames: dict[str, pd.DataFrame], a: str, b: str) -> pd.Series | None:
 def verdict_line(frames: dict[str, pd.DataFrame], a: str, b: str) -> str:
     r = find(frames, a, b)
     if r is None:
-        return "not run"
+        return "no 3-split result"
     return (
         f"{r.test_delta_mean:+.3f} ± {r.test_delta_sd:.3f} ({r.verdict}, p = {r.p:.2g})"
     )
@@ -180,8 +180,10 @@ def main(argv: list[str] | None = None) -> int:
         "seed 555), 3 grouped split repeats, test PR-AUC of each setup's Model A "
         "(no-skill 0.095). Verdict rule, fixed before the runs: **supported** if Δ > 0 "
         "on all 3 splits, mean Δ > SD, and the Nadeau–Bengio corrected t-test over the "
-        "15 grouped training CV folds gives p < 0.05. Source: docs/RESEARCH_PLAN.md §11 "
-        "and the results database.",
+        "15 grouped training CV folds gives p < 0.05. Otherwise a positive mean is **not "
+        "distinguishable from zero** and a negative mean is labelled **worse**; p is "
+        'two-sided, so a "worse" with p ≥ 0.05 is a lower mean, not a significant drop. '
+        "Source: docs/RESEARCH_PLAN.md §11 and the results database.",
         "",
         "## 1. Every model setup (test PR-AUC, mean ± SD over 3 splits)",
         "",

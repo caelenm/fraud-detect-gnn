@@ -14,6 +14,15 @@ We ask: **does using a graph improve fraud classification over the same kind of 
 
 **New on 2026-10-26 (branch `exp/rq-plan`):** the project is framed around three research questions on Amazon (main) and YelpChi (validation) only: RQ1, how much of Amazon's results and of the graph's apparent benefit depend on the leaked vote column `f19`; RQ2, how much of the remaining graph gain is real structure rather than degree and extra columns; RQ3, whether training the GNN encoder matters and how small its embeddings can be. `no19` (all features except `own__f19`) is the candidate Amazon headline. Experiment IDs (B, F4, F5, E1–E6, N1–N3, Z1, …) and the pre-registered contrasts are in RESEARCH_PLAN §11 (2026-10-26).
 
+**New on 2026-10-27 (branch `exp/rq-plan`, overnight pilots, 32 runs + 6 summaries, tag `rq-plan`):** results for RQ1–RQ3 without `f19` are in RESEARCH_PLAN §11 (2026-10-27), README ("Results (RQ pilots without f19)") and [`docs/RQ_RESULTS.md`](docs/RQ_RESULTS.md), which `scripts/rq_report.py` generates.
+- F4 = −0.379.
+- Graph gain: E1 +0.163, E2 +0.130. It splits into degree +0.112 and real structure +0.076, a lower bound.
+- Size 8 per relation is enough.
+- DGI training adds nothing measurable over random weights.
+- The top 4 non-`f19` columns score 0.010 below the 24 (not significant).
+
+Not run: the four-feature graph runs (E1/E2 on `top4no19`) and E3 raw on split 2.
+
 The details are in [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md) §11 (decision log and every result) and §12 (next steps); a short summary is in the README ("Results").
 
 **What has been run (Amazon only, seed 555, one RTX 4060 laptop under WSL2).** Every df-analyze run passed the split and column-type checks.

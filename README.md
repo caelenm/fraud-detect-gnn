@@ -168,6 +168,34 @@ Answers so far to the professor's feedback of 2026-10-21 ([`docs/PHASE3_FEEDBACK
 
 Caveats: pilot budget and one seed per run. The top 4 were ranked on split 0's training folds, so splits 1 and 2 (whose test sets include some of those nodes) are mildly optimistic. On their own folds, those splits would swap `f18` for `f12`. Verdict tables: `outputs/amazon/compare/{only36,top4,gnnrand}_summary.md`.
 
+## Results (RQ pilots without f19, Amazon, 2026-10-27)
+
+`f19` is a helpfulness-vote count, and the label is computed from helpfulness votes, so `f19` leaks the label. These pilots therefore drop `f19` and keep the other 24 columns. Settings are the same as above: 3 classifiers, 10 trials, 3 splits, and verdicts pre-registered in `docs/RESEARCH_PLAN.md` §11. The full page, with every setup and contrast, is [`docs/RQ_RESULTS.md`](docs/RQ_RESULTS.md).
+
+Test PR-AUC is the mean ± SD over 3 splits; no skill is 0.095.
+
+| Setup | Features | Test PR-AUC |
+|---|---|---|
+| B | own | 0.539 ± 0.025 |
+| N1 | own + degree | 0.651 ± 0.001 |
+| N2 | own + neighbour means on a rewired graph | 0.626 ± 0.007 |
+| E1 | own + neighbour means | **0.702 ± 0.004** |
+| E2 | own + DGI embeddings, 8 per relation | 0.669 ± 0.006 |
+| E3 | own + untrained GNN embeddings, 8 per relation | 0.666 ± 0.013 |
+
+For comparison, B with all 25 features (`f19` included) scores 0.918.
+
+| Question | Finding (test Δ PR-AUC, mean ± SD) |
+|---|---|
+| **How much does `f19` drive the results? (RQ1)** | Dropping it costs **−0.379 ± 0.024**. With `f19`, the graph adds about +0.01. Without it, neighbour means add **+0.163** and DGI embeddings **+0.130** (both supported). Every no-`f19` number is within 0.01 of the earlier "without #36" one. |
+| **Is the graph gain real structure? (RQ2)** | E1's +0.163 splits three ways:<br>• degree alone: +0.112 (supported);<br>• neighbour means on a degree-matched random graph: −0.025 on top of degree;<br>• the real edges: **+0.076** (supported). This is a lower bound, because the rewired graph keeps some real edges. |
+| **Embedding size (professor)** | Both embeddings beat B at 8, 16 and raw 64 per relation (all supported). Neither 16 nor raw 64 measurably beats 8 (+0.009 and +0.014 for DGI, not distinguishable). **8 per relation (24 columns) is enough.** DeepTune has no label-free reducer for these embeddings, so PCA is used. The untrained encoder at raw 64 ran on 2 of 3 splits, so it has no verdict. |
+| **Does training the GNN help? (professor)** | **No measurable effect.** DGI minus the same encoder with random weights is +0.003 ± 0.007 at size 8 and +0.018 ± 0.025 at size 16 (not distinguishable). GraphSAGE trained on the labels is not built yet. |
+| **Just the 4 important features? (professor)** | Each split's top 4 of the 24 non-`f19` columns score 0.010 below all 24. That is lower on all 3 splits but not significant (p = 0.60). Whether the graph still adds to these four is not known yet: those runs did not fit in the night. |
+| **More datasets (professor)** | Amazon is the main dataset and YelpChi the validation dataset (decided 2026-10-26). |
+
+Caveats: pilot budget, one seed per run, 3 splits. Not run yet: the four-feature graph runs, the untrained encoder at raw 64 on split 2, GraphSAGE and full-budget runs.
+
 ## Graph feature blocks (Models 2 and 5)
 
 The graph reaches df-analyze as extra columns per node, joined next to the own features; df-analyze then treats each node as a table row exactly as in Model 1. Every rung uses the same split, folds, tuning and test scoring; only the input columns differ.
