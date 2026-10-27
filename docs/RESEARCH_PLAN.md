@@ -708,6 +708,25 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
     - E1 − N2 "supported" means the real edges add something that a degree-matched random graph does not.
     - N2 − N1 "worse" or "not distinguishable" means that, on a random graph, neighbour means add nothing beyond degree.
     - Because the rewired U-S-U keeps 36% of the real edges, a positive E1 − N2 is a lower bound on the real-structure part.
+- **2026-10-27 01:55 UTC (second amendment, written BEFORE these runs; the queue started at 01:41 UTC).** Caelen asked for the embedding-size rungs, then the graph on the four features, with the laptop free by 8 am Atlantic (11:00 UTC). A guard skips any of these jobs that would start after 10:30 UTC (summaries 10:45).
+  - **Z1 result** (training CV, split 0, no19; results DB `20261027T014148Z_amazon_1552db`). CV PR-AUC by d:
+
+    | Block | 2 | 4 | 8 | 16 | 32 | 64 | raw |
+    |---|---|---|---|---|---|---|---|
+    | gnnssl (E2) | 0.643 | 0.662 | 0.688 | 0.696 | 0.695 | 0.700 | 0.696 |
+    | gnnrand (E3) | 0.634 | 0.653 | 0.673 | 0.697 | 0.700 | 0.701 | 0.702 |
+
+    The one-standard-error rule picks d = 8 for gnnssl and d = 16 for gnnrand.
+  - **Sizes run:** 8 (the default, already queued as E2 and E3), 16 (gnnrand's choice, run for both so E2 and E3 are matched), and raw 64 (the plan's contrasting size; 192 columns). The size is set by `gnn_embed_sizes` through variants `no19d16` and `no19raw`, which have the no19 columns.
+  - **Runs:** `pilot_m5r_own_gnnrand_no19d16`, `pilot_m5_own_gnnssl_no19d16`, `pilot_m5_own_gnnssl_no19raw`, `pilot_m5r_own_gnnrand_no19raw` on splits 0–2 (12 runs). Then `pilot_m2_own_nbr_top4no19` and `pilot_m5_own_gnnssl_top4no19` on splits 0–2 (6 runs; the graph blocks see only each split's four columns).
+  - **Primary contrasts** (B − A as written; the 2026-10-19 rule):
+    - at each size, E2_d − B_no19 and E3_d − B_no19 (`size16_summary`, `sizeraw_summary`);
+    - on the four features, E1 − B_top4no19 and E2 − B_top4no19 (`top4no19_summary`).
+  - **Secondary contrasts:** at each size, E2_d − E3_d (does training help at that size?); E2_d − E2_8 and E3_d − E3_8 (does a larger embedding help over the default?); on the four features, E2 − E1.
+  - **Readings, fixed now:**
+    - For the professor's "size of GNN embeddings", the smallest size whose E − B is supported and whose E_d − E_8 is not "supported" is enough.
+    - For "does training help", E2_d − E3_d must be supported at some size.
+    - For "4 important features", E1/E2 − B_top4no19 "supported" means the graph still adds to the four non-vote columns.
 
 ---
 

@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "run_id": "20261027T014148Z_amazon_1552db",
+  "recorded_utc": "2026-10-27T01:44:03Z",
+  "started_utc": "2026-10-27T01:41:48Z",
+  "finished_utc": "2026-10-27T01:44:02Z",
+  "duration_min": 2.2,
+  "device": "rtx4060-laptop",
+  "device_details": {
+    "os": "Linux",
+    "platform": "Linux-5.10.16.3-microsoft-standard-WSL2-x86_64-with-glibc2.41",
+    "wsl": true,
+    "python": "3.13.15",
+    "cpu": "Intel(R) Core(TM) Ultra 9 185H",
+    "gpus": [
+      {
+        "name": "NVIDIA GeForce RTX 4060 Laptop GPU",
+        "driver": "571.96",
+        "memory": "8188 MiB"
+      }
+    ]
+  },
+  "description": "Z1 (RQ3): gnnssl and gnnrand (5 inits) at d = 2-64 and raw, with effective rank, Amazon no19, split 0 training CV",
+  "kind": "probe",
+  "status": "ok",
+  "dataset": "amazon",
+  "feature_set": null,
+  "split_repeat": null,
+  "seed": null,
+  "git_commit": "68d235d879700e163daa1ec12006d1918145061a",
+  "git_dirty": false,
+  "command": "scripts/feedback_probes.py --dataset amazon --task z1 --variant no19",
+  "tags": [
+    "rq-plan",
+    "z1"
+  ],
+  "source": "outputs/amazon/probe/z1_size_sweep_no19.csv",
+  "results_rows": 43,
+  "results_columns": [
+    "variant",
+    "block",
+    "n_features",
+    "n_folds",
+    "cv_pr_auc_mean",
+    "cv_pr_auc_std",
+    "cv_auroc_mean",
+    "cv_auroc_std",
+    "cv_pr_auc_folds",
+    "k",
+    "init_seed",
+    "eff_rank_upu",
+    "eff_rank_usu",
+    "eff_rank_uvu",
+    "chosen"
+  ]
+}
