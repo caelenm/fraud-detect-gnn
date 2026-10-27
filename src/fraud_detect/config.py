@@ -89,6 +89,8 @@ def with_dataset(config: dict[str, Any], dataset: str | None) -> dict[str, Any]:
 
 
 KEEP_BY_REPEAT = "keep_by_repeat"
+# gnn_embed_sizes value for a GNN block that keeps its raw embedding (no PCA).
+RAW_SIZE = "raw"
 
 
 def resolve_variants(variants: dict[str, Any], repeat: int) -> dict[str, Any]:
@@ -118,6 +120,13 @@ def check_feature_sets(config: dict[str, Any]) -> None:
             raise ConfigError(
                 f"feature_variants.{variant}: a variant (a name without '_') is a list "
                 "of own columns to leave out, or {keep: [own columns to keep]}"
+            )
+    for variant, size in (config.get("gnn_embed_sizes") or {}).items():
+        number = isinstance(size, int) and not isinstance(size, bool) and size > 0
+        if variant not in variants or not (number or size == RAW_SIZE):
+            raise ConfigError(
+                f"gnn_embed_sizes.{variant}: maps a variant of feature_variants to a "
+                f"positive number of PCA components per relation, or {RAW_SIZE!r}"
             )
     for name, block_names in config["feature_sets"].items():
         for block in block_names:

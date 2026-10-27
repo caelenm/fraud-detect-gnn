@@ -207,6 +207,69 @@ def test_a_variant_block_never_sees_the_left_out_columns(tmp_path):
     assert not np.array_equal(full, np.load(p.raw_embedding("aaa", "gnnssl_x01")))
 
 
+def test_gnn_embed_sizes_set_the_pca_size_or_keep_the_raw_embedding(tmp_path):
+    from fraud_detect.config import (  # noqa: PLC0415
+        DEFAULT_CONFIG,
+        ConfigError,
+        load_config,
+        with_dataset,
+    )
+    from fraud_detect.pipeline import Context, gnn_embed_fingerprint  # noqa: PLC0415
+
+    path, config = fake_dataset(tmp_path, n_nodes=120)
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    for v in ("x01", "x01k2", "x01raw"):
+        raw["feature_variants"][v] = ["own__f01"]
+    raw["gnn_embed_sizes"] = {"x01k2": 2, "x01raw": "raw"}
+    raw["feature_sets"]["sizes"] = ["own_x01", "gnnssl_x01", "gnnssl_x01k2",
+                                    "gnnrand_x01raw"]  # fmt: skip
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    args = ["--config", str(path), *SMALL, "--to", "df_analyze_input"]
+    assert main([*args, "--set", "feature_set=sizes"]) == 0
+    c = {**config, "feature_sets": raw["feature_sets"], "feature_set": "sizes",
+         "feature_variants": raw["feature_variants"]}  # fmt: skip
+    p = get_paths(c)
+    default = pd.read_parquet(p.block_file("gnnssl_x01"))
+    k2 = pd.read_parquet(p.block_file("gnnssl_x01k2"))
+    rawb = pd.read_parquet(p.block_file("gnnrand_x01raw"))
+    assert default.shape == (120, 1 + 2 * 3) and k2.shape == (120, 1 + 2 * 2)
+    assert rawb.shape == (120, 1 + 2 * 8)  # out_dim 8 on both relations, no PCA
+    assert list(rawb.columns)[1:3] == [
+        "gnnrand_x01raw__aaa_z01",
+        "gnnrand_x01raw__aaa_z02",
+    ]
+    z = np.load(p.raw_embedding("aaa", "gnnrand_x01raw"))
+    assert np.array_equal(rawb.iloc[:, 1:9].to_numpy(), z.astype(np.float64))
+    # Same input and seed: size 2 is the first 2 components of size 3's PCA.
+    first_two = default.iloc[:, 1:3].to_numpy()
+    np.testing.assert_allclose(k2.iloc[:, 1:3].to_numpy(), first_two, atol=1e-8)
+    meta = json.loads((p.embed_dir("gnnssl_x01k2") / "meta.json").read_text())
+    assert meta["pca_components_used"] == 2
+    meta = json.loads((p.embed_dir("gnnrand_x01raw") / "meta.json").read_text())
+    assert meta["pca_components_used"] == "raw"
+    train = pd.read_parquet(p.df_analyze_input_dir / "train.parquet")
+    assert train.shape[1] == 4 + 6 + 4 + 16 + 1  # own_x01, three blocks, target
+
+    # A size entry changes only its own block's fingerprint.
+    def fingerprint(cfg: dict, block: str) -> str:
+        return gnn_embed_fingerprint(
+            Context(config=cfg, paths=p, run_dir=tmp_path), block
+        )
+
+    without = {k: v for k, v in c.items() if k != "gnn_embed_sizes"}
+    with_sizes = {**c, "gnn_embed_sizes": raw["gnn_embed_sizes"]}
+    assert fingerprint(without, "gnnssl_x01") == fingerprint(with_sizes, "gnnssl_x01")
+    assert fingerprint(with_sizes, "gnnssl_x01k2") != fingerprint(
+        with_sizes, "gnnssl_x01"
+    )
+
+    bad = load_config(DEFAULT_CONFIG)
+    for sizes in ({"nope": 4}, {"no19d16": 0}, {"no19d16": "big"}):
+        bad["gnn_embed_sizes"] = sizes
+        with pytest.raises(ConfigError, match="gnn_embed_sizes"):
+            with_dataset(bad, "amazon")
+
+
 def test_gnn_embed_resumes_after_an_interruption(tmp_path, monkeypatch):
     path, config = fake_dataset(tmp_path, n_nodes=120)
     assert main([*stage_args(path), "--to", "gnn_embed"]) == 0

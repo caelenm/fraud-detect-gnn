@@ -53,6 +53,7 @@ from sklearn.preprocessing import StandardScaler
 from torch_geometric.nn import DeepGraphInfomax
 
 from fraud_detect import columns as C
+from fraud_detect.config import RAW_SIZE
 from fraud_detect.features.graph import adjacency, own_matrix
 
 DEVICES = ("auto", "cpu", "cuda")
@@ -359,16 +360,28 @@ def standardized_features(own_features: pd.DataFrame, fit_mask: np.ndarray) -> n
 def pca_block(
     embeddings: Mapping[str, np.ndarray],
     fit_mask: np.ndarray,
-    k: int,
+    k: int | str,
     seed: int,
     name: str = C.GNNSSL_BLOCK,
 ) -> tuple[pd.DataFrame, dict[str, dict[str, Any]]]:
     """<name>__<relation>_pc01..pcK (name gnnssl, or e.g. gnnssl_no36) for each
     relation in order, from a PCA fit on the training nodes' embeddings, and
-    each PCA's explained variance."""
+    each PCA's explained variance. With k = "raw" (config.RAW_SIZE) it is the
+    raw embedding itself, as <name>__<relation>_z01..zD, with no PCA."""
     n = len(fit_mask)
     out: dict[str, np.ndarray] = {C.NODE_ID: np.arange(n, dtype=np.int64)}
-    info = {}
+    info: dict[str, dict[str, Any]] = {}
+    if k == RAW_SIZE:
+        for relation, z in embeddings.items():
+            if z.shape[0] != n:
+                raise ValueError(f"{relation}: {z.shape[0]} embedding rows for {n} nodes")
+            width = max(2, len(str(z.shape[1])))
+            for j in range(z.shape[1]):
+                column = f"{name}{C.BLOCK_SEPARATOR}{relation}_z{j + 1:0{width}d}"
+                out[column] = z[:, j].astype(np.float64)
+            info[relation] = {"raw": True, "explained_variance_total": 1.0}
+        return pd.DataFrame(out), info
+    k = int(k)
     width = max(2, len(str(k)))
     for relation, z in embeddings.items():
         if z.shape[0] != n:

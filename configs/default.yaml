@@ -133,6 +133,16 @@ feature_sets:
   pilot_n2_own_nbrrw_no19: [own_no19, nbrrw_no19]
   # F5: B on the per-split top 4 without f19 (feature_variants.top4no19).
   pilot_m1_own_top4no19: [own_top4no19]
+  # The graph on F5's four features (E1, E2 on top4no19; the GNN and the
+  # neighbour means see only those four too).
+  pilot_m2_own_nbr_top4no19: [own_top4no19, nbr_top4no19]
+  pilot_m5_own_gnnssl_top4no19: [own_top4no19, gnnssl_top4no19]
+  # Z1 size rungs: E2 and E3 at 16 PCA components per relation and at the raw
+  # 64-d embedding (gnn_embed_sizes); size 8 is pilot_m5*_no19.
+  pilot_m5_own_gnnssl_no19d16: [own_no19, gnnssl_no19d16]
+  pilot_m5r_own_gnnrand_no19d16: [own_no19, gnnrand_no19d16]
+  pilot_m5_own_gnnssl_no19raw: [own_no19, gnnssl_no19raw]
+  pilot_m5r_own_gnnrand_no19raw: [own_no19, gnnrand_no19raw]
 
 # Input variants: a block named <kind>_<variant> (own_no36, nbr_no36,
 # gnnssl_no36) is built from the own features without the variant's columns:
@@ -160,6 +170,10 @@ feature_variants:
       0: [own__f07, own__f15, own__f18, own__f23]
       1: [own__f15, own__f18, own__f23, own__f24]
       2: [own__f13, own__f18, own__f23, own__f24]
+  # Amazon only (2026-10-26, Z1 size rungs): the same columns as no19, under
+  # names that gnn_embed_sizes gives other embedding sizes (16, raw).
+  no19d16: [own__f19]
+  no19raw: [own__f19]
 
 neighbour_agg:
   # Model 2's `nbr` block. For each relation of the dataset (not homo): the
@@ -203,6 +217,14 @@ gnn_embed:
   # 1.0 keeps all. If CUDA runs out of memory, that relation is retried on the
   # CPU (logged in meta.json); lower this only if the CPU is too slow.
   usu_edge_fraction: 1.0
+
+# Z1 size rungs (RQ3, 2026-10-26): a gnnssl/gnnrand block whose variant is
+# listed here keeps that many PCA components per relation instead of
+# gnn_embed.pca_components, or its raw embedding with `raw` (no PCA; 3 x 64 =
+# 192 columns on Amazon). The variants themselves are in feature_variants.
+gnn_embed_sizes:
+  no19d16: 16
+  no19raw: raw
 
 split:
   # StratifiedGroupKFold over the labelled nodes: `test_folds` of `n_folds`

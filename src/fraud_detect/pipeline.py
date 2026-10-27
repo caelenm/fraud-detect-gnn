@@ -578,7 +578,18 @@ def gnn_embed_fingerprint(ctx: Context, block: str = C.GNNSSL_BLOCK) -> str:
         fields["excluded_own_columns"] = spec
     if kind != C.GNNSSL_BLOCK:
         fields["kind"] = kind
+    if blocks.parse_block(block)[1] in (ctx.config.get("gnn_embed_sizes") or {}):
+        fields["size"] = gnn_embed_size(ctx, block)
     return config_fingerprint(fields)
+
+
+def gnn_embed_size(ctx: Context, block: str) -> int | str:
+    """PCA components per relation of a gnnssl or gnnrand block: the block
+    variant's entry in gnn_embed_sizes (a number, or "raw" for the embedding
+    itself; Z1's size rungs, 2026-10-26), else gnn_embed.pca_components."""
+    sizes = ctx.config.get("gnn_embed_sizes") or {}
+    variant = blocks.parse_block(block)[1]
+    return sizes.get(variant, int(ctx.config["gnn_embed"]["pca_components"]))
 
 
 def run_gnn_embed(ctx: Context) -> None:
@@ -668,10 +679,9 @@ def _embed_block(
             flush=True,
         )
 
+    size = gnn_embed_size(ctx, name)
     try:
-        block, pca_info = ssl.pca_block(
-            embeddings, fit_mask, cfg.pca_components, cfg.seed, name=name
-        )
+        block, pca_info = ssl.pca_block(embeddings, fit_mask, size, cfg.seed, name=name)
     except ValueError as e:
         raise StageError(str(e)) from e
     versions = package_versions()
@@ -701,6 +711,7 @@ def _embed_block(
         "encoder": f"{cfg.layers} rounds of GCN-normalised propagation over A + I, "
         f"hidden {cfg.hidden}, output {cfg.out_dim}, PReLU",
         "fit_nodes": "the feature scaler and each PCA are fit on training nodes only",
+        "pca_components_used": size,
         "n_nodes": len(x),
         "n_fit_nodes": int(fit_mask.sum()),
         "n_loss_nodes": int(loss_mask.sum()),
@@ -721,7 +732,8 @@ def _embed_block(
         f"{r} {pca_info[r]['explained_variance_total']:.0%}" for r in edges
     )
     print(
-        f"{name} block: {block.shape[1] - 1} features for {len(block):,} nodes; PCA "
+        f"{name} block: {block.shape[1] - 1} features for {len(block):,} nodes "
+        f"(size {size} per relation); PCA "
         f"variance kept per relation: {explained}; types from training nodes: "
         f"{_type_counts(spec)}"
     )
