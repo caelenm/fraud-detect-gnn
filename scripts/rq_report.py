@@ -5,10 +5,12 @@
 Reads what the pilot summaries already saved (outputs/<dataset>/compare/
 *_summary.csv from scripts/repeat_summary.py, plus the Z1 and N2 training-CV
 probes in outputs/<dataset>/probe/) and writes outputs/<dataset>/compare/
-rq_results.md: every model setup's mean test PR-AUC over the 3 splits, the
+rq_results.md: every model setup's mean test PR-AUC over its splits, the
 verdict of every pre-registered contrast, and the tables that answer the
-professor's questions of 2026-10-21. Aggregates only; nothing is recomputed
-and nothing is chosen here.
+professor's questions of 2026-10-21. Where a contrast has both a 3-split and
+a 5-split verdict, the 5-split one is used (decided 2026-10-28). Full-budget
+runs (no pilot_ prefix, split 0 only) are listed apart, descriptively.
+Aggregates only; nothing is recomputed and nothing is chosen here.
 """
 
 from __future__ import annotations
@@ -50,6 +52,8 @@ VARIANTS = {
     "": ("all 25", ""),
     "no36": ("without #36", ""),
     "no19": ("without f19", ""),
+    "no19d2": ("without f19", "2"),
+    "no19d4": ("without f19", "4"),
     "no19d16": ("without f19", "16"),
     "no19raw": ("without f19", "raw 64"),
     "only36": ("#36 four only", ""),
@@ -58,8 +62,8 @@ VARIANTS = {
 }
 COLUMNS = ["all 25", "without #36", "without f19", "top 4 without f19", "#36 four only",
            "top 4 (with f19)"]  # fmt: skip
-ROW_ORDER = ["B", "E1", "E2", "E2 (16)", "E2 (raw 64)", "E3", "E3 (16)", "E3 (raw 64)",
-             "N1", "N2"]  # fmt: skip
+ROW_ORDER = ["B", "E1", "E2 (2)", "E2 (4)", "E2", "E2 (16)", "E2 (raw 64)",
+             "E3 (2)", "E3 (4)", "E3", "E3 (16)", "E3 (raw 64)", "N1", "N2"]  # fmt: skip
 SUMMARIES = {
     "repeat_summary": "Phase 2 ladder (2026-10-20)",
     "gnnrand_summary": "Trained vs untrained embeddings (2026-10-23)",
@@ -71,8 +75,21 @@ SUMMARIES = {
     "e3_summary": "Untrained embeddings without f19 (2026-10-27)",
     "size16_summary": "Embedding size 16, without f19 (2026-10-27)",
     "sizeraw_summary": "Raw 64-d embeddings, without f19 (2026-10-27)",
-    "top4no19_summary": "Graph on the four features without f19 (2026-10-27)",
+    "top4no19_summary": "Graph on the four features without f19 (2026-10-29)",
+    "sizeraw_e3_summary": "Raw 64-d untrained embeddings, without f19 (2026-10-29)",
+    "size8_5split": "Size 8, without f19, 5 splits (2026-10-29)",
+    "size16_5split": "Size 16, without f19, 5 splits (2026-10-29)",
+    "sizeraw_5split": "Raw 64, without f19, 5 splits (2026-10-29)",
+    "size24_summary": "Sizes 2 and 4, without f19 (2026-10-29)",
+    "full_no19_summary": "Full budget, without f19, split 0 only (2026-10-29)",
 }
+# Summaries of full-budget runs: one split, descriptive, kept out of the
+# pilot tables.
+FULL_SUMMARIES = {"full_no19_summary"}
+
+
+def n_splits(frame: pd.DataFrame) -> int:
+    return sum(c.startswith("test_delta_split") for c in frame.columns)
 
 
 def parse(feature_set: str) -> tuple[str, str, str]:
@@ -89,22 +106,29 @@ def parse(feature_set: str) -> tuple[str, str, str]:
 
 def label(feature_set: str) -> str:
     setup, column, _ = parse(feature_set)
-    return f"{setup} [{column}]"
+    full = "" if feature_set.startswith("pilot_") else ", full budget"
+    return f"{setup} [{column}{full}]"
 
 
 def scores(frames: dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """Mean ± SD test PR-AUC over the splits of every feature set seen."""
-    rows = {}
-    for frame in frames.values():
+    """Mean ± SD test PR-AUC of every pilot feature set seen, over the most
+    splits any summary has for it (marked when that is not 3)."""
+    rows: dict[str, tuple[int, float, float]] = {}
+    for name, frame in frames.items():
+        if name in FULL_SUMMARIES:
+            continue
+        n = n_splits(frame)
         for r in frame.itertuples():
             for side in ("a", "b"):
                 fs = getattr(r, side)
-                rows[fs] = (getattr(r, f"test_pr_auc_{side}_mean"),
-                            getattr(r, f"test_pr_auc_{side}_sd"))  # fmt: skip
+                if n > rows.get(fs, (0,))[0]:
+                    rows[fs] = (n, getattr(r, f"test_pr_auc_{side}_mean"),
+                                getattr(r, f"test_pr_auc_{side}_sd"))  # fmt: skip
     table = pd.DataFrame(index=ROW_ORDER, columns=COLUMNS, dtype=object)
-    for fs, (mean, sd) in rows.items():
+    for fs, (n, mean, sd) in rows.items():
         setup, column, _ = parse(fs)
-        table.loc[setup, column] = f"{mean:.3f} ± {sd:.3f}"
+        mark = "" if n == 3 else f" ({n} splits)"
+        table.loc[setup, column] = f"{mean:.3f} ± {sd:.3f}{mark}"
     return table.dropna(how="all").dropna(axis=1, how="all").fillna("")
 
 
@@ -119,36 +143,44 @@ def markdown(frame: pd.DataFrame, index: str | None = None) -> str:
     return "\n".join([head, rule, *body])
 
 
-def contrast_rows(frame: pd.DataFrame) -> pd.DataFrame:
+def contrast_rows(frame: pd.DataFrame, descriptive: bool = False) -> pd.DataFrame:
+    n = n_splits(frame)
     out = []
     for r in frame.itertuples():
         deltas = " / ".join(
-            f"{getattr(r, f'test_delta_split{k}'):+.3f}" for k in range(3)
+            f"{getattr(r, f'test_delta_split{k}'):+.3f}" for k in range(n)
         )
+        sd = "" if n == 1 else f" ± {r.test_delta_sd:.3f}"
         out.append({
             "Contrast": f"{label(r.b)} − {label(r.a)}",
-            "Δ splits 0 / 1 / 2": deltas,
-            "Mean ± SD": f"{r.test_delta_mean:+.3f} ± {r.test_delta_sd:.3f}",
+            f"Δ splits {' / '.join(map(str, range(n)))}": deltas,
+            "Mean ± SD": f"{r.test_delta_mean:+.3f}{sd}",
             "CV p": f"{r.p:.2g}",
-            "Verdict": r.verdict,
+            "Verdict": "descriptive (one split)" if descriptive else r.verdict,
         })  # fmt: skip
     return pd.DataFrame(out)
 
 
-def find(frames: dict[str, pd.DataFrame], a: str, b: str) -> pd.Series | None:
-    for frame in frames.values():
+def find(frames: dict[str, pd.DataFrame], a: str, b: str) -> tuple[pd.Series, int] | None:
+    """The pilot contrast B − A from the summary with the most splits."""
+    best = None
+    for name, frame in frames.items():
+        if name in FULL_SUMMARIES:
+            continue
         hit = frame[(frame["a"] == f"pilot_{a}") & (frame["b"] == f"pilot_{b}")]
-        if len(hit):
-            return hit.iloc[0]
-    return None
+        if len(hit) and (best is None or n_splits(frame) > best[1]):
+            best = (hit.iloc[0], n_splits(frame))
+    return best
 
 
 def verdict_line(frames: dict[str, pd.DataFrame], a: str, b: str) -> str:
-    r = find(frames, a, b)
-    if r is None:
-        return "no 3-split result"
+    found = find(frames, a, b)
+    if found is None:
+        return "no result yet"
+    r, n = found
     return (
-        f"{r.test_delta_mean:+.3f} ± {r.test_delta_sd:.3f} ({r.verdict}, p = {r.p:.2g})"
+        f"{r.test_delta_mean:+.3f} ± {r.test_delta_sd:.3f} "
+        f"({r.verdict}, p = {r.p:.2g}, {n} splits)"
     )
 
 
@@ -177,15 +209,17 @@ def main(argv: list[str] | None = None) -> int:
         f"# Amazon results: model setups and the professor's questions ({args.dataset})",
         "",
         "Pilot budget (LightGBM, logistic regression, CatBoost; 10 tuning trials; "
-        "seed 555), 3 grouped split repeats, test PR-AUC of each setup's Model A "
-        "(no-skill 0.095). Verdict rule, fixed before the runs: **supported** if Δ > 0 "
-        "on all 3 splits, mean Δ > SD, and the Nadeau–Bengio corrected t-test over the "
-        "15 grouped training CV folds gives p < 0.05. Otherwise a positive mean is **not "
-        "distinguishable from zero** and a negative mean is labelled **worse**; p is "
-        'two-sided, so a "worse" with p ≥ 0.05 is a lower mean, not a significant drop. '
-        "Source: docs/RESEARCH_PLAN.md §11 and the results database.",
+        "seed 555), 3 grouped split repeats (5 for B, E2 and E3 at sizes 8, 16 and raw "
+        "64), test PR-AUC of each setup's Model A (no-skill 0.095). Verdict rule, fixed "
+        "before the runs: **supported** if Δ > 0 on every split, mean Δ > SD, and the "
+        "Nadeau–Bengio corrected t-test over the grouped training CV folds (5 per "
+        "split) gives p < 0.05. Otherwise a positive mean is **not distinguishable "
+        "from zero** and a negative mean is labelled **worse**; p is two-sided, so a "
+        '"worse" with p ≥ 0.05 is a lower mean, not a significant drop. Where a '
+        "contrast has 3- and 5-split verdicts, the 5-split one is shown (decided "
+        "2026-10-28). Source: docs/RESEARCH_PLAN.md §11 and the results database.",
         "",
-        "## 1. Every model setup (test PR-AUC, mean ± SD over 3 splits)",
+        "## 1. Every model setup (test PR-AUC, mean ± SD over 3 splits unless marked)",
         "",
         markdown(scores(frames), index="Setup"),
         "",
@@ -225,12 +259,31 @@ def main(argv: list[str] | None = None) -> int:
         "",
         "| Size per relation | E2 (DGI) − B | E3 (untrained) − B |",
         "|---|---|---|",
+        f"| 2 | {v(frames, 'm1_own_no19', 'm5_own_gnnssl_no19d2')} | "
+        f"{v(frames, 'm1_own_no19', 'm5r_own_gnnrand_no19d2')} |",
+        f"| 4 | {v(frames, 'm1_own_no19', 'm5_own_gnnssl_no19d4')} | "
+        f"{v(frames, 'm1_own_no19', 'm5r_own_gnnrand_no19d4')} |",
         f"| 8 (default) | {v(frames, 'm1_own_no19', 'm5_own_gnnssl_no19')} | "
         f"{v(frames, 'm1_own_no19', 'm5r_own_gnnrand_no19')} |",
         f"| 16 | {v(frames, 'm1_own_no19', 'm5_own_gnnssl_no19d16')} | "
         f"{v(frames, 'm1_own_no19', 'm5r_own_gnnrand_no19d16')} |",
         f"| raw 64 | {v(frames, 'm1_own_no19', 'm5_own_gnnssl_no19raw')} | "
         f"{v(frames, 'm1_own_no19', 'm5r_own_gnnrand_no19raw')} |",
+        "",
+        "Against the default size 8. By the size rule, fixed before the runs, a size "
+        "below 8 is enough if its E − B is supported and 8 − d is not; a size above 8 "
+        "is needed only if d − 8 is supported:",
+        "",
+        "| Contrast | E2 (DGI) | E3 (untrained) |",
+        "|---|---|---|",
+        f"| 8 − 2 | {v(frames, 'm5_own_gnnssl_no19d2', 'm5_own_gnnssl_no19')} | "
+        f"{v(frames, 'm5r_own_gnnrand_no19d2', 'm5r_own_gnnrand_no19')} |",
+        f"| 8 − 4 | {v(frames, 'm5_own_gnnssl_no19d4', 'm5_own_gnnssl_no19')} | "
+        f"{v(frames, 'm5r_own_gnnrand_no19d4', 'm5r_own_gnnrand_no19')} |",
+        f"| 16 − 8 | {v(frames, 'm5_own_gnnssl_no19', 'm5_own_gnnssl_no19d16')} | "
+        f"{v(frames, 'm5r_own_gnnrand_no19', 'm5r_own_gnnrand_no19d16')} |",
+        f"| raw 64 − 8 | {v(frames, 'm5_own_gnnssl_no19', 'm5_own_gnnssl_no19raw')} | "
+        f"{v(frames, 'm5r_own_gnnrand_no19', 'm5r_own_gnnrand_no19raw')} |",
         "",
         "DeepTune has no label-free reducer for tabular or graph embeddings (its "
         "embeddings come from label-trained models; its autoencoder is image-only), "
@@ -243,6 +296,10 @@ def main(argv: list[str] | None = None) -> int:
         f"| all 25 | 8 | {v(frames, 'm5r_own_gnnrand', 'm5_own_gnnssl')} |",
         f"| without #36 | 8 | "
         f"{v(frames, 'm5r_own_gnnrand_no36', 'm5_own_gnnssl_no36')} |",
+        f"| without f19 | 2 | "
+        f"{v(frames, 'm5r_own_gnnrand_no19d2', 'm5_own_gnnssl_no19d2')} |",
+        f"| without f19 | 4 | "
+        f"{v(frames, 'm5r_own_gnnrand_no19d4', 'm5_own_gnnssl_no19d4')} |",
         f"| without f19 | 8 | "
         f"{v(frames, 'm5r_own_gnnrand_no19', 'm5_own_gnnssl_no19')} |",
         f"| without f19 | 16 | "
@@ -308,12 +365,26 @@ def main(argv: list[str] | None = None) -> int:
                 f"{b} {m:.3f}" for b, m in g.mean().items()) + ".",
             "",
         ]  # fmt: skip
+    full = [f for name, f in frames.items() if name in FULL_SUMMARIES]
+    if full:
+        seen: dict[str, float] = {}
+        for frame in full:
+            for r in frame.itertuples():
+                seen[r.a], seen[r.b] = r.test_pr_auc_a_mean, r.test_pr_auc_b_mean
+        lines += [
+            "### Full budget (6 classifiers, 100 trials; split 0 only, descriptive)",
+            "",
+            "Test PR-AUC: "
+            + "; ".join(f"{label(fs)} {m:.3f}" for fs, m in seen.items())
+            + ". Contrasts are in section 4; one split gives no verdict.",
+            "",
+        ]
     lines += ["## 4. Every contrast", ""]
     for name, frame in frames.items():
         lines += [
             f"### {SUMMARIES[name]} (`{name}`)",
             "",
-            markdown(contrast_rows(frame)),
+            markdown(contrast_rows(frame, descriptive=name in FULL_SUMMARIES)),
             "",
         ]
     out = compare_dir / "rq_results.md"
