@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import os
+from collections.abc import Collection
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -77,13 +78,16 @@ def with_dataset(config: dict[str, Any], dataset: str | None) -> dict[str, Any]:
     repeat, n_repeats = int(out["split"]["repeat"]), int(out["split"]["n_repeats"])
     if not 0 <= repeat < max(n_repeats, 1):
         raise ConfigError(f"split.repeat {repeat} is outside 0..{n_repeats - 1}")
-    out["feature_variants"] = resolve_variants(out.get("feature_variants") or {}, repeat)
     feature_set = out.get("feature_set")
     if feature_set not in out["feature_sets"]:
         raise ConfigError(
             f"Unknown feature set {feature_set!r}; choose from "
             + ", ".join(out["feature_sets"])
         )
+    needed = {b.partition("_")[2] for b in out["feature_sets"][feature_set]} - {""}
+    out["feature_variants"] = resolve_variants(
+        out.get("feature_variants") or {}, repeat, needed
+    )
     check_feature_sets(out)
     return out
 
@@ -93,19 +97,25 @@ KEEP_BY_REPEAT = "keep_by_repeat"
 RAW_SIZE = "raw"
 
 
-def resolve_variants(variants: dict[str, Any], repeat: int) -> dict[str, Any]:
+def resolve_variants(
+    variants: dict[str, Any], repeat: int, needed: Collection[str] = ()
+) -> dict[str, Any]:
     """A {keep_by_repeat: {0: [...], 1: [...]}} variant keeps other own columns
     on each split repeat (F5: a top 4 ranked on each split's own training
-    folds). It becomes {keep: [...]} for the active repeat; others are kept."""
+    folds). It becomes {keep: [...]} for the active repeat; others are kept.
+    One that lists no columns for the active repeat is an error only if the
+    active feature set uses it (`needed`); otherwise it stays unresolved, so a
+    block built from it fails loudly (blocks.variant_spec)."""
     out: dict[str, Any] = {}
     for name, spec in variants.items():
         if isinstance(spec, dict) and set(spec) == {KEEP_BY_REPEAT}:
             by_repeat = {int(k): v for k, v in (spec[KEEP_BY_REPEAT] or {}).items()}
-            if repeat not in by_repeat:
+            if repeat in by_repeat:
+                spec = {"keep": list(by_repeat[repeat])}
+            elif name in needed:
                 raise ConfigError(
                     f"feature_variants.{name} lists no columns for split repeat {repeat}"
                 )
-            spec = {"keep": list(by_repeat[repeat])}
         out[name] = spec
     return out
 
@@ -116,7 +126,9 @@ def check_feature_sets(config: dict[str, Any]) -> None:
     variants = config.get("feature_variants") or {}
     for variant, spec in variants.items():
         keeps = isinstance(spec, dict) and set(spec) == {"keep"} and spec["keep"]
-        if not (keeps or isinstance(spec, list)) or "_" in variant:
+        # Left unresolved by resolve_variants: no columns for this split repeat.
+        unresolved = isinstance(spec, dict) and set(spec) == {KEEP_BY_REPEAT}
+        if not (keeps or unresolved or isinstance(spec, list)) or "_" in variant:
             raise ConfigError(
                 f"feature_variants.{variant}: a variant (a name without '_') is a list "
                 "of own columns to leave out, or {keep: [own columns to keep]}"

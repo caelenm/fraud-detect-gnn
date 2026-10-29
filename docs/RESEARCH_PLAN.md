@@ -813,6 +813,33 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
     - The 32 pilot runs are tagged `rq-plan` (`uv run scripts/results_db.py list --tag rq-plan`).
     - The one-page summary is `uv run scripts/rq_report.py --dataset amazon` → `outputs/amazon/compare/rq_results.md`, copied to [`RQ_RESULTS.md`](RQ_RESULTS.md).
   - **Still to run** (each needs a go): the four-feature graph runs and their summary (about 2 h); E3 raw on split 2 and its summary (about 25 min).
+- **2026-10-29 ~01:55 UTC (third amendment, written BEFORE any of the runs it adds; the 3-split results above were known).** Caelen's go (2026-10-28 22:15 Atlantic): last night's leftovers, then splits 3–4, sizes 2 and 4, and full-budget runs. The laptop should be free by 8 am Atlantic (11:00 UTC), and "a bit over is OK". The queue restarted at 01:24 UTC with the leftovers, which are pre-registered in the second amendment; only their guard times moved to tonight. Order and guards:
+  1. **Leftovers.** E1 and E2 on `top4no19` (splits 0–2) and `top4no19_summary`. Then E3 raw on split 2 (job `r2_pilot_m5r_own_gnnrand_no19raw_rerun`) and `sizeraw_e3_summary` (3-split: E3raw − B; secondary E2raw − E3raw and E3raw − E3₈).
+  2. **Splits 3 and 4** (split seeds 3555, 4555; `--set split.n_repeats=5`; the split seed is `seed + 1000 × repeat`, so splits 0–2 are unchanged).
+     - Runs: `pilot_m1_own_no19`, `pilot_m5_own_gnnssl_no19`, `pilot_m5r_own_gnnrand_no19`, and the same at 16 and at raw 64 (`…_no19d16`, `…_no19raw`). That is 7 rungs × 2 splits = 14 runs, pilot settings.
+     - **Code change needed first:** `with_dataset` used to resolve every `keep_by_repeat` variant for the active split. `top4no19` lists splits 0–2 only, so every split-3/4 run would have failed. Now it fails only if the active feature set uses such a variant (test added).
+  3. **5-split summaries** (`size8_5split`, `size16_5split`, `sizeraw_5split`; prefix `pilot_`, `--repeats 5`).
+     - The contrasts are the 3-split ones extended to 5 splits:
+       - primary: E2_d − B and E3_d − B;
+       - secondary: E2_d − E3_d, E2_d − E2₈ and E3_d − E3₈;
+       - for d = 8, 16 and raw.
+     - Rule: **supported** if Δ > 0 on all 5 splits, the mean Δ exceeds its SD, and the Nadeau–Bengio corrected test over the 25 CV folds gives p < 0.05. Otherwise, as before, a positive mean is not distinguishable and a negative mean is worse.
+     - **Caelen's decision: the 5-split verdict replaces the 3-split verdict** for these contrasts. The 3-split verdicts stay in this log for reference.
+     - The readings are the second amendment's (size rule, "training helps" rule).
+  4. **Sizes 2 and 4** (3 splits, 0–2).
+     - Runs: `pilot_m5_own_gnnssl_no19d{2,4}` and `pilot_m5r_own_gnnrand_no19d{2,4}` (12 runs), then `size24_summary`.
+     - Primary: E2_d − B and E3_d − B.
+     - Secondary: E2₈ − E2_d and E3₈ − E3_d (does 8 beat the smaller size?), and E2_d − E3_d.
+     - **Reading, fixed now:** a size d < 8 is enough if E_d − B is supported and E₈ − E_d is not supported. Otherwise 8 remains the answer.
+     - What was known when this was written: on training CV (Z1), d = 2 and 4 scored below 8 (gnnssl 0.643 / 0.662 against 0.688), and nothing on the test set.
+  5. **Full budget**, split 0 only, the full Model A settings (6 classifiers, 100 trials): `m1_own_no19` (B), then `m2_own_nbr_no19` (E1), then `m5_own_gnnssl_no19` (E2).
+     - Each starts only if it can finish by about 12:30 UTC (B ≈ 2 h, so it starts no later than 10:30 UTC; E1 and E2 no later than 10:00 UTC). B is probably the only one that fits.
+     - These are **descriptive only** (one split, no verdict):
+       - each run's test PR-AUC with its group-bootstrap 95% interval;
+       - the paired Δ with its interval from the comparison page for E1 − B and E2 − B (if both sides ran) and for B_full − B_pilot (the budget effect);
+       - the 5-fold CV p next to it.
+     - Summary `full_no19_summary` (`--repeats 1 --prefix ""`). The verdict column in that table is not the pre-registered rule.
+  - **Guards:** no pilot run starts after 11:00 UTC and no summary after 11:30 UTC; full-budget runs as in step 5.
 
 ---
 

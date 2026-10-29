@@ -202,7 +202,21 @@ def test_a_per_repeat_variant_keeps_that_repeats_columns():
         assert resolved["no19"] == ["own__f19"]  # plain variants unchanged
         assert "own__f19" not in spec[k]
     with pytest.raises(ConfigError, match="split repeat 1"):
-        resolve_variants({"x": {"keep_by_repeat": {0: ["own__f00"]}}}, 1)
+        resolve_variants({"x": {"keep_by_repeat": {0: ["own__f00"]}}}, 1, {"x"})
+
+
+def test_a_split_repeat_without_a_per_repeat_list_fails_only_where_it_is_used():
+    config = load_config(DEFAULT_CONFIG)
+    config["split"]["n_repeats"] = 5
+    config["split"]["repeat"] = 3  # top4no19 lists repeats 0-2 only
+    config["feature_set"] = "pilot_m1_own_no19"
+    resolved = with_dataset(config, "amazon")["feature_variants"]
+    assert resolved["no19"] == ["own__f19"]
+    with pytest.raises(blocks.BlockError, match="top4no19"):
+        blocks.variant_spec("own_top4no19", resolved)
+    config["feature_set"] = "pilot_m1_own_top4no19"
+    with pytest.raises(ConfigError, match="split repeat 3"):
+        with_dataset(config, "amazon")
 
 
 def test_rewiring_keeps_degrees_roughly_and_changes_partners():
