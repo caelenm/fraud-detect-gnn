@@ -1,0 +1,135 @@
+{
+  "schema_version": 1,
+  "run_id": "20261029T055142Z_amazon-pilot-m5r-own-gnnrand-no19d16-r4_2e7ede",
+  "recorded_utc": "2026-10-29T06:09:40Z",
+  "started_utc": "2026-10-29T05:51:42Z",
+  "finished_utc": "2026-10-29T06:09:32Z",
+  "duration_min": 17.8,
+  "device": "rtx4060-laptop",
+  "device_details": {
+    "os": "Linux",
+    "platform": "Linux-5.10.16.3-microsoft-standard-WSL2-x86_64-with-glibc2.41",
+    "wsl": true,
+    "python": "3.13.15",
+    "cpu": "Intel(R) Core(TM) Ultra 9 185H",
+    "gpus": [
+      {
+        "name": "NVIDIA GeForce RTX 4060 Laptop GPU",
+        "driver": "571.96",
+        "memory": "8188 MiB"
+      }
+    ]
+  },
+  "description": "RQ3 Z1 E3 size 16: + untrained GNN embeddings, 16 PCA components per relation, without f19, split 4, pilot",
+  "kind": "pipeline",
+  "status": "ok",
+  "dataset": "amazon",
+  "feature_set": "pilot_m5r_own_gnnrand_no19d16",
+  "split_repeat": 4,
+  "seed": 555,
+  "git_commit": "67e8a0f7e136360264ec281733076f8f9ac61263",
+  "git_dirty": false,
+  "df_analyze_run": "20261029T055144Z",
+  "headline": {
+    "model_a": "catboost (embed)",
+    "test_pr_auc": 0.69190703667204,
+    "test_pr_auc_low": 0.6428208673318244,
+    "test_pr_auc_high": 0.7355866177424571,
+    "test_auroc": 0.9375136454369658,
+    "test_auroc_low": 0.9244562569811052,
+    "test_auroc_high": 0.9492614406582568,
+    "no_skill_pr_auc": 0.09490740740740741,
+    "cv_pr_auc": 0.6766052155866904,
+    "cv_pr_auc_std": 0.0368936195103999,
+    "f1": 0.6529411764705882,
+    "threshold": 0.29714812806811836,
+    "n_train": 5183,
+    "n_test": 3456,
+    "sanity_warning": "Model A's test PR-AUC 0.692 is more than 0.05 below the sanity band (0.91, from an untuned gradient-boosting model; docs/RESEARCH_PLAN.md \u00a72). Assume a pipeline bug (mis-typed features, a wrong label vector, a misaligned split) and investigate before reporting."
+  },
+  "settings": {
+    "htune_trials": 10,
+    "seed": 555,
+    "feature_set": "pilot_m5r_own_gnnrand_no19d16",
+    "split.repeat": 4,
+    "split.n_repeats": 5,
+    "df_analyze.classifiers": [
+      "lgbm",
+      "lr",
+      "catboost"
+    ],
+    "df_analyze.htune_trials": 10,
+    "df_analyze.htune_cls_metric": "bal-acc",
+    "df_analyze.commit": "199e5638620693c267dac715784f1fd0e33fa796",
+    "gnn_embed": {
+      "layers": 2,
+      "hidden": 64,
+      "out_dim": 64,
+      "lr": 0.001,
+      "max_epochs": 300,
+      "patience": 20,
+      "pca_components": 8,
+      "device": "cpu",
+      "usu_edge_fraction": 1.0
+    },
+    "neighbour_agg": {
+      "statistics": [
+        "mean"
+      ],
+      "log1p_degree": true,
+      "rewire_swaps_per_edge": 10
+    },
+    "blocks": [
+      "own_no19",
+      "gnnrand_no19d16"
+    ]
+  },
+  "source": "outputs/amazon_repeat4/pilot_m5r_own_gnnrand_no19d16",
+  "command": "--dataset amazon --set split.n_repeats=5 --set df_analyze.classifiers=[lgbm,lr,catboost] --set df_analyze.htune_trials=10 --set split.repeat=4 --set feature_set=pilot_m5r_own_gnnrand_no19d16",
+  "packages": {
+    "numpy": "2.5.3",
+    "pandas": "3.0.6",
+    "pyarrow": "25.0.1",
+    "scikit-learn": "1.9.1",
+    "scipy": "1.18.1",
+    "pyyaml": "6.0.3",
+    "torch": "2.9.1",
+    "torch-geometric": "2.8.1"
+  },
+  "tags": [
+    "pilot",
+    "rq-plan"
+  ],
+  "results_rows": 16,
+  "results_columns": [
+    "model",
+    "selection",
+    "embed_selector",
+    "cv_pr_auc",
+    "cv_pr_auc_std",
+    "cv_auroc",
+    "cv_bal_acc",
+    "cv_pr_auc_default",
+    "cv_auroc_default",
+    "cv_tuning_gain",
+    "tuning_metric",
+    "tuning_score",
+    "pr_auc",
+    "auroc",
+    "f1",
+    "precision",
+    "recall",
+    "accuracy",
+    "balanced_accuracy",
+    "tp",
+    "fp",
+    "fn",
+    "tn",
+    "threshold",
+    "f1_at_05",
+    "precision_at_05",
+    "recall_at_05",
+    "accuracy_at_05",
+    "balanced_accuracy_at_05"
+  ]
+}

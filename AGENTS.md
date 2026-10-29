@@ -6,7 +6,7 @@ Instructions for AI coding agents (primarily Claude Code) working in this reposi
 
 We ask: **does using a graph improve fraud classification over the same kind of model without one, and can a GNN's representations improve a tabular AutoML pipeline (df-analyze)?** The datasets are two graph fraud benchmarks with tabular node features: **YelpChi** (main; nodes are hotel and restaurant reviews, labelled spam by Yelp's filter, three review–review relations) and **Amazon** (replication; nodes are users, labelled fraudulent or not, three user–user relations). Both come from the preprocessed `.mat` files of the CARE-GNN repository. The model ladder (plan §1) is: (1) df-analyze on each node's own features (Model A); (2) df-analyze plus label-free neighbour aggregates per relation; (3) GraphSAGE with all edges removed; (4) heterogeneous GraphSAGE over all relations; (5) df-analyze plus self-supervised GNN embeddings; (6) df-analyze plus supervised, out-of-fold GNN features (needs a rule change). Every model on a dataset is trained on the same split and scored on the same frozen, grouped test set. The headline metric is PR-AUC, always reported next to the no-skill baseline (the test positive rate). Model 1 and the interfaces the later rungs need (node table, relation edge lists, feature blocks, feature sets) were implemented first. Phase 2 ([`docs/PHASE2_GNN_PLAN.md`](docs/PHASE2_GNN_PLAN.md)) adds Models 2 and 5 as feature blocks (`nbr`, `gnnssl`) and a comparison page; GraphSAGE (Models 3–4) comes later. **Phase 3 ([`docs/PHASE3_FEEDBACK_PLAN.md`](docs/PHASE3_FEEDBACK_PLAN.md)) is the current plan:** it answers the professor's feedback of 2026-10-21 (embedding size and DeepTune, whether training the GNN helps, the 4 important features, more datasets).
 
-## Current state (2026-10-26): read this first
+## Current state (2026-10-29): read this first
 
 **New on 2026-10-21:** the professor's feedback and the plan that answers it ([`docs/PHASE3_FEEDBACK_PLAN.md`](docs/PHASE3_FEEDBACK_PLAN.md); its open questions D1–D5 need the group); the [results database](#results-database) (`results/runs/`); and commits no longer need a PR ([Git workflow](#git-workflow)).
 
@@ -21,7 +21,15 @@ We ask: **does using a graph improve fraud classification over the same kind of 
 - DGI training adds nothing measurable over random weights.
 - The top 4 non-`f19` columns score 0.010 below the 24 (not significant).
 
-Not run: the four-feature graph runs (E1/E2 on `top4no19`) and E3 raw on split 2.
+The four-feature graph runs and E3 raw on split 2, not run that night, ran on 2026-10-29.
+
+**New on 2026-10-29 (branch `exp/rq-plan`, second overnight queue, 33 pilot runs + 1 full-budget run + 7 summaries, tag `rq-plan`; third pre-registration amendment in RESEARCH_PLAN §11):** B, E2 and E3 at sizes 8, 16 and raw 64 now have 5 splits, and their 5-split verdicts replace the 3-split ones (Caelen's decision).
+- Sizes 2 and 4 were added. Both embeddings beat B at every size from 2 to raw 64. Size 8 does not measurably beat 2, so by the rule 2 per relation is enough. Above 8, only the untrained encoder at raw 64 beats 8 (+0.031).
+- DGI training adds nothing measurable at any size.
+- On the four non-`f19` columns the graph still helps: E1 +0.144, E2 +0.121.
+- Full-budget B without `f19`: 0.525 on split 0 (pilot 0.516).
+
+Not run: full-budget E1/E2 (skipped by the guard), and E1/N1/N2 on splits 3–4.
 
 The details are in [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md) §11 (decision log and every result) and §12 (next steps); a short summary is in the README ("Results").
 
@@ -54,8 +62,8 @@ The details are in [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md) §11 (decisi
 
 **Where things are:**
 - **Code:** on `main`; the phase 3 plan and work (branches `claude/awesome-wozniak-wm548a` and `exp/phase3-feedback`) were merged with PR #39 (`f4175e3`). The 2026-10-26 work (RQ1–RQ3: `no19`, the `deg` block, the #36 column map) is on `exp/rq-plan`, committed locally and not pushed.
-- **Results database:** `results/runs/` (committed; see [Results database](#results-database)). It holds the phase 3 runs of 2026-10-23; the earlier runs above have not been recorded in it (D5).
-- **Overnight queue (2026-10-23):** the job runner and its logs live in the WSL clone's `outputs/amazon/phase3_logs/` (never committed): `bin/runner.sh` runs each line of `queue.txt` not yet in `done.txt`, `bin/pilot.sh` runs one pilot rung and records it, and `bin/summary.sh` builds the comparison pages and a verdict table.
+- **Results database:** `results/runs/` (committed; see [Results database](#results-database)). It holds the phase 3 runs of 2026-10-23 and the RQ runs from 2026-10-26 on (tag `rq-plan`); the earlier runs above have not been recorded in it (D5).
+- **Overnight queue (2026-10-23):** the job runner and its logs live in the WSL clone's `outputs/amazon/phase3_logs/` (never committed): `bin/runner.sh` runs each line of `queue.txt` not yet in `done.txt`, `bin/pilot.sh` runs one pilot rung and records it, and `bin/summary.sh` builds the comparison pages and a verdict table. The RQ queue (2026-10-27 and 2026-10-29) works the same way in `outputs/amazon/rq_logs/`, with `bin/pilot5.sh` (5 split repeats), `bin/summaryN.sh`, `bin/full.sh` and `bin/fullsum.sh`.
 - **Results:** in the WSL clone's `outputs/amazon*` and `data/processed/amazon*`. Split repeats 1–2 live in `outputs/amazon_repeat1/2`, which `pack_artifacts.py` does not pack (it packs repeat 0 only).
 - **Group bundle:** `fraud_artifacts_amazon_20261019T220559Z.tgz` (148 MB, split 0), on OneDrive.
 - **CFPB-era files** moved out of the clone to `~/projects/fraud-detect-gnn-cfpb-archive/`.

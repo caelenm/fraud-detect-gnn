@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "run_id": "20261029T023123Z_amazon_91fb7a",
+  "recorded_utc": "2026-10-29T02:34:36Z",
+  "started_utc": "2026-10-29T02:31:23Z",
+  "finished_utc": "2026-10-29T02:34:36Z",
+  "duration_min": 3.2,
+  "device": "rtx4060-laptop",
+  "device_details": {
+    "os": "Linux",
+    "platform": "Linux-5.10.16.3-microsoft-standard-WSL2-x86_64-with-glibc2.41",
+    "wsl": true,
+    "python": "3.13.15",
+    "cpu": "Intel(R) Core(TM) Ultra 9 185H",
+    "gpus": [
+      {
+        "name": "NVIDIA GeForce RTX 4060 Laptop GPU",
+        "driver": "571.96",
+        "memory": "8188 MiB"
+      }
+    ]
+  },
+  "description": "RQ1 F5 + graph: 3-split verdicts E1-B, E2-B on top4no19 (secondary E2-E1), pilot rungs",
+  "kind": "compare",
+  "status": "ok",
+  "dataset": "amazon",
+  "feature_set": null,
+  "split_repeat": null,
+  "seed": null,
+  "git_commit": "67e8a0f7e136360264ec281733076f8f9ac61263",
+  "git_dirty": false,
+  "command": "scripts/repeat_summary.py --dataset amazon --repeats 3 --prefix pilot_ --name top4no19_summary --pairs m1_own_top4no19:m2_own_nbr_top4no19 m1_own_top4no19:m5_own_gnnssl_top4no19 m2_own_nbr_top4no19:m5_own_gnnssl_top4no19",
+  "tags": [
+    "pilot",
+    "rq-plan"
+  ],
+  "source": "outputs/amazon/compare/top4no19_summary.csv",
+  "results_rows": 3,
+  "results_columns": [
+    "variant",
+    "contrast",
+    "a",
+    "b",
+    "test_delta_split0",
+    "test_delta_split1",
+    "test_delta_split2",
+    "test_delta_mean",
+    "test_delta_sd",
+    "test_pr_auc_a_mean",
+    "test_pr_auc_a_sd",
+    "test_pr_auc_b_mean",
+    "test_pr_auc_b_sd",
+    "cv_folds",
+    "cv_delta_mean",
+    "corrected_t",
+    "p",
+    "verdict"
+  ]
+}

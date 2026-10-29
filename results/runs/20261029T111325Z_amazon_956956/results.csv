@@ -1,0 +1,2 @@
+variant,contrast,a,b,test_delta_split0,test_delta_mean,test_delta_sd,test_pr_auc_a_mean,test_pr_auc_a_sd,test_pr_auc_b_mean,test_pr_auc_b_sd,cv_folds,cv_delta_mean,corrected_t,p,verdict
+-,m1_own_no19 - pilot_m1_own_no19,pilot_m1_own_no19,m1_own_no19,0.0082743947005337,0.0082743947005337,,0.516334753834628,,0.5246091485351617,,5,0.0132082867112397,0.6228216156009949,0.5671512586980894,not distinguishable from zero

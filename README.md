@@ -168,33 +168,36 @@ Answers so far to the professor's feedback of 2026-10-21 ([`docs/PHASE3_FEEDBACK
 
 Caveats: pilot budget and one seed per run. The top 4 were ranked on split 0's training folds, so splits 1 and 2 (whose test sets include some of those nodes) are mildly optimistic. On their own folds, those splits would swap `f18` for `f12`. Verdict tables: `outputs/amazon/compare/{only36,top4,gnnrand}_summary.md`.
 
-## Results (RQ pilots without f19, Amazon, 2026-10-27)
+## Results (RQ pilots without f19, Amazon, 2026-10-27 and 2026-10-29)
 
-`f19` is a helpfulness-vote count, and the label is computed from helpfulness votes, so `f19` leaks the label. These pilots therefore drop `f19` and keep the other 24 columns. Settings are the same as above: 3 classifiers, 10 trials, 3 splits, and verdicts pre-registered in `docs/RESEARCH_PLAN.md` §11. The full page, with every setup and contrast, is [`docs/RQ_RESULTS.md`](docs/RQ_RESULTS.md).
+`f19` is a helpfulness-vote count, and the label is computed from helpfulness votes, so `f19` leaks the label. These pilots therefore drop `f19` and keep the other 24 columns. Settings are the same as above: 3 classifiers, 10 trials, 3 splits (5 for B, E2 and E3 at sizes 8, 16 and raw 64), and verdicts pre-registered in `docs/RESEARCH_PLAN.md` §11. Where a contrast has 5 splits, its 5-split verdict replaces the 3-split one. The full page, with every setup and contrast, is [`docs/RQ_RESULTS.md`](docs/RQ_RESULTS.md).
 
-Test PR-AUC is the mean ± SD over 3 splits; no skill is 0.095.
+Test PR-AUC is the mean ± SD over splits 0–2, so every row is on the same splits; no skill is 0.095.
 
-| Setup | Features | Test PR-AUC |
-|---|---|---|
-| B | own | 0.539 ± 0.025 |
-| N1 | own + degree | 0.651 ± 0.001 |
-| N2 | own + neighbour means on a rewired graph | 0.626 ± 0.007 |
-| E1 | own + neighbour means | **0.702 ± 0.004** |
-| E2 | own + DGI embeddings, 8 per relation | 0.669 ± 0.006 |
-| E3 | own + untrained GNN embeddings, 8 per relation | 0.666 ± 0.013 |
+| Setup | Features | Test PR-AUC (splits 0–2) | Splits 0–4 |
+|---|---|---|---|
+| B | own | 0.539 ± 0.025 | 0.544 ± 0.019 |
+| N1 | own + degree | 0.651 ± 0.001 | |
+| N2 | own + neighbour means on a rewired graph | 0.626 ± 0.007 | |
+| E1 | own + neighbour means | **0.702 ± 0.004** | |
+| E2 | own + DGI embeddings, 8 per relation | 0.669 ± 0.006 | 0.677 ± 0.015 |
+| E2 (2 / 4 / 16 / raw 64) | the same at other sizes | 0.648 / 0.651 / 0.678 / 0.683 | — / — / 0.693 / 0.693 |
+| E3 | own + untrained GNN embeddings, 8 per relation | 0.666 ± 0.013 | 0.672 ± 0.012 |
+| E3 (2 / 4 / 16 / raw 64) | the same at other sizes | 0.662 / 0.668 / 0.660 / 0.695 | — / — / 0.675 / 0.702 |
 
-For comparison, B with all 25 features (`f19` included) scores 0.918.
+For comparison, B with all 25 features (`f19` included) scores 0.918. At the full Model A budget (6 classifiers, 100 trials; split 0 only), B without `f19` scores 0.525 [0.471, 0.585], against 0.516 for the pilot on the same split.
 
 | Question | Finding (test Δ PR-AUC, mean ± SD) |
 |---|---|
-| **How much does `f19` drive the results? (RQ1)** | Dropping it costs **−0.379 ± 0.024**. With `f19`, the graph adds about +0.01. Without it, neighbour means add **+0.163** and DGI embeddings **+0.130** (both supported). Every no-`f19` number is within 0.01 of the earlier "without #36" one. |
+| **How much does `f19` drive the results? (RQ1)** | Dropping it costs **−0.379 ± 0.024**. With `f19`, the graph adds about +0.01. Without it, neighbour means add **+0.163** and DGI embeddings **+0.130** (both supported; DGI +0.133 over 5 splits). Every no-`f19` number is within 0.01 of the earlier "without #36" one. |
 | **Is the graph gain real structure? (RQ2)** | E1's +0.163 splits three ways:<br>• degree alone: +0.112 (supported);<br>• neighbour means on a degree-matched random graph: −0.025 on top of degree;<br>• the real edges: **+0.076** (supported). This is a lower bound, because the rewired graph keeps some real edges. |
-| **Embedding size (professor)** | Both embeddings beat B at 8, 16 and raw 64 per relation (all supported). Neither 16 nor raw 64 measurably beats 8 (+0.009 and +0.014 for DGI, not distinguishable). **8 per relation (24 columns) is enough.** DeepTune has no label-free reducer for these embeddings, so PCA is used. The untrained encoder at raw 64 ran on 2 of 3 splits, so it has no verdict. |
-| **Does training the GNN help? (professor)** | **No measurable effect.** DGI minus the same encoder with random weights is +0.003 ± 0.007 at size 8 and +0.018 ± 0.025 at size 16 (not distinguishable). GraphSAGE trained on the labels is not built yet. |
-| **Just the 4 important features? (professor)** | Each split's top 4 of the 24 non-`f19` columns score 0.010 below all 24. That is lower on all 3 splits but not significant (p = 0.60). Whether the graph still adds to these four is not known yet: those runs did not fit in the night. |
+| **Embedding size (professor)** | Both embeddings beat B at every size tried, 2, 4, 8, 16 and raw 64 per relation (all supported). Size 8 does not measurably beat 2 or 4 (DGI +0.021 and +0.018, untrained +0.004 and −0.002; not distinguishable), so by the pre-registered rule **2 per relation (6 columns) is enough**. For DGI, though, 8 scored above 2 on all 3 splits. Above 8, only the untrained encoder at raw 64 measurably beats 8 (+0.031 ± 0.013 over 5 splits, supported); DGI at 16 or raw 64 does not (+0.016 each). DeepTune has no label-free reducer for these embeddings, so PCA is used. |
+| **Does training the GNN help? (professor)** | **No measurable effect at any size.** DGI minus the same encoder with random weights: −0.015 at 2 and −0.018 at 4 (3 splits); +0.005 at 8, +0.019 at 16 and −0.009 at raw 64 (5 splits). None is supported. GraphSAGE trained on the labels is not built yet. |
+| **Just the 4 important features? (professor)** | Each split's top 4 of the 24 non-`f19` columns score 0.010 below all 24. That is lower on all 3 splits but not significant (p = 0.60). **The graph still helps on the four:** neighbour means add +0.144 ± 0.021 and DGI embeddings +0.121 ± 0.029 (both supported), close to the gains on all 24 (+0.163 and +0.130). On the four, DGI scores below neighbour means (−0.023, p = 0.047). |
+| **Does a larger tuning budget change B?** | Hardly. B without `f19` at the full budget is +0.008 above the pilot on split 0 (CV p = 0.57; one split, descriptive). |
 | **More datasets (professor)** | Amazon is the main dataset and YelpChi the validation dataset (decided 2026-10-26). |
 
-Caveats: pilot budget, one seed per run, 3 splits. Not run yet: the four-feature graph runs, the untrained encoder at raw 64 on split 2, GraphSAGE and full-budget runs.
+Caveats: pilot budget, one seed per run, 3 splits (5 where stated); the full-budget run is one split. Not run yet: full-budget E1 and E2, E1/N1/N2 on splits 3–4, and GraphSAGE.
 
 ## Graph feature blocks (Models 2 and 5)
 

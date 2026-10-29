@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "run_id": "20261029T094738Z_amazon_409d22",
+  "recorded_utc": "2026-10-29T09:58:22Z",
+  "started_utc": "2026-10-29T09:47:38Z",
+  "finished_utc": "2026-10-29T09:58:22Z",
+  "duration_min": 10.7,
+  "device": "rtx4060-laptop",
+  "device_details": {
+    "os": "Linux",
+    "platform": "Linux-5.10.16.3-microsoft-standard-WSL2-x86_64-with-glibc2.41",
+    "wsl": true,
+    "python": "3.13.15",
+    "cpu": "Intel(R) Core(TM) Ultra 9 185H",
+    "gpus": [
+      {
+        "name": "NVIDIA GeForce RTX 4060 Laptop GPU",
+        "driver": "571.96",
+        "memory": "8188 MiB"
+      }
+    ]
+  },
+  "description": "RQ3 Z1: 3-split verdicts at sizes 4 and 2 on Amazon no19: E2-B, E3-B (secondary E2_8-E2_d, E3_8-E3_d, E2-E3), pilot rungs",
+  "kind": "compare",
+  "status": "ok",
+  "dataset": "amazon",
+  "feature_set": null,
+  "split_repeat": null,
+  "seed": null,
+  "git_commit": "67e8a0f7e136360264ec281733076f8f9ac61263",
+  "git_dirty": false,
+  "command": "scripts/repeat_summary.py --dataset amazon --repeats 3 --prefix pilot_ --name size24_summary --pairs m1_own_no19:m5_own_gnnssl_no19d4 m1_own_no19:m5r_own_gnnrand_no19d4 m5_own_gnnssl_no19d4:m5_own_gnnssl_no19 m5r_own_gnnrand_no19d4:m5r_own_gnnrand_no19 m5r_own_gnnrand_no19d4:m5_own_gnnssl_no19d4 m1_own_no19:m5_own_gnnssl_no19d2 m1_own_no19:m5r_own_gnnrand_no19d2 m5_own_gnnssl_no19d2:m5_own_gnnssl_no19 m5r_own_gnnrand_no19d2:m5r_own_gnnrand_no19 m5r_own_gnnrand_no19d2:m5_own_gnnssl_no19d2",
+  "tags": [
+    "pilot",
+    "rq-plan",
+    "splits3"
+  ],
+  "source": "outputs/amazon/compare/size24_summary.csv",
+  "results_rows": 10,
+  "results_columns": [
+    "variant",
+    "contrast",
+    "a",
+    "b",
+    "test_delta_split0",
+    "test_delta_split1",
+    "test_delta_split2",
+    "test_delta_mean",
+    "test_delta_sd",
+    "test_pr_auc_a_mean",
+    "test_pr_auc_a_sd",
+    "test_pr_auc_b_mean",
+    "test_pr_auc_b_sd",
+    "cv_folds",
+    "cv_delta_mean",
+    "corrected_t",
+    "p",
+    "verdict"
+  ]
+}

@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "run_id": "20261029T111325Z_amazon_956956",
+  "recorded_utc": "2026-10-29T11:13:48Z",
+  "started_utc": "2026-10-29T11:13:25Z",
+  "finished_utc": "2026-10-29T11:13:48Z",
+  "duration_min": 0.4,
+  "device": "rtx4060-laptop",
+  "device_details": {
+    "os": "Linux",
+    "platform": "Linux-5.10.16.3-microsoft-standard-WSL2-x86_64-with-glibc2.41",
+    "wsl": true,
+    "python": "3.13.15",
+    "cpu": "Intel(R) Core(TM) Ultra 9 185H",
+    "gpus": [
+      {
+        "name": "NVIDIA GeForce RTX 4060 Laptop GPU",
+        "driver": "571.96",
+        "memory": "8188 MiB"
+      }
+    ]
+  },
+  "description": "Full budget, split 0 only (descriptive, no verdict): B_full-B_pilot, E1_full-B_full, E2_full-B_full on Amazon no19",
+  "kind": "compare",
+  "status": "ok",
+  "dataset": "amazon",
+  "feature_set": null,
+  "split_repeat": null,
+  "seed": null,
+  "git_commit": "67e8a0f7e136360264ec281733076f8f9ac61263",
+  "git_dirty": false,
+  "command": "scripts/repeat_summary.py --dataset amazon --repeats 1 --prefix '' --name full_no19_summary --pairs pilot_m1_own_no19:m1_own_no19",
+  "tags": [
+    "rq-plan",
+    "full"
+  ],
+  "source": "outputs/amazon/compare/full_no19_summary.csv",
+  "results_rows": 1,
+  "results_columns": [
+    "variant",
+    "contrast",
+    "a",
+    "b",
+    "test_delta_split0",
+    "test_delta_mean",
+    "test_delta_sd",
+    "test_pr_auc_a_mean",
+    "test_pr_auc_a_sd",
+    "test_pr_auc_b_mean",
+    "test_pr_auc_b_sd",
+    "cv_folds",
+    "cv_delta_mean",
+    "corrected_t",
+    "p",
+    "verdict"
+  ]
+}

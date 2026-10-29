@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "run_id": "20261029T065903Z_amazon_551909",
+  "recorded_utc": "2026-10-29T07:02:42Z",
+  "started_utc": "2026-10-29T06:59:03Z",
+  "finished_utc": "2026-10-29T07:02:41Z",
+  "duration_min": 3.6,
+  "device": "rtx4060-laptop",
+  "device_details": {
+    "os": "Linux",
+    "platform": "Linux-5.10.16.3-microsoft-standard-WSL2-x86_64-with-glibc2.41",
+    "wsl": true,
+    "python": "3.13.15",
+    "cpu": "Intel(R) Core(TM) Ultra 9 185H",
+    "gpus": [
+      {
+        "name": "NVIDIA GeForce RTX 4060 Laptop GPU",
+        "driver": "571.96",
+        "memory": "8188 MiB"
+      }
+    ]
+  },
+  "description": "RQ3 Z1: 5-split verdicts at raw 64 on Amazon no19: E2-B, E3-B (secondary E2-E3, E2 raw-8, E3 raw-8), pilot rungs (replaces the 3-split verdicts)",
+  "kind": "compare",
+  "status": "ok",
+  "dataset": "amazon",
+  "feature_set": null,
+  "split_repeat": null,
+  "seed": null,
+  "git_commit": "67e8a0f7e136360264ec281733076f8f9ac61263",
+  "git_dirty": false,
+  "command": "scripts/repeat_summary.py --dataset amazon --repeats 5 --prefix pilot_ --name sizeraw_5split --pairs m1_own_no19:m5_own_gnnssl_no19raw m1_own_no19:m5r_own_gnnrand_no19raw m5r_own_gnnrand_no19raw:m5_own_gnnssl_no19raw m5_own_gnnssl_no19:m5_own_gnnssl_no19raw m5r_own_gnnrand_no19:m5r_own_gnnrand_no19raw",
+  "tags": [
+    "pilot",
+    "rq-plan",
+    "splits5"
+  ],
+  "source": "outputs/amazon/compare/sizeraw_5split.csv",
+  "results_rows": 5,
+  "results_columns": [
+    "variant",
+    "contrast",
+    "a",
+    "b",
+    "test_delta_split0",
+    "test_delta_split1",
+    "test_delta_split2",
+    "test_delta_split3",
+    "test_delta_split4",
+    "test_delta_mean",
+    "test_delta_sd",
+    "test_pr_auc_a_mean",
+    "test_pr_auc_a_sd",
+    "test_pr_auc_b_mean",
+    "test_pr_auc_b_sd",
+    "cv_folds",
+    "cv_delta_mean",
+    "corrected_t",
+    "p",
+    "verdict"
+  ]
+}

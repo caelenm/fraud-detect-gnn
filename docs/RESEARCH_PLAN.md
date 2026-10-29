@@ -840,6 +840,91 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
        - the 5-fold CV p next to it.
      - Summary `full_no19_summary` (`--repeats 1 --prefix ""`). The verdict column in that table is not the pre-registered rule.
   - **Guards:** no pilot run starts after 11:00 UTC and no summary after 11:30 UTC; full-budget runs as in step 5.
+- **2026-10-29 (overnight results, third amendment; Amazon, pilot settings, RTX 4060 laptop).** The queue ran from 01:18 to 11:13 UTC (08:13 Atlantic).
+  - **Coverage:**
+    - All 33 pilot runs and all 7 summaries finished, all exit 0.
+    - Full budget: `m1_own_no19` (B) started at 09:58 UTC and took 75 min. `m2_own_nbr_no19` (E1) and `m5_own_gnnssl_no19` (E2) were skipped by their 10:00 UTC guard, so `full_no19_summary` holds only B_full − B_pilot.
+    - Every df-analyze run passed the split and column-type checks. The full B run raised the sanity-band warning (0.525 against 0.91). That is expected without `f19`; `m1_own_no36` raised it too.
+  - **Test PR-AUC per split** (0 / 1 / 2 / 3 / 4; splits 0–2 of B, F5 and E2/E3 at 8, 16 and raw are from 2026-10-27), no-skill 0.095:
+
+    | Setup | Feature set | Test PR-AUC |
+    |---|---|---|
+    | B | `pilot_m1_own_no19` | 0.516 / 0.535 / 0.565 / 0.558 / 0.542 |
+    | E2 (d 2) | `pilot_m5_own_gnnssl_no19d2` | 0.641 / 0.647 / 0.656 |
+    | E2 (d 4) | `pilot_m5_own_gnnssl_no19d4` | 0.650 / 0.663 / 0.639 |
+    | E2 (d 8) | `pilot_m5_own_gnnssl_no19` | 0.662 / 0.674 / 0.671 / 0.702 / 0.675 |
+    | E2 (d 16) | `pilot_m5_own_gnnssl_no19d16` | 0.681 / 0.677 / 0.676 / 0.731 / 0.701 |
+    | E2 (raw 64) | `pilot_m5_own_gnnssl_no19raw` | 0.672 / 0.699 / 0.677 / 0.726 / 0.692 |
+    | E3 (d 2) | `pilot_m5r_own_gnnrand_no19d2` | 0.646 / 0.680 / 0.661 |
+    | E3 (d 4) | `pilot_m5r_own_gnnrand_no19d4` | 0.656 / 0.678 / 0.670 |
+    | E3 (d 8) | `pilot_m5r_own_gnnrand_no19` | 0.651 / 0.676 / 0.672 / 0.685 / 0.675 |
+    | E3 (d 16) | `pilot_m5r_own_gnnrand_no19d16` | 0.647 / 0.646 / 0.687 / 0.702 / 0.692 |
+    | E3 (raw 64) | `pilot_m5r_own_gnnrand_no19raw` | 0.693 / 0.694 / 0.698 / 0.731 / 0.696 |
+    | F5 | `pilot_m1_own_top4no19` | 0.504 / 0.531 / 0.553 |
+    | E1 on F5's four | `pilot_m2_own_nbr_top4no19` | 0.671 / 0.667 / 0.681 |
+    | E2 on F5's four | `pilot_m5_own_gnnssl_top4no19` | 0.651 / 0.657 / 0.643 |
+    | B, full budget | `m1_own_no19` | split 0 only: 0.525 [0.471, 0.585] (CatBoost; AUROC 0.894 [0.874, 0.910]) |
+
+  - **Verdicts** (test Δ, B − A as written; Nadeau–Bengio p, two-sided; "worse" = negative mean, significant only if p < 0.05). By Caelen's decision the 5-split rows replace the 3-split rows of 2026-10-27 and the 3-split `sizeraw_e3_summary` of tonight:
+
+    | Contrast | Role | Splits | Δ per split | Mean ± SD | p | Verdict |
+    |---|---|---|---|---|---|---|
+    | E2₈ − B | primary | 5 | +0.146 / +0.139 / +0.105 / +0.144 / +0.133 | +0.133 ± 0.016 | 3.2e-05 | supported |
+    | E3₈ − B | primary | 5 | +0.135 / +0.141 / +0.107 / +0.126 / +0.132 | +0.128 ± 0.013 | 1.6e-05 | supported |
+    | E2₈ − E3₈ | secondary | 5 | +0.011 / −0.002 / −0.001 / +0.018 / +0.001 | +0.005 ± 0.009 | 0.50 | not distinguishable |
+    | E2₁₆ − B | primary | 5 | +0.165 / +0.142 / +0.111 / +0.173 / +0.159 | +0.150 ± 0.025 | 5.4e-06 | supported |
+    | E3₁₆ − B | primary | 5 | +0.130 / +0.110 / +0.122 / +0.144 / +0.150 | +0.131 ± 0.016 | 2.8e-07 | supported |
+    | E2₁₆ − E3₁₆ | secondary | 5 | +0.035 / +0.031 / −0.011 / +0.029 / +0.010 | +0.019 ± 0.019 | 0.71 | not distinguishable |
+    | E2₁₆ − E2₈ | secondary | 5 | +0.019 / +0.003 / +0.005 / +0.029 / +0.026 | +0.016 ± 0.012 | 0.37 | not distinguishable |
+    | E3₁₆ − E3₈ | secondary | 5 | −0.004 / −0.030 / +0.015 / +0.018 / +0.017 | +0.003 ± 0.021 | 0.21 | not distinguishable |
+    | E2raw − B | primary | 5 | +0.156 / +0.164 / +0.112 / +0.167 / +0.150 | +0.150 ± 0.022 | 9.3e-07 | supported |
+    | E3raw − B | primary | 5 | +0.177 / +0.158 / +0.132 / +0.173 / +0.154 | +0.159 ± 0.018 | 7.1e-07 | supported |
+    | E2raw − E3raw | secondary | 5 | −0.021 / +0.006 / −0.021 / −0.005 / −0.004 | −0.009 ± 0.012 | 0.51 | worse (not significant) |
+    | E2raw − E2₈ | secondary | 5 | +0.010 / +0.025 / +0.006 / +0.023 / +0.017 | +0.016 ± 0.008 | 0.53 | not distinguishable |
+    | E3raw − E3₈ | secondary | 5 | +0.042 / +0.018 / +0.026 / +0.047 / +0.022 | +0.031 ± 0.013 | 0.019 | supported |
+    | E2₄ − B | primary | 3 | +0.133 / +0.128 / +0.074 | +0.112 ± 0.033 | 0.0002 | supported |
+    | E3₄ − B | primary | 3 | +0.140 / +0.143 / +0.105 | +0.129 ± 0.021 | 0.00026 | supported |
+    | E2₈ − E2₄ | secondary | 3 | +0.012 / +0.011 / +0.032 | +0.018 ± 0.012 | 0.89 | not distinguishable |
+    | E3₈ − E3₄ | secondary | 3 | −0.005 / −0.002 / +0.001 | −0.002 ± 0.003 | 0.53 | worse (not significant) |
+    | E2₄ − E3₄ | secondary | 3 | −0.006 / −0.015 / −0.031 | −0.018 ± 0.013 | 0.28 | worse (not significant) |
+    | E2₂ − B | primary | 3 | +0.124 / +0.111 / +0.090 | +0.109 ± 0.017 | 0.00074 | supported |
+    | E3₂ − B | primary | 3 | +0.130 / +0.145 / +0.096 | +0.123 ± 0.025 | 0.00027 | supported |
+    | E2₈ − E2₂ | secondary | 3 | +0.021 / +0.027 / +0.015 | +0.021 ± 0.006 | 0.42 | not distinguishable |
+    | E3₈ − E3₂ | secondary | 3 | +0.005 / −0.004 / +0.011 | +0.004 ± 0.008 | 0.46 | not distinguishable |
+    | E2₂ − E3₂ | secondary | 3 | −0.005 / −0.033 / −0.005 | −0.015 ± 0.016 | 0.91 | worse (not significant) |
+    | E1 − B_top4no19 | primary | 3 | +0.167 / +0.136 / +0.128 | +0.144 ± 0.021 | 3.3e-08 | supported |
+    | E2 − B_top4no19 | primary | 3 | +0.147 / +0.127 / +0.090 | +0.121 ± 0.029 | 0.00022 | supported |
+    | E2 − E1 (on top4no19) | secondary | 3 | −0.020 / −0.010 / −0.038 | −0.023 ± 0.014 | 0.047 | worse (significant) |
+    | B_full − B_pilot | descriptive | 1 | +0.008 | — | 0.57 | none (one split) |
+
+    Two verdicts changed with splits 3–4. E3₁₆ − E3₈ went from worse (−0.007) to not distinguishable (+0.003). E3raw − E3₈ went from not distinguishable (3 splits, +0.029, p = 0.071) to supported. The others kept their verdicts.
+  - **Readings** (by the rules fixed beforehand):
+    - **Embedding size (professor; RQ3).**
+      - Both blocks beat B at every size tried, from 2 per relation to raw 64 (all supported).
+      - Below 8: 8 does not measurably beat 2 or 4 for either block. By the third amendment's rule, **2 per relation (6 columns) is enough.**
+      - Caveat to that: for DGI, 8 scored above 2 on all 3 splits (+0.021 ± 0.006) and failed only the CV test (p = 0.42), and the Z1 training-CV probe also rises from 2 to 8. Sizes 2 and 4 have 3 splits, not 5.
+      - Above 8: DGI at 16 or raw 64 does not measurably beat 8. The untrained encoder at raw 64 does (+0.031 ± 0.013, supported over 5 splits).
+      - The rule compares each size with 8 only, so it does not say whether raw 64 beats 2. Descriptively (not pre-registered), the untrained encoder's raw 64 is +0.033 above its size 2 on splits 0–2, higher on all three.
+      - In short: two PCA components per relation already give most of the graph gain (E − B +0.11 to +0.12, against +0.14 to +0.16 at raw 64 on the same 3 splits), and only the untrained encoder gains measurably from keeping all 64 dimensions over 8.
+    - **Training the GNN (professor; RQ3).** E2 − E3 is not supported at any size: 2 −0.015 and 4 −0.018 (3 splits); 8 +0.005, 16 +0.019 and raw 64 −0.009 (5 splits). By the "training helps" rule, DGI training does not measurably help over the same encoder with random weights at any size from 2 to 64. GraphSAGE trained on the labels is not built.
+    - **Four features (professor; RQ1).**
+      - The graph still adds to each split's four non-`f19` columns: neighbour means +0.144 and DGI +0.121 (both supported). Those gains are close to the gains on all 24 (+0.163 and +0.130 on the same splits).
+      - On the four, DGI scores below neighbour means (−0.023, lower on all 3 splits, p = 0.047). That repeats the without-#36 result of 2026-10-20 (−0.033).
+    - **Full budget (descriptive, one split).** B without `f19` at the full budget scores 0.525 [0.471, 0.585] on split 0, against the pilot's 0.516 (+0.008, CV p = 0.57). The pilot budget does not measurably understate B. Full-budget E1 and E2 were not run.
+    - **Not pre-registered, descriptive only:** on splits 0–2, neighbour means (E1, 0.703) still score above every embedding rung. The best embedding rung there is E3 raw (0.695).
+  - **Results DB:**
+    - Summaries:
+      - `20261029T023123Z_amazon_91fb7a` (four features + graph)
+      - `20261029T025625Z_amazon_19faef` (E3 raw, 3 splits; replaced by the 5-split one)
+      - `20261029T065310Z_amazon_d0bc69` (size 8, 5 splits)
+      - `20261029T065523Z_amazon_27623e` (size 16, 5 splits)
+      - `20261029T065903Z_amazon_551909` (raw 64, 5 splits)
+      - `20261029T094738Z_amazon_409d22` (sizes 2 and 4)
+      - `20261029T111325Z_amazon_956956` (full budget, descriptive)
+    - Full-budget B: `20261029T095827Z_amazon-m1-own-no19_f961b5`.
+    - The 33 pilot runs are tagged `rq-plan`; the summaries of 5 splits are also tagged `splits5`.
+    - [`RQ_RESULTS.md`](RQ_RESULTS.md) is regenerated from all 17 summaries.
+  - **Still to run** (each needs a go): full-budget E1 and E2 without `f19` on split 0 (about 1.5–2 h each); E1, N1 and N2 on splits 3–4, if the RQ1 and RQ2 verdicts should also rest on 5 splits (6 runs, about 1.5 h).
 
 ---
 
