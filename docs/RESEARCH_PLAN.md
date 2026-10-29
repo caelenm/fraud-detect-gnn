@@ -925,6 +925,16 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
     - The 33 pilot runs are tagged `rq-plan`; the summaries of 5 splits are also tagged `splits5`.
     - [`RQ_RESULTS.md`](RQ_RESULTS.md) is regenerated from all 17 summaries.
   - **Still to run** (each needs a go): full-budget E1 and E2 without `f19` on split 0 (about 1.5–2 h each); E1, N1 and N2 on splits 3–4, if the RQ1 and RQ2 verdicts should also rest on 5 splits (6 runs, about 1.5 h).
+- **2026-10-29 ~11:30 UTC (fourth amendment, written BEFORE the runs it adds; every result above was known).** Caelen asked to queue the two full-budget runs the guard skipped. They are queued in `outputs/amazon/rq_logs/queue.txt` but not started; the runner starts on Caelen's go.
+  - **Runs**, split 0 only, at the full Model A settings (6 classifiers, 100 trials), in this order: `m2_own_nbr_no19` (E1), then `m5_own_gnnssl_no19` (E2).
+    - Both reuse split 0's `nbr_no19` and `gnnssl_no19` blocks, the ones their pilots used, so only the df-analyze budget differs from the pilots.
+    - Job names `full2_…`, so last night's skip logs are kept.
+  - **Guards:** the third amendment's, moved to the night of 2026-10-29/30. Each run starts no later than 10:00 UTC on 2026-10-30, and the summary no later than 13:00 UTC.
+  - **Summary:** `full_no19_summary`, rerun with every complete pair. It is recorded as a new results-DB entry; the earlier entry (`20261029T111325Z_amazon_956956`, B only) stays. Pairs:
+    - B_full − B_pilot, E1_full − B_full and E2_full − B_full, as in the third amendment;
+    - added now: E1_full − E1_pilot and E2_full − E2_pilot (does the full budget change the graph rungs?).
+  - **Descriptive only** (one split, no verdict): each run's test PR-AUC with its group-bootstrap 95% interval, each pair's paired Δ with its interval from the comparison page, and the 5-fold CV p next to it.
+  - **What was known when this was written:** on split 0, the pilots scored E1 0.703 and E2 0.662, and full-budget B scored 0.525 (pilot 0.516).
 
 ---
 

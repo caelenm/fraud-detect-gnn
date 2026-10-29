@@ -29,7 +29,7 @@ The four-feature graph runs and E3 raw on split 2, not run that night, ran on 20
 - On the four non-`f19` columns the graph still helps: E1 +0.144, E2 +0.121.
 - Full-budget B without `f19`: 0.525 on split 0 (pilot 0.516).
 
-Not run: full-budget E1/E2 (skipped by the guard), and E1/N1/N2 on splits 3–4.
+Not run: full-budget E1/E2 (skipped by the guard; queued on 2026-10-29 under a fourth amendment, not started), and E1/N1/N2 on splits 3–4.
 
 The details are in [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md) §11 (decision log and every result) and §12 (next steps); a short summary is in the README ("Results").
 
