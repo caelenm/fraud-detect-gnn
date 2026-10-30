@@ -185,7 +185,13 @@ Test PR-AUC is the mean ± SD over splits 0–2, so every row is on the same spl
 | E3 | own + untrained GNN embeddings, 8 per relation | 0.666 ± 0.013 | 0.672 ± 0.012 |
 | E3 (2 / 4 / 16 / raw 64) | the same at other sizes | 0.662 / 0.668 / 0.660 / 0.695 | — / — / 0.675 / 0.702 |
 
-For comparison, B with all 25 features (`f19` included) scores 0.918. At the full Model A budget (6 classifiers, 100 trials; split 0 only), B without `f19` scores 0.525 [0.471, 0.585], against 0.516 for the pilot on the same split.
+For comparison, B with all 25 features (`f19` included) scores 0.918. At the full Model A budget (6 classifiers, 100 trials; split 0 only), the scores without `f19` are close to the pilots on the same split:
+
+| Setup | Full budget | Pilot |
+|---|---|---|
+| B | 0.525 [0.471, 0.585] | 0.516 |
+| E1 | 0.714 [0.667, 0.758] | 0.703 |
+| E2 | 0.646 [0.591, 0.701] | 0.662 |
 
 | Question | Finding (test Δ PR-AUC, mean ± SD) |
 |---|---|
@@ -194,10 +200,10 @@ For comparison, B with all 25 features (`f19` included) scores 0.918. At the ful
 | **Embedding size (professor)** | Both embeddings beat B at every size tried, 2, 4, 8, 16 and raw 64 per relation (all supported). Size 8 does not measurably beat 2 or 4 (DGI +0.021 and +0.018, untrained +0.004 and −0.002; not distinguishable), so by the pre-registered rule **2 per relation (6 columns) is enough**. For DGI, though, 8 scored above 2 on all 3 splits. Above 8, only the untrained encoder at raw 64 measurably beats 8 (+0.031 ± 0.013 over 5 splits, supported); DGI at 16 or raw 64 does not (+0.016 each). DeepTune has no label-free reducer for these embeddings, so PCA is used. |
 | **Does training the GNN help? (professor)** | **No measurable effect at any size.** DGI minus the same encoder with random weights: −0.015 at 2 and −0.018 at 4 (3 splits); +0.005 at 8, +0.019 at 16 and −0.009 at raw 64 (5 splits). None is supported. GraphSAGE trained on the labels is not built yet. |
 | **Just the 4 important features? (professor)** | Each split's top 4 of the 24 non-`f19` columns score 0.010 below all 24. That is lower on all 3 splits but not significant (p = 0.60). **The graph still helps on the four:** neighbour means add +0.144 ± 0.021 and DGI embeddings +0.121 ± 0.029 (both supported), close to the gains on all 24 (+0.163 and +0.130). On the four, DGI scores below neighbour means (−0.023, p = 0.047). |
-| **Does a larger tuning budget change B?** | Hardly. B without `f19` at the full budget is +0.008 above the pilot on split 0 (CV p = 0.57; one split, descriptive). |
+| **Does a larger tuning budget change the results?** | **No measurable change** (split 0 only, descriptive). Against their pilots:<br>• B +0.008;<br>• E1 +0.011;<br>• E2 −0.016.<br>All three paired intervals cover zero. The graph gains stay: E1 − B **+0.190 [0.144, 0.231]** and E2 − B **+0.122 [0.075, 0.166]**, against +0.187 and +0.146 at the pilot budget. |
 | **More datasets (professor)** | Amazon is the main dataset and YelpChi the validation dataset (decided 2026-10-26). |
 
-Caveats: pilot budget, one seed per run, 3 splits (5 where stated); the full-budget run is one split. Not run yet: full-budget E1 and E2, E1/N1/N2 on splits 3–4, and GraphSAGE.
+Caveats: pilot budget, one seed per run, 3 splits (5 where stated). The full-budget runs (B, E1 and E2) cover only split 0. Not run yet: E1/N1/N2 on splits 3–4, and GraphSAGE.
 
 ## Graph feature blocks (Models 2 and 5)
 
@@ -466,7 +472,7 @@ fraud-detect-gnn/
     - 0.518 (without the #36 four) also drops three legitimate rating features.
     - The candidate headline is **`no19`**: every column except `f19`, which is also left out of every graph input. Its pilot runs are pre-registered and queued (`docs/RESEARCH_PLAN.md` §11, 2026-10-26).
 - **GNN embedding settings are untuned** (64-d, up to 300 epochs, 8 PCA components per relation, the plan's defaults). Some relations were still improving at 300 epochs. Choosing them, on training CV only, is phase 3.
-- **The graph comparison uses a reduced budget** (10 trials, 3 classifiers) on 3 seeded splits with one tuning seed; see the pilot section. The full-budget runs (6 classifiers, 100 trials) exist only for Model 1, on split 0.
+- **The graph comparison uses a reduced budget** (10 trials, 3 classifiers) on 3 seeded splits with one tuning seed; see the pilot section. The full-budget runs (6 classifiers, 100 trials) exist only on split 0: for Model 1 (with all features, without the #36 four, and without `f19`), and for E1 and E2 without `f19`.
 - **df-analyze's internal CV is not grouped.** Its tuning and feature-selection folds are random, so a YelpChi user's reviews can sit on both sides of them. This makes its tuning scores optimistic, which is one more reason Model A is chosen by our grouped CV. The test set is grouped, so final scores are not affected; the tuned hyperparameters may still be slightly over-fitted to user-level leakage.
 - **df-analyze scales continuous features over train and test together,** and infers types on both. No labels are used, but test rows influence the clip points. Our own type decisions use training nodes only.
 - **Single split by default.** Bootstrap intervals cover test-set sampling only. Amazon is small, and its scores vary across splits; `split.n_repeats` measures this at the cost of one df-analyze run per repeat.

@@ -6,7 +6,7 @@ Instructions for AI coding agents (primarily Claude Code) working in this reposi
 
 We ask: **does using a graph improve fraud classification over the same kind of model without one, and can a GNN's representations improve a tabular AutoML pipeline (df-analyze)?** The datasets are two graph fraud benchmarks with tabular node features: **YelpChi** (main; nodes are hotel and restaurant reviews, labelled spam by Yelp's filter, three review–review relations) and **Amazon** (replication; nodes are users, labelled fraudulent or not, three user–user relations). Both come from the preprocessed `.mat` files of the CARE-GNN repository. The model ladder (plan §1) is: (1) df-analyze on each node's own features (Model A); (2) df-analyze plus label-free neighbour aggregates per relation; (3) GraphSAGE with all edges removed; (4) heterogeneous GraphSAGE over all relations; (5) df-analyze plus self-supervised GNN embeddings; (6) df-analyze plus supervised, out-of-fold GNN features (needs a rule change). Every model on a dataset is trained on the same split and scored on the same frozen, grouped test set. The headline metric is PR-AUC, always reported next to the no-skill baseline (the test positive rate). Model 1 and the interfaces the later rungs need (node table, relation edge lists, feature blocks, feature sets) were implemented first. Phase 2 ([`docs/PHASE2_GNN_PLAN.md`](docs/PHASE2_GNN_PLAN.md)) adds Models 2 and 5 as feature blocks (`nbr`, `gnnssl`) and a comparison page; GraphSAGE (Models 3–4) comes later. **Phase 3 ([`docs/PHASE3_FEEDBACK_PLAN.md`](docs/PHASE3_FEEDBACK_PLAN.md)) is the current plan:** it answers the professor's feedback of 2026-10-21 (embedding size and DeepTune, whether training the GNN helps, the 4 important features, more datasets).
 
-## Current state (2026-10-29): read this first
+## Current state (2026-10-30): read this first
 
 **New on 2026-10-21:** the professor's feedback and the plan that answers it ([`docs/PHASE3_FEEDBACK_PLAN.md`](docs/PHASE3_FEEDBACK_PLAN.md); its open questions D1–D5 need the group); the [results database](#results-database) (`results/runs/`); and commits no longer need a PR ([Git workflow](#git-workflow)).
 
@@ -29,7 +29,12 @@ The four-feature graph runs and E3 raw on split 2, not run that night, ran on 20
 - On the four non-`f19` columns the graph still helps: E1 +0.144, E2 +0.121.
 - Full-budget B without `f19`: 0.525 on split 0 (pilot 0.516).
 
-Not run: full-budget E1/E2 (skipped by the guard; queued on 2026-10-29 under a fourth amendment, not started), and E1/N1/N2 on splits 3–4.
+**New on 2026-10-30 (branch `exp/rq-plan`, fourth pre-registration amendment; 2 full-budget runs + 1 summary, tags `rq-plan`, `full`):** full-budget E1 and E2 without `f19` on split 0. These are descriptive (one split).
+- E1 0.714 and E2 0.646, against pilots of 0.703 and 0.662.
+- The graph gains stay: E1 − B +0.190 [0.144, 0.231] and E2 − B +0.122 [0.075, 0.166].
+- No rung moves measurably with the larger budget.
+
+Not run: E1/N1/N2 on splits 3–4.
 
 The details are in [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md) §11 (decision log and every result) and §12 (next steps); a short summary is in the README ("Results").
 
@@ -54,11 +59,11 @@ The details are in [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md) §11 (decisi
 **Unknown:**
 - What f19 is. It is probably a helpfulness-vote count; the label is the share of helpful votes (< 20% fraud, > 80% benign), and `Amazon.mat` holds no votes.
 - Whether other columns are vote-derived.
-- Full-budget and tuned-embedding results for the graph methods.
+- Tuned-embedding results for the graph methods, and full-budget graph results beyond split 0 without `f19`.
 - YelpChi.
 - GraphSAGE (Models 3–4).
 
-**Not run yet:** #36 checks (c)–(e) in RESEARCH_PLAN §12, step 0; a variant without only the vote-derived columns; full-budget m2/m5; YelpChi beyond a smoke test; Models 3, 4, 6.
+**Not run yet:** #36 checks (c)–(e) in RESEARCH_PLAN §12, step 0; a variant without only the vote-derived columns; full-budget m2/m5 with all features or without #36 (without `f19` they ran on 2026-10-30, split 0); YelpChi beyond a smoke test; Models 3, 4, 6.
 
 **Where things are:**
 - **Code:** on `main`; the phase 3 plan and work (branches `claude/awesome-wozniak-wm548a` and `exp/phase3-feedback`) were merged with PR #39 (`f4175e3`). The 2026-10-26 work (RQ1–RQ3: `no19`, the `deg` block, the #36 column map) is on `exp/rq-plan`, committed locally and not pushed.

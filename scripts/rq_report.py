@@ -81,7 +81,7 @@ SUMMARIES = {
     "size16_5split": "Size 16, without f19, 5 splits (2026-10-29)",
     "sizeraw_5split": "Raw 64, without f19, 5 splits (2026-10-29)",
     "size24_summary": "Sizes 2 and 4, without f19 (2026-10-29)",
-    "full_no19_summary": "Full budget, without f19, split 0 only (2026-10-29)",
+    "full_no19_summary": "Full budget, without f19, split 0 only (2026-10-29 and -30)",
 }
 # Summaries of full-budget runs: one split, descriptive, kept out of the
 # pilot tables.

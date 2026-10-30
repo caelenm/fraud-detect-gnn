@@ -935,6 +935,41 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
     - added now: E1_full − E1_pilot and E2_full − E2_pilot (does the full budget change the graph rungs?).
   - **Descriptive only** (one split, no verdict): each run's test PR-AUC with its group-bootstrap 95% interval, each pair's paired Δ with its interval from the comparison page, and the 5-fold CV p next to it.
   - **What was known when this was written:** on split 0, the pilots scored E1 0.703 and E2 0.662, and full-budget B scored 0.525 (pilot 0.516).
+- **2026-10-30 (fourth amendment, results).** On Caelen's go, the runner started at 01:46 UTC on 2026-10-30, and all three jobs exited 0 by 04:30 UTC. Every guard was met, and nothing was skipped. Both runs were on commit `59d6554` with a clean tree. Both passed the split and column-type checks: 99 columns for E1 and 48 for E2, none dropped. Model A decoded and reproduces its test probabilities in each, as do 18 of the 28 tuned models. Wall-clock time, including `select_model`, was 1 h 27 min for E1 and 1 h 14 min for E2.
+  - **Scores** (split 0, test set; group-bootstrap 95% intervals; no skill 0.095):
+
+    | Setup | Feature set | Model A | Test PR-AUC | AUROC | CV PR-AUC of Model A | Pilot, split 0 |
+    |---|---|---|---|---|---|---|
+    | B | `m1_own_no19` | CatBoost (none) | 0.525 [0.471, 0.585] | 0.894 [0.874, 0.910] | 0.570 ± 0.026 | 0.516 |
+    | E1 | `m2_own_nbr_no19` | CatBoost (assoc) | 0.714 [0.667, 0.758] | 0.935 [0.919, 0.948] | 0.712 ± 0.036 | 0.703 |
+    | E2 | `m5_own_gnnssl_no19` | CatBoost (embed_linear) | 0.646 [0.591, 0.701] | 0.919 [0.903, 0.935] | 0.692 ± 0.037 | 0.662 |
+
+  - **Paired contrasts** (descriptive, as pre-registered):
+    - Test Δ PR-AUC (B − A as written) with its paired group-bootstrap 95% interval (2,000 resamples of whole test groups) and the share of resamples above zero.
+    - Next to it, the 5-fold training-CV Δ and its Nadeau–Bengio p.
+    - `repeat_summary.py` still prints verdict labels for these rows ("supported", "worse"), because the mean > SD condition is undefined for one split. By this amendment they carry no verdict, and `RQ_RESULTS.md` marks them descriptive.
+
+    | Contrast | Test Δ [95%] | Share > 0 | CV Δ | CV p |
+    |---|---|---|---|---|
+    | B_full − B_pilot | +0.008 [−0.009, +0.025] | 83% | +0.013 | 0.57 |
+    | E1_full − B_full | +0.190 [+0.144, +0.231] | 100% | +0.142 | 0.0023 |
+    | E2_full − B_full | +0.122 [+0.075, +0.166] | 100% | +0.122 | 0.017 |
+    | E1_full − E1_pilot | +0.011 [−0.009, +0.032] | 86% | +0.006 | 0.51 |
+    | E2_full − E2_pilot | −0.016 [−0.041, +0.008] | 12% | +0.004 | 0.79 |
+
+  - **Readings** (one split, descriptive):
+    - **The full budget changes no rung measurably.** B moves +0.008, E1 +0.011 and E2 −0.016 against their pilots. All three intervals cover zero, and so do the CV tests. On split 0, the pilot budget does not distort these contrasts.
+    - **The graph gain survives the full budget.** E1 − B is +0.190, against +0.187 for the pilots on the same split. E2 − B is +0.122, against +0.146. Both paired intervals exclude zero.
+      - In headroom terms (Δ / (1 − PR-AUC of B), with B = 0.525), E1 closes about 40% and E2 about 26%.
+    - **Not pre-registered (point estimates; no paired interval was computed):** at the full budget E1 scores 0.068 above E2, against 0.041 for the pilots on split 0. Neighbour means stay ahead of DGI embeddings at both budgets.
+    - Model A is CatBoost in all three full runs. The pilots chose LightGBM for B and E1, and CatBoost for E2.
+    - The sanity-band warning (0.91, a band for all 25 features) fires on all three runs. That is expected without `f19`.
+  - **Results DB:**
+    - E1 full: `20261030T014631Z_amazon-m2-own-nbr-no19_71cfa9`.
+    - E2 full: `20261030T031404Z_amazon-m5-own-gnnssl-no19_70f41b`.
+    - Summary of the five pairs: `20261030T042833Z_amazon_39555d`. It extends `20261029T111325Z_amazon_956956`, which stays.
+    - All three are tagged `rq-plan` and `full`. [`RQ_RESULTS.md`](RQ_RESULTS.md) is regenerated.
+  - **Still to run** (each needs a go): E1, N1 and N2 on splits 3–4 (6 pilot runs, about 1.5 h), if the RQ1 and RQ2 verdicts should also rest on 5 splits.
 
 ---
 
