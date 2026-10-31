@@ -41,9 +41,15 @@ GNNRAND_BLOCK = "gnnrand"
 NBR_BLOCK_KINDS: tuple[str, ...] = (NBR_BLOCK, DEG_BLOCK, NBRRW_BLOCK)
 # The blocks the gnn_embed stage builds.
 GNN_BLOCK_KINDS: tuple[str, ...] = (GNNSSL_BLOCK, GNNRAND_BLOCK)
+# gnnsup__score: the logit of the best supervised GNN's out-of-fold P(fraud),
+# Model 6 (2026-10-31). Built by the gnn_oof stage, the one documented
+# exception to leakage invariant 1 (AGENTS.md).
+GNNSUP_BLOCK = "gnnsup"
 # Every block name is one of these kinds, optionally followed by _<variant>
 # (see features/blocks.py).
-BLOCK_KINDS: tuple[str, ...] = (OWN_BLOCK, *NBR_BLOCK_KINDS, *GNN_BLOCK_KINDS)
+BLOCK_KINDS: tuple[str, ...] = (
+    OWN_BLOCK, *NBR_BLOCK_KINDS, *GNN_BLOCK_KINDS, GNNSUP_BLOCK,
+)  # fmt: skip
 
 # Columns that identify, label or place a node. They must never appear in any
 # feature block or model input (AGENTS.md leakage invariant 7).

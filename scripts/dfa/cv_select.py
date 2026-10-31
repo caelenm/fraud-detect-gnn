@@ -130,6 +130,42 @@ def read_folds(path: Path, n_rows: int) -> np.ndarray:
     return folds
 
 
+def read_nested(path: Path, fold_of_row: np.ndarray) -> pd.DataFrame:
+    """Nested out-of-fold scores (Model 6's gnnsup block; columns row,
+    outer_fold, column, value): for each outer fold k and column, one value
+    for every training row outside fold k and none inside it (checked)."""
+    nested = pd.read_parquet(path)
+    for (k, column), frame in nested.groupby(["outer_fold", "column"]):
+        expected = np.flatnonzero(fold_of_row != k)
+        if not np.array_equal(np.sort(frame["row"].to_numpy()), expected):
+            raise SystemExit(
+                f"{path}: nested scores of {column} for outer fold {k} must cover "
+                "exactly the training rows outside that fold"
+            )
+    missing = set(np.unique(fold_of_row)) - set(nested["outer_fold"].unique())
+    if missing:
+        raise SystemExit(f"{path} has no nested scores for outer folds {sorted(missing)}")
+    return nested
+
+
+def with_nested(
+    X_fit: pd.DataFrame, nested: pd.DataFrame | None, fold: int
+) -> pd.DataFrame:
+    """The rows a fold's model is fit on, with each nested column replaced by
+    its scores from models fit without the held-out `fold`, so no score on
+    them was built with the held-out rows' labels. Rows are X_fit's index
+    (positions in the X_train export)."""
+    if nested is None:
+        return X_fit
+    out = X_fit.copy()
+    for column, frame in nested[nested["outer_fold"] == fold].groupby("column"):
+        if column not in out.columns:
+            continue  # this configuration's feature selection dropped it
+        values = pd.Series(frame["value"].to_numpy(), index=frame["row"].to_numpy())
+        out[column] = values.loc[out.index.to_numpy()].to_numpy()
+    return out
+
+
 def previous_oof(path: Path, done: set) -> list[pd.DataFrame]:
     """Out-of-fold predictions of configurations kept on --resume."""
     if not path.is_file() or not done:
@@ -186,6 +222,13 @@ def main() -> int:
         required=True,
         help="CSV with a `fold` column: each training row's fold, in X_train order",
     )
+    parser.add_argument(
+        "--nested-file",
+        type=Path,
+        default=None,
+        help="nested out-of-fold scores (.parquet: row, outer_fold, column, value) "
+        "put on the rows each fold's model is fit on (Model 6's gnnsup block)",
+    )
     parser.add_argument("--seed", type=int, default=555)
     parser.add_argument(
         "--only", nargs="*", default=None, help="model class names (for smoke tests)"
@@ -219,10 +262,15 @@ def main() -> int:
     )["predictions"]
     num_classes = int(y.nunique())
     fold_of_row = read_folds(args.folds_file, len(X))
+    fold_ids = [int(k) for k in sorted(np.unique(fold_of_row))]
     folds = [
         (np.flatnonzero(fold_of_row != k), np.flatnonzero(fold_of_row == k))
-        for k in sorted(np.unique(fold_of_row))
+        for k in fold_ids
     ]
+    nested = read_nested(args.nested_file, fold_of_row) if args.nested_file else None
+    if nested is not None:
+        print(f"Nested out-of-fold scores for {sorted(nested['column'].unique())} on "
+              "the rows each fold's model is fit on")  # fmt: skip
     print(
         f"CV on {len(X)} training rows, {len(folds)} saved grouped folds, "
         f"{len(predictions)} configs"
@@ -283,7 +331,8 @@ def main() -> int:
                 model = (
                     cls(num_classes=num_classes) if name in NEEDS_NUM_CLASSES else cls()
                 )
-                model.refit_tuned(X=Xs.iloc[idx_tr], y=y.iloc[idx_tr], tuned_args=params)
+                X_fit = with_nested(Xs.iloc[idx_tr], nested, fold_ids[k])
+                model.refit_tuned(X=X_fit, y=y.iloc[idx_tr], tuned_args=params)
                 prob = np.asarray(model.predict_proba(Xs.iloc[idx_va]))[:, 1]
                 per_fold.append(fold_scores(y.iloc[idx_va].to_numpy(), prob))
                 prob_oof[idx_va] = prob

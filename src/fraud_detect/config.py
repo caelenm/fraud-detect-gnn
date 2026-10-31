@@ -93,6 +93,8 @@ def with_dataset(config: dict[str, Any], dataset: str | None) -> dict[str, Any]:
 
 
 KEEP_BY_REPEAT = "keep_by_repeat"
+# gnn_models graphs: every relation, N2's rewired graph, or no edges (an MLP).
+GNN_GRAPHS = ("real", "rewired", "none")
 # gnn_embed_sizes value for a GNN block that keeps its raw embedding (no PCA).
 RAW_SIZE = "raw"
 
@@ -140,6 +142,25 @@ def check_feature_sets(config: dict[str, Any]) -> None:
                 f"gnn_embed_sizes.{variant}: maps a variant of feature_variants to a "
                 f"positive number of PCA components per relation, or {RAW_SIZE!r}"
             )
+    for name, spec in (config.get("gnn_models") or {}).items():
+        own_only = [b.partition("_")[0] for b in config["feature_sets"].get(name, [])]
+        if own_only != ["own"]:
+            raise ConfigError(
+                f"gnn_models.{name}: a GNN classifier rung needs a feature set of "
+                "exactly one own block"
+            )
+        if (
+            not isinstance(spec, dict)
+            or spec.get("graph") not in GNN_GRAPHS
+            or (spec.get("norm", "mean") not in ("mean", "sym"))
+        ):
+            raise ConfigError(
+                f"gnn_models.{name}: graph must be one of {GNN_GRAPHS} and norm "
+                "mean or sym"
+            )
+        source = spec.get("setting_from")
+        if source is not None and source not in config["gnn_models"]:
+            raise ConfigError(f"gnn_models.{name}: setting_from {source!r} is not a rung")
     for name, block_names in config["feature_sets"].items():
         for block in block_names:
             kind, _, variant = block.partition("_")
@@ -179,6 +200,9 @@ class Paths:
     # The active feature set's blocks, so a block stage's outputs can be only
     # the blocks this feature set uses (none for m1_own).
     blocks: tuple[str, ...] = ()
+    # True for a GNN classifier rung (gnn_models): gnn_classify scores it, and
+    # the df-analyze stages have no outputs for it.
+    is_gnn: bool = False
 
     # ---- Dataset level -----------------------------------------------------
     @property
@@ -258,6 +282,16 @@ class Paths:
         """One relation's raw (n_nodes, out_dim) GNN embedding, before PCA."""
         return self.embed_dir(block) / f"raw_{relation}.npy"
 
+    def nested_scores(self, block: str) -> Path:
+        """A gnnsup block's nested out-of-fold scores (node_id, outer_fold,
+        <block>__score), which select_model puts on the rows it fits on."""
+        return self.features_dir / f"{block}.nested.parquet"
+
+    @property
+    def gnn_oof_dir(self) -> Path:
+        """The gnn_oof stage's meta.json (which GNN, its setting and seeds)."""
+        return self.outputs_dir / "gnn_oof"
+
     @property
     def probe_dir(self) -> Path:
         return self.outputs_dir / "probe"
@@ -319,6 +353,7 @@ def get_paths(config: dict[str, Any], root: Path = REPO_ROOT) -> Paths:
         outputs_dir=_resolve(root, p["outputs_dir"]) / folder,
         feature_set=feature_set,
         blocks=tuple(config["feature_sets"].get(feature_set, ())),
+        is_gnn=feature_set in (config.get("gnn_models") or {}),
     )
 
 

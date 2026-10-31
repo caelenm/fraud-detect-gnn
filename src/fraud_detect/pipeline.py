@@ -20,9 +20,16 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from sklearn.metrics import average_precision_score, roc_auc_score
 
 from fraud_detect import columns as C
-from fraud_detect.config import REPO_ROOT, Paths, dataset_config, df_analyze_dir
+from fraud_detect.config import (
+    REPO_ROOT,
+    Paths,
+    dataset_config,
+    df_analyze_dir,
+    get_paths,
+)
 from fraud_detect.data import audit, care_gnn, download, split
 from fraud_detect.external import ExternalToolError, run_df_analyze_script
 from fraud_detect.features import blocks, graph, own
@@ -30,6 +37,7 @@ from fraud_detect.models import (
     df_analyze,
     df_analyze_report,
     evaluation,
+    gnn_outputs,
     model_export,
     selection,
 )
@@ -754,7 +762,262 @@ def check_gnn_embed_settings(ctx: Context, block: str) -> None:
 
 
 # --------------------------------------------------------------------------
-# Stage 8: df-analyze input tables for the active feature set
+# Supervised GNNs (2026-10-31, docs/GNN_MODELS_PLAN.md): shared helpers for
+# the gnn_oof block stage (Model 6) and the gnn_classify stage (Models 3-4)
+# --------------------------------------------------------------------------
+GNN_MODEL_LABELS = {
+    ("real", "mean"): "GraphSAGE",
+    ("real", "sym"): "R-GCN-style GNN",
+    ("none", "mean"): "MLP (GNN without edges)",
+    ("none", "sym"): "MLP (GNN without edges)",
+    ("rewired", "mean"): "GraphSAGE (rewired graph)",
+    ("rewired", "sym"): "R-GCN-style GNN (rewired graph)",
+}
+
+
+def gnn_model_label(spec: dict[str, Any]) -> str:
+    return GNN_MODEL_LABELS[(spec["graph"], spec.get("norm", "mean"))]
+
+
+def _import_supervised() -> Any:
+    try:
+        from fraud_detect.graph import supervised  # noqa: PLC0415  (needs the gnn extra)
+    except ImportError as e:
+        raise StageError(
+            "The supervised GNN stages need torch. Install it with "
+            f"`uv sync --extra gnn` ({e})."
+        ) from e
+    return supervised
+
+
+def _train_config(ctx: Context, sup: Any) -> Any:
+    try:
+        return sup.TrainConfig.from_config(ctx.config["gnn_classify"])
+    except (TypeError, ValueError) as e:
+        raise StageError(f"gnn_classify settings: {e}") from e
+
+
+@dataclass
+class GNNData:
+    """What a supervised GNN stage needs, with labels for training rows only."""
+
+    x: np.ndarray  # standardised own features, node order (scaler: training nodes)
+    train_nodes: np.ndarray  # training node IDs, in train_ids.csv order
+    y_train: np.ndarray  # their labels
+    folds: np.ndarray  # their saved CV folds
+    groups: np.ndarray  # their split groups
+    test_nodes: np.ndarray  # test node IDs, in test_ids.csv order (no labels)
+    own_columns: list[str]
+
+
+def gnn_data(ctx: Context, own_block: str) -> GNNData:
+    """The own features (all nodes) and the training rows' labels, folds and
+    groups. Test labels are not read here."""
+    p = ctx.paths
+    _require(p.train_ids, p.test_ids, p.cv_folds)
+    from fraud_detect.graph import ssl  # noqa: PLC0415  (needs the gnn extra)
+
+    nodes = read_nodes(p)
+    fit_mask, _ = split_masks(nodes)
+    own_input = _own_input(ctx, own_block)
+    try:
+        x = ssl.standardized_features(own_input, fit_mask)
+    except ValueError as e:
+        raise StageError(str(e)) from e
+    train_ids = pd.read_csv(p.train_ids)
+    folds = folds_in_train_order(p)
+    groups = nodes.set_index(C.NODE_ID)[C.GROUP_ID]
+    return GNNData(
+        x=x,
+        train_nodes=train_ids[C.NODE_ID].to_numpy(dtype=np.int64),
+        y_train=train_ids[C.LABEL].to_numpy(dtype=int),
+        folds=folds["fold"].to_numpy(dtype=int),
+        groups=groups.loc[train_ids[C.NODE_ID]].to_numpy(),
+        test_nodes=pd.read_csv(p.test_ids, usecols=[C.NODE_ID])[C.NODE_ID].to_numpy(
+            dtype=np.int64
+        ),
+        own_columns=[c for c in own_input.columns if c != C.NODE_ID],
+    )
+
+
+def gnn_edges(ctx: Context, graph_kind: str, n_nodes: int) -> dict[str, np.ndarray]:
+    """Every relation (real), N2's rewired graph (rewired, built or reused),
+    or no edges (none)."""
+    if graph_kind == "none":
+        return {}
+    edges = _relation_edges(ctx)
+    return rewired_edges(ctx, edges, n_nodes) if graph_kind == "rewired" else edges
+
+
+def _fs_paths(ctx: Context, feature_set: str) -> Paths:
+    """Paths of another feature set on the same dataset and split repeat."""
+    return get_paths({**ctx.config, "feature_set": feature_set}, ctx.paths.root)
+
+
+def gnn_rung_summary(ctx: Context, feature_set: str) -> dict[str, Any]:
+    """A finished GNN classifier rung's model_a.json on this split repeat."""
+    path = _fs_paths(ctx, feature_set).model_reports_dir / MODEL_A_SUMMARY
+    if not path.is_file():
+        raise StageError(
+            f"{feature_set} has no result on this split ({path}). Run it first: "
+            f"`uv run run.py --dataset {ctx.dataset} --set feature_set={feature_set}`."
+        )
+    summary = _read_json(path)
+    if not gnn_outputs.is_gnn_summary(summary):
+        raise StageError(f"{path} is not a GNN classifier rung's result")
+    return summary
+
+
+# --------------------------------------------------------------------------
+# Stage 8: gnnsup block (Model 6): the best GNN's out-of-fold score
+# --------------------------------------------------------------------------
+def gnn_oof_outputs(p: Paths) -> list[Path]:
+    names = blocks.blocks_of_kind(p.blocks, C.GNNSUP_BLOCK)
+    return [
+        f for b in names for f in (p.nested_scores(b), p.block_file(b), p.block_spec(b))
+    ]
+
+
+def best_gnn(ctx: Context) -> dict[str, Any]:
+    """The rule fixed before the runs (RESEARCH_PLAN §11, 2026-10-31): on this
+    split's own training folds, a candidate other than the first (E5) is
+    chosen only if its mean per-fold out-of-fold PR-AUC gain over the first
+    exceeds one standard error (SD / sqrt(folds)); the largest such gain wins.
+    Otherwise the first. Test results never enter."""
+    candidates = list(ctx.config["gnn_oof"]["candidates"])
+    summaries = {fs: gnn_rung_summary(ctx, fs) for fs in candidates}
+    base = np.asarray(summaries[candidates[0]]["gnn"]["fold_pr_auc"])
+    rows, chosen, best_gain = [], candidates[0], 0.0
+    for fs in candidates[1:]:
+        d = np.asarray(summaries[fs]["gnn"]["fold_pr_auc"]) - base
+        se = float(d.std(ddof=1) / np.sqrt(len(d)))
+        beats = bool(d.mean() > se)
+        rows.append({"candidate": fs, "mean_gain": float(d.mean()), "se": se,
+                     "beats_first": beats})  # fmt: skip
+        if beats and d.mean() > best_gain:
+            chosen, best_gain = fs, float(d.mean())
+    return {
+        "feature_set": chosen,
+        "spec": dict(ctx.config["gnn_models"][chosen]),
+        "setting": summaries[chosen]["gnn"]["setting"],
+        "own_block": feature_set_blocks_of(ctx, chosen)[0],
+        "rule": "first candidate unless another's mean per-fold out-of-fold PR-AUC "
+        "gain over it exceeds one SE on this split's training folds",
+        "comparisons": rows,
+        "candidates_cv_pr_auc": {
+            fs: summaries[fs]["model_a"]["cv_pr_auc"] for fs in candidates
+        },
+    }
+
+
+def feature_set_blocks_of(ctx: Context, feature_set: str) -> list[str]:
+    return list(ctx.config["feature_sets"][feature_set])
+
+
+def run_gnn_oof(ctx: Context) -> None:
+    """Model 6's gnnsup block, the one documented exception to invariant 1:
+    the best GNN (best_gnn) with its Part A setting, nested-cross-fit on the
+    saved folds for each seed (one unit per seed). gnnsup__score is the logit
+    of the seed-averaged probability: out-of-fold for training rows, the mean
+    of the fold models for every other node. The nested scores (for the
+    shared CV) go to <block>.nested.parquet. No test label is read."""
+    names = _blocks_to_build(ctx, C.GNNSUP_BLOCK)
+    if not names:
+        return
+    if names != [C.GNNSUP_BLOCK]:
+        raise StageError(f"Only the plain {C.GNNSUP_BLOCK} block is defined, not {names}")
+    sup = _import_supervised()
+    p, cfg = ctx.paths, _train_config(ctx, sup)
+    choice = best_gnn(ctx)
+    setting = sup.Setting(**choice["setting"])
+    data = gnn_data(ctx, choice["own_block"])
+    spec = choice["spec"]
+    g = sup.graph_input(data.x, gnn_edges(ctx, spec["graph"], len(data.x)),
+                        spec.get("norm", "mean"), cfg.device)  # fmt: skip
+    print(
+        f"gnnsup: {gnn_model_label(spec)} ({choice['feature_set']}, chosen by the "
+        f"pre-registered rule) with {setting.key}; nested cross-fitting on "
+        f"{len(np.unique(data.folds))} folds x {cfg.seeds} seeds; {len(data.x):,} nodes",
+        flush=True,
+    )
+    store = ctx.unit_store("gnn_oof")
+    seeds = [ctx.seed + s for s in range(cfg.seeds)]
+    results = []
+    for seed in seeds:
+        unit = f"gnnsup/{choice['feature_set']}/{setting.key}/seed{seed}"
+        if store.done(unit):
+            results.append(store.load(unit))
+            print(f"  seed {seed}: finished in the interrupted run; kept")
+            continue
+        start = time.monotonic()
+        outer, nested = sup.nested_cross_fit(
+            g, data.train_nodes, data.y_train, data.folds, data.groups, setting, cfg, seed
+        )
+        result = {
+            "seed": seed,
+            "oof": outer.oof.tolist(),
+            "all_nodes": outer.all_nodes.tolist(),
+            "nested": {str(k): v.tolist() for k, v in nested.items()},
+            "fold_pr_auc": sup.fold_pr_auc(data.y_train, outer.oof, data.folds),
+            "logs": outer.logs,
+        }
+        store.save(unit, result)
+        results.append(result)
+        print(f"  seed {seed}: out-of-fold PR-AUC by fold "
+              f"{[round(v, 3) for v in result['fold_pr_auc']]} "
+              f"({time.monotonic() - start:.0f} s)", flush=True)  # fmt: skip
+    oof = np.mean([r["oof"] for r in results], axis=0)
+    all_nodes = np.mean([r["all_nodes"] for r in results], axis=0)
+    column = f"{C.GNNSUP_BLOCK}{C.BLOCK_SEPARATOR}score"
+    score = sup.logit(all_nodes)
+    score[data.train_nodes] = sup.logit(oof)
+    block = pd.DataFrame(
+        {C.NODE_ID: np.arange(len(score), dtype=np.int64), column: score}
+    )
+    nested_rows = []
+    for k in sorted(np.unique(data.folds)):
+        values = np.mean([r["nested"][str(k)] for r in results], axis=0)
+        outside = data.folds != k
+        if np.isnan(values[outside]).any() or not np.isnan(values[~outside]).all():
+            raise StageError(
+                f"Nested scores for outer fold {k} do not cover the other folds"
+            )
+        nested_rows.append(pd.DataFrame({
+            C.NODE_ID: data.train_nodes[outside],
+            "outer_fold": int(k),
+            column: sup.logit(values[outside]),
+        }))  # fmt: skip
+    versions = package_versions()
+    meta = {
+        "block": C.GNNSUP_BLOCK,
+        "method": "logit of a supervised GNN's out-of-fold P(fraud), averaged over "
+        "seeds (Model 6; invariant 1's documented exception)",
+        "training_rows": "out-of-fold: each from the model fit without the row's CV fold",
+        "other_nodes": "mean of the fold models (test labels are never read)",
+        "nested": "for outer fold k, the other folds' scores from models fit without "
+        "fold k (select_model fits on these when fold k is held out)",
+        "choice": choice,
+        "setting": asdict(setting),
+        "seeds": seeds,
+        "config": asdict(cfg),
+        "per_seed_fold_pr_auc": {str(r["seed"]): r["fold_pr_auc"] for r in results},
+        "fold_pr_auc": sup.fold_pr_auc(data.y_train, oof, data.folds),
+        "versions": {k: versions[k] for k in ("torch",) if k in versions},
+        "created_utc": datetime.now(UTC).isoformat(timespec="seconds"),
+    }
+    atomic_write_json(p.gnn_oof_dir / "meta.json", meta)
+    atomic_write_parquet(p.nested_scores(C.GNNSUP_BLOCK),
+                         pd.concat(nested_rows, ignore_index=True))  # fmt: skip
+    spec_out = _write_block(p, C.GNNSUP_BLOCK, block)
+    print(
+        f"gnnsup block: {column} for {len(block):,} nodes from {choice['feature_set']}; "
+        f"out-of-fold PR-AUC by fold {[round(v, 3) for v in meta['fold_pr_auc']]}; "
+        f"types from training nodes: {_type_counts(spec_out)}"
+    )
+
+
+# --------------------------------------------------------------------------
+# Stage 9: df-analyze input tables for the active feature set
 # --------------------------------------------------------------------------
 FEATURE_SET_INFO = "feature_set.json"
 
@@ -837,7 +1100,7 @@ def columns_of_type(info: dict[str, Any], kind: str) -> list[str]:
 
 
 # --------------------------------------------------------------------------
-# Stage 9: run df-analyze; verify its split and its column types
+# Stage 10: run df-analyze; verify its split and its column types
 # --------------------------------------------------------------------------
 # df-analyze models that train on the GPU when CUDA is available.
 GPU_CLASSIFIERS = frozenset({"catboost", "gandalf"})
@@ -888,7 +1151,30 @@ def check_cuda(ctx: Context, purpose: str) -> bool:
     return False
 
 
+def gnn_rung(ctx: Context) -> bool:
+    """True (with a note) for a GNN classifier rung (gnn_models): the
+    gnn_classify stage trains and scores it, so a df-analyze stage has
+    nothing to do. A fresh run reaches these stages because run.py reruns
+    every stage after the first one with missing outputs."""
+    if not ctx.paths.is_gnn:
+        return False
+    print(
+        f"{ctx.config['feature_set']} is a GNN classifier rung (gnn_models); the "
+        "gnn_classify stage trains and scores it, so there is nothing to do here."
+    )
+    return True
+
+
+def _df_analyze_only(
+    outputs: Callable[[Paths], list[Path]],
+) -> Callable[[Paths], list[Path]]:
+    """A df-analyze stage's outputs, or none for a GNN classifier rung."""
+    return lambda p: [] if p.is_gnn else outputs(p)
+
+
 def run_df_analyze(ctx: Context) -> None:
+    if gnn_rung(ctx):
+        return
     p = ctx.paths
     train_path = p.df_analyze_input_dir / "train.parquet"
     test_path = p.df_analyze_input_dir / "test.parquet"
@@ -958,7 +1244,7 @@ def _latest_verified_run(p: Paths) -> tuple[str, Path]:
 
 
 # --------------------------------------------------------------------------
-# Stage 10: score every tuned model on the saved grouped CV folds (train only)
+# Stage 11: score every tuned model on the saved grouped CV folds (train only)
 # --------------------------------------------------------------------------
 CV_SELECT_RUNNER = REPO_ROOT / "scripts" / "dfa" / "cv_select.py"
 SHARED_CV = "model_selection_cv.csv"
@@ -984,12 +1270,65 @@ def folds_in_train_order(p: Paths) -> pd.DataFrame:
     )
 
 
+NESTED_SCORES = "nested_scores.parquet"
+
+
+def nested_scores_file(ctx: Context, outdir: Path, export_dir: Path) -> list[str]:
+    """cv_select.py's --nested-file for a feature set with a gnnsup block
+    (Model 6; none otherwise): for each outer fold k, the nested score of
+    every training row outside fold k, in df-analyze's row order and column
+    name. cv_select puts these on the rows a fold's model is fit on, so the
+    shared CV never fits on a score built with the held-out fold's labels.
+    The held-out rows keep their out-of-fold score. Stops unless df-analyze
+    exported the column unchanged (then the values can be put in directly)."""
+    names = blocks.blocks_of_kind(feature_set_blocks(ctx), C.GNNSUP_BLOCK)
+    if not names:
+        return []
+    p = ctx.paths
+    info = read_feature_set_info(p)
+    safe_of = {c["block_column"]: safe for safe, c in info["columns"].items()}
+    train_ids = pd.read_csv(p.train_ids)[C.NODE_ID].to_numpy()
+    row_of = pd.Series(np.arange(len(train_ids)), index=train_ids)
+    exported = pd.read_csv(export_dir / "X_train_00.csv")
+    ours = pd.read_parquet(p.df_analyze_input_dir / "train.parquet")
+    frames = []
+    for name in names:
+        _require(p.nested_scores(name))
+        nested = pd.read_parquet(p.nested_scores(name))
+        for column in [
+            c for c in nested.columns if c.startswith(name + C.BLOCK_SEPARATOR)
+        ]:
+            safe = safe_of[column]
+            if safe not in exported.columns or not np.allclose(
+                exported[safe].to_numpy(float), ours[safe].to_numpy(float),
+                rtol=0, atol=1e-9,
+            ):  # fmt: skip
+                raise StageError(
+                    f"df-analyze's X_train export changed column {safe}, so its nested "
+                    "out-of-fold scores cannot be put in for the shared CV. Ask before "
+                    "working around it."
+                )
+            frames.append(pd.DataFrame({
+                "row": row_of.loc[nested[C.NODE_ID].to_numpy()].to_numpy(),
+                "outer_fold": nested["outer_fold"].to_numpy(),
+                "column": safe,
+                "value": nested[column].to_numpy(float),
+            }))  # fmt: skip
+    path = outdir / NESTED_SCORES
+    atomic_write_parquet(path, pd.concat(frames, ignore_index=True))
+    print(f"Nested out-of-fold scores for the shared CV: {path}")
+    return ["--nested-file", str(path.resolve())]
+
+
 def run_select_model(ctx: Context) -> None:
     """df-analyze's tuning scores are not comparable across models (and its
     internal CV is not grouped), so refit every tuned combination on the saved
     grouped folds of the training set and score it from its probabilities (see
     scripts/dfa/cv_select.py). The test set is not read. The report stage
-    chooses Model A from this table."""
+    chooses Model A from this table. With a gnnsup block (Model 6), the rows
+    each fold's model is fit on carry nested scores (nested_scores_file)."""
+    if gnn_rung(ctx):
+        return
     p = ctx.paths
     stamp, outdir = _latest_verified_run(p)
     export_dir = df_analyze.find_export_dir(outdir)
@@ -997,6 +1336,7 @@ def run_select_model(ctx: Context) -> None:
     folds = folds_in_train_order(p)
     folds_path = outdir / FOLDS_IN_TRAIN_ORDER
     atomic_write_csv(folds_path, folds)
+    nested_args = nested_scores_file(ctx, outdir, export_dir)
     cv_path, oof_path = outdir / SHARED_CV, outdir / OOF_PREDICTIONS
     # The CV script saves its tables after every configuration. On --resume it
     # keeps the finished ones; on a fresh run it starts over.
@@ -1015,6 +1355,7 @@ def run_select_model(ctx: Context) -> None:
         args += ["--settings", "tuned"]
     if ctx.resume:
         args += ["--resume"]
+    args += nested_args
     _run_dfa(ctx, str(CV_SELECT_RUNNER), args, outdir / "model_selection.log")
     cv = pd.read_csv(cv_path, keep_default_na=False, na_values=[""])
     log = (outdir / "df_analyze.log").read_text(encoding="utf-8", errors="replace")
@@ -1054,7 +1395,7 @@ def run_select_model(ctx: Context) -> None:
 
 
 # --------------------------------------------------------------------------
-# Stage 11: Model A report: choice by shared CV, threshold from out-of-fold
+# Stage 12: Model A report: choice by shared CV, threshold from out-of-fold
 # training predictions, test metrics, group-bootstrap intervals, sanity band
 # --------------------------------------------------------------------------
 MODEL_A_REPORT = "model_a_report.md"
@@ -1080,6 +1421,8 @@ def oof_thresholds(oof: pd.DataFrame, y_train: np.ndarray, rule: str) -> pd.Data
 
 
 def run_df_analyze_report(ctx: Context) -> None:
+    if gnn_rung(ctx):
+        return
     p = ctx.paths
     train_path = p.df_analyze_input_dir / "train.parquet"
     test_path = p.df_analyze_input_dir / "test.parquet"
@@ -1176,12 +1519,14 @@ def run_df_analyze_report(ctx: Context) -> None:
 
 
 # --------------------------------------------------------------------------
-# Stage 12: static HTML report (parameters, results, confidence cards)
+# Stage 13: static HTML report (parameters, results, confidence cards)
 # --------------------------------------------------------------------------
 DATASET_LABELS = {"yelpchi": "YelpChi (reviews)", "amazon": "Amazon (users)"}
 
 
 def run_web_report(ctx: Context) -> None:
+    if gnn_rung(ctx):
+        return
     p = ctx.paths
     summary_path = p.model_reports_dir / MODEL_A_SUMMARY
     test_path = p.df_analyze_input_dir / "test.parquet"
@@ -1283,7 +1628,7 @@ def run_web_report(ctx: Context) -> None:
 
 
 # --------------------------------------------------------------------------
-# Stage 13: Model A in its native format; check every model df-analyze saved
+# Stage 14: Model A in its native format; check every model df-analyze saved
 # --------------------------------------------------------------------------
 # Last in STAGES on purpose: run.py reruns every stage after the first one
 # with missing outputs, so an earlier position would rerun df-analyze.
@@ -1318,6 +1663,8 @@ def run_export_model(ctx: Context) -> None:
     saved test probabilities, and save Model A (as chosen by df_analyze_report)
     in its native format with model_a.json, so nobody has to retrain it (see
     scripts/dfa/export_model.py). Nothing is chosen or tuned here."""
+    if gnn_rung(ctx):
+        return
     p = ctx.paths
     summary_path = p.model_reports_dir / MODEL_A_SUMMARY
     thresholds_path = p.model_reports_dir / THRESHOLDS
@@ -1378,6 +1725,243 @@ def run_export_model(ctx: Context) -> None:
     )
 
 
+# --------------------------------------------------------------------------
+# Stage 15: GNN classifier rungs (Models 3-4: E5, E5g, E6, N3)
+# --------------------------------------------------------------------------
+# After export_model: it has outputs only for feature sets in gnn_models, so
+# no finished df-analyze run (or bundle) ever reruns anything because of it.
+def gnn_classify_outputs(p: Paths) -> list[Path]:
+    if not p.is_gnn:
+        return []
+    r = p.model_reports_dir
+    return [r / gnn_outputs.GNN_OOF, r / gnn_outputs.GNN_TEST, r / MODEL_A_METRICS,
+            r / MODEL_A_SUMMARY]  # fmt: skip
+
+
+def _cross_fit_unit(
+    store: UnitStore, unit: str, sup: Any, g: Any, data: GNNData, setting: Any,
+    cfg: Any, seed: int,
+) -> dict[str, Any]:  # fmt: skip
+    """One (setting, seed): out-of-fold probabilities of the training rows and
+    the fold models' mean for the test nodes; kept on --resume."""
+    if store.done(unit):
+        print(f"  {unit}: finished in the interrupted run; kept")
+        return store.load(unit)
+    start = time.monotonic()
+    fit = sup.cross_fit(g, data.train_nodes, data.y_train, data.folds, data.groups,
+                        setting, cfg, seed)  # fmt: skip
+    result = {
+        "setting": asdict(setting),
+        "seed": seed,
+        "oof": fit.oof.tolist(),
+        "test": fit.all_nodes[data.test_nodes].tolist(),
+        "fold_pr_auc": sup.fold_pr_auc(data.y_train, fit.oof, data.folds),
+        "logs": fit.logs,
+    }
+    store.save(unit, result)
+    epochs = [log["best_epoch"] for log in fit.logs]
+    print(
+        f"  {unit}: out-of-fold PR-AUC {np.mean(result['fold_pr_auc']):.4f} "
+        f"(best epochs {epochs}; {time.monotonic() - start:.0f} s)",
+        flush=True,
+    )
+    return result
+
+
+def run_gnn_classify(ctx: Context) -> None:
+    """Train and score a GNN classifier rung (docs/GNN_MODELS_PLAN.md §2):
+    the setting from the grid by mean out-of-fold PR-AUC on the saved folds
+    (seed 0), or another rung's setting on this split (setting_from); then 5
+    seeds, each cross-fit on the saved folds (one unit per setting and seed).
+    Probabilities are averaged over seeds; the threshold comes from the
+    out-of-fold ones; test metrics and group-bootstrap intervals as for a
+    df-analyze Model A. Test labels are read only to score."""
+    fs = ctx.config["feature_set"]
+    spec = (ctx.config.get("gnn_models") or {}).get(fs)
+    if spec is None:
+        print(f"Feature set {fs} is not a GNN classifier rung (gnn_models), so there "
+              "is nothing to do here.")  # fmt: skip
+        return
+    sup = _import_supervised()
+    cfg = _train_config(ctx, sup)
+    data = gnn_data(ctx, feature_set_blocks(ctx)[0])
+    g = sup.graph_input(data.x, gnn_edges(ctx, spec["graph"], len(data.x)),
+                        spec.get("norm", "mean"), cfg.device)  # fmt: skip
+    label = gnn_model_label(spec)
+    print(
+        f"{fs}: {label}, {cfg.layers} layers, relations {g.relations or 'none'} "
+        f"({spec['graph']} graph, {spec.get('norm', 'mean')} normalisation), "
+        f"{len(data.own_columns)} own features, {len(data.x):,} nodes; cross-fit on "
+        f"{len(np.unique(data.folds))} saved folds on {cfg.device}",
+        flush=True,
+    )
+    store = ctx.unit_store("gnn_classify")
+    grid_rows: list[dict[str, Any]] = []
+    grid_results: dict[str, dict[str, Any]] = {}
+    if spec.get("setting_from"):
+        source = spec["setting_from"]
+        setting = sup.Setting(**gnn_rung_summary(ctx, source)["gnn"]["setting"])
+        setting_rule = f"{source}'s chosen setting on this split"
+    else:
+        for candidate in cfg.grid():
+            result = _cross_fit_unit(store, f"{fs}/grid/{candidate.key}", sup, g, data,
+                                     candidate, cfg, ctx.seed)  # fmt: skip
+            grid_results[candidate.key] = result
+            folds_ap = result["fold_pr_auc"]
+            grid_rows.append(
+                {
+                    **asdict(candidate),
+                    "setting": candidate.key,
+                    **{f"fold{k}_pr_auc": v for k, v in enumerate(folds_ap)},
+                    "cv_pr_auc": float(np.mean(folds_ap)),
+                    "cv_pr_auc_std": float(np.std(folds_ap, ddof=1)),
+                }
+            )
+        means = [r["cv_pr_auc"] for r in grid_rows]
+        setting = cfg.grid()[int(np.argmax(means))]  # ties: the earlier setting
+        setting_rule = "grid, highest mean out-of-fold PR-AUC (seed 0, saved folds)"
+    seeds = [ctx.seed + s for s in range(cfg.seeds)]
+    per_seed = []
+    for seed in seeds:
+        if seed == ctx.seed and setting.key in grid_results:
+            per_seed.append(grid_results[setting.key])  # the grid's fit, same seed
+            continue
+        per_seed.append(_cross_fit_unit(store, f"{fs}/seed{seed}/{setting.key}", sup, g,
+                                        data, setting, cfg, seed))  # fmt: skip
+    oof = np.mean([r["oof"] for r in per_seed], axis=0)
+    prob = np.mean([r["test"] for r in per_seed], axis=0)
+    _write_gnn_rung(ctx, spec, label, data, setting, setting_rule, seeds, per_seed,
+                    oof, prob, grid_rows, g, cfg, sup)  # fmt: skip
+
+
+def _write_gnn_rung(
+    ctx: Context, spec: dict[str, Any], label: str, data: GNNData, setting: Any,
+    setting_rule: str, seeds: list[int], per_seed: list[dict[str, Any]],
+    oof: np.ndarray, prob: np.ndarray, grid_rows: list[dict[str, Any]], g: Any,
+    cfg: Any, sup: Any,
+) -> None:  # fmt: skip
+    """Score a GNN rung as df_analyze_report scores Model A and write its
+    outputs (model_a.json last: it marks the stage as done)."""
+    p, report = ctx.paths, ctx.config["report"]
+    fold_ap = sup.fold_pr_auc(data.y_train, oof, data.folds)
+    fold_auroc = [
+        float(roc_auc_score(data.y_train[data.folds == k], oof[data.folds == k]))
+        for k in sorted(np.unique(data.folds))
+    ]
+    try:
+        threshold = evaluation.threshold_from_oof(
+            pd.DataFrame({"fold": data.folds, "prob": oof, "y": data.y_train}),
+            str(report["threshold_rule"]),
+        )
+    except evaluation.EvaluationError as e:
+        raise StageError(str(e)) from e
+    # Scoring only, after every fit: the test labels and groups.
+    test_ids = pd.read_csv(p.test_ids)
+    if not np.array_equal(test_ids[C.NODE_ID].to_numpy(), data.test_nodes):
+        raise StageError("test_ids.csv changed while the GNN was trained")
+    y_test = test_ids[C.LABEL].to_numpy(dtype=int)
+    metrics = df_analyze_report.test_metrics(y_test, prob, threshold["threshold"])
+    intervals = [
+        evaluation.group_bootstrap(
+            y_test,
+            test_ids[C.GROUP_ID].to_numpy(),
+            prob,
+            metric=metric,
+            n_resamples=int(report["bootstrap_resamples"]),
+            seed=ctx.seed,
+        ).as_dict()
+        for metric in ("pr_auc", "auroc")
+    ]
+    seed_rows = [
+        {"seed": r["seed"], "cv_pr_auc": float(np.mean(r["fold_pr_auc"])),
+         "test_pr_auc": float(average_precision_score(y_test, r["test"])),
+         "mean_best_epoch": float(np.mean([log["best_epoch"] for log in r["logs"]]))}
+        for r in per_seed
+    ]  # fmt: skip
+    model_a = {
+        "model": label,
+        "selection": "gnn",
+        "embed_selector": "",
+        "cv_pr_auc": float(np.mean(fold_ap)),
+        "cv_pr_auc_std": float(np.std(fold_ap, ddof=1)),
+        "cv_auroc": float(np.mean(fold_auroc)),
+        "cv_auroc_std": float(np.std(fold_auroc, ddof=1)),
+        "tuning_metric": "out-of-fold PR-AUC (grid); inner-validation PR-AUC "
+        "(early stopping)",
+        **metrics,
+    }
+    warning = evaluation.sanity_check(float(metrics["pr_auc"]), ctx.data["sanity_band"],
+                                      float(report["sanity_margin"]))  # fmt: skip
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    summary = {
+        "dataset": ctx.dataset,
+        "feature_set": ctx.config["feature_set"],
+        "source": gnn_outputs.GNN_SOURCE,
+        "run": f"gnn-{stamp}",
+        "htune_trials": None,
+        "seed": ctx.seed,
+        "n_train": len(data.train_nodes),
+        "n_test": len(data.test_nodes),
+        "test_positive_rate": float(y_test.mean()),
+        "cv_folds": len(fold_ap),
+        "selection_rule": setting_rule,
+        "threshold_rule": f"{report['threshold_rule']} on out-of-fold training "
+        "predictions",
+        "sanity_band": ctx.data["sanity_band"],
+        "model_a": model_a,
+        "model_a_threshold": threshold,
+        "intervals": intervals,
+        "sanity_warning": warning,
+        "gnn": {
+            "spec": dict(spec),
+            "setting": asdict(setting),
+            "seeds": seeds,
+            "fold_pr_auc": fold_ap,
+            "per_seed": seed_rows,
+            "relations": g.relations,
+            "n_edges": g.n_edges,
+            "norm": g.norm,
+            "config": asdict(cfg),
+            "own_columns": data.own_columns,
+            "rewired_graph": _repo_relative(p.rewired_dir(ctx.split_seed), p.root)
+            if spec["graph"] == "rewired"
+            else None,
+            "versions": {k: v for k, v in package_versions().items() if k == "torch"},
+        },
+    }
+    r = p.model_reports_dir
+    atomic_write_parquet(r / gnn_outputs.GNN_OOF, pd.DataFrame(
+        {"row": np.arange(len(oof)), "fold": data.folds, "prob": oof}))  # fmt: skip
+    atomic_write_parquet(r / gnn_outputs.GNN_TEST, pd.DataFrame(
+        {C.NODE_ID: data.test_nodes, "prob": prob}))  # fmt: skip
+    if grid_rows:
+        atomic_write_csv(r / gnn_outputs.GNN_GRID, pd.DataFrame(grid_rows))
+    atomic_write_csv(r / gnn_outputs.GNN_SEEDS, pd.DataFrame(seed_rows))
+    atomic_write_csv(r / MODEL_A_METRICS, pd.DataFrame([model_a]))
+    lines = [
+        f"# {label}: {ctx.config['feature_set']} ({ctx.dataset})",
+        "",
+        f"Setting {setting.key} ({setting_rule}); seeds {seeds}; threshold "
+        f"{threshold['threshold']:.4f} ({summary['threshold_rule']}).",
+        "",
+        f"- Shared-CV PR-AUC (out-of-fold, seed-averaged): {model_a['cv_pr_auc']:.4f} "
+        f"± {model_a['cv_pr_auc_std']:.4f}",
+        f"- Test PR-AUC: {metrics['pr_auc']:.4f} [{intervals[0]['low']:.4f}, "
+        f"{intervals[0]['high']:.4f}] (no skill {summary['test_positive_rate']:.4f})",
+        f"- Test AUROC: {metrics['auroc']:.4f} [{intervals[1]['low']:.4f}, "
+        f"{intervals[1]['high']:.4f}]",
+        f"- F1 / precision / recall at the threshold: {metrics['f1']:.4f} / "
+        f"{metrics['precision']:.4f} / {metrics['recall']:.4f}",
+        "- Per seed (test PR-AUC): "
+        + ", ".join(f"{s['seed']}: {s['test_pr_auc']:.4f}" for s in seed_rows),
+    ]
+    if warning:
+        lines += ["", f"WARNING: {warning}"]
+    atomic_write_text(r / MODEL_A_REPORT, "\n".join(lines) + "\n")
+    atomic_write_json(r / MODEL_A_SUMMARY, summary)  # last: stage done
+    print("\n".join(lines))
+
+
 STAGES: list[Stage] = [
     # A clone that unpacked a bundle has the load stage's outputs but no raw
     # files; it has nothing left to download.
@@ -1399,25 +1983,33 @@ STAGES: list[Stage] = [
           lambda p: [f for k in C.NBR_BLOCK_KINDS for f in block_outputs(k)(p)]),
     Stage("gnn_embed", "gnnssl block: self-supervised DGI embeddings per relation "
           "(and the untrained gnnrand control)", run_gnn_embed, gnn_embed_outputs),
+    Stage("gnn_oof", "gnnsup block: the best supervised GNN's out-of-fold score "
+          "(Model 6, nested cross-fitting)", run_gnn_oof, gnn_oof_outputs),
     Stage("df_analyze_input", "df-analyze train/test tables for the feature set",
           run_df_analyze_input,
           lambda p: [p.df_analyze_input_dir / "train.parquet",
                      p.df_analyze_input_dir / "test.parquet",
                      p.df_analyze_input_dir / FEATURE_SET_INFO]),
+    # The df-analyze stages have no outputs for a GNN classifier rung, which
+    # gnn_classify scores instead.
     Stage("df_analyze", "Run df-analyze (Model A); verify split and types",
-          run_df_analyze, lambda p: [p.model_reports_dir / SPLIT_CHECK,
-                                     p.model_reports_dir / TYPE_CHECK]),
+          run_df_analyze,
+          _df_analyze_only(lambda p: [p.model_reports_dir / SPLIT_CHECK,
+                                      p.model_reports_dir / TYPE_CHECK])),
     Stage("select_model", "Score every tuned model on the grouped CV folds",
-          run_select_model, lambda p: [p.model_reports_dir / SHARED_CV]),
+          run_select_model,
+          _df_analyze_only(lambda p: [p.model_reports_dir / SHARED_CV])),
     Stage("df_analyze_report", "Model A test metrics, threshold, bootstrap CIs",
           run_df_analyze_report,
-          lambda p: [p.model_reports_dir / MODEL_A_REPORT,
-                     p.model_reports_dir / MODEL_A_METRICS,
-                     p.model_reports_dir / MODEL_A_SUMMARY]),
+          _df_analyze_only(lambda p: [p.model_reports_dir / MODEL_A_REPORT,
+                                      p.model_reports_dir / MODEL_A_METRICS,
+                                      p.model_reports_dir / MODEL_A_SUMMARY])),
     Stage("web_report", "HTML report: parameters, results, confidence cards",
-          run_web_report, lambda p: [p.web_report]),
+          run_web_report, _df_analyze_only(lambda p: [p.web_report])),
     Stage("export_model", "Save Model A natively; check every saved model",
-          run_export_model, export_outputs),
+          run_export_model, _df_analyze_only(export_outputs)),
+    Stage("gnn_classify", "GNN classifier rungs (GraphSAGE, R-GCN-style, MLP): "
+          "grid, 5 seeds, cross-fit scores", run_gnn_classify, gnn_classify_outputs),
 ]  # fmt: skip
 
 STAGE_NAMES = [s.name for s in STAGES]

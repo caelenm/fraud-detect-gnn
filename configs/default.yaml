@@ -159,6 +159,57 @@ feature_sets:
   # embeddings together (Model 2 + Model 5); E7r with the untrained encoder.
   pilot_m7_own_nbr_gnnssl: [own, nbr, gnnssl]
   pilot_m7r_own_nbr_gnnrand: [own, nbr, gnnrand]
+  # GNN classifier rungs (Models 3-4; see gnn_models below): trained and
+  # scored by the gnn_classify stage on the own features, not by df-analyze.
+  pilot_g5_sage: [own]         # E5: heterogeneous GraphSAGE
+  pilot_g5g_rgcn: [own]        # E5g: R-GCN-style (symmetric) normalisation
+  pilot_g6_mlp: [own]          # E6: the same network without edges
+  pilot_g5n3_sage_rw: [own]    # N3: E5 on N2's rewired graph
+  # E8 (Model 6): + the best GNN's out-of-fold score (gnn_oof stage); E8s
+  # without the neighbour means.
+  pilot_m8_own_nbr_gnnsup: [own, nbr, gnnsup]
+  pilot_m8s_own_gnnsup: [own, gnnsup]
+
+# GNN classifier rungs (Models 3-4; 2026-10-31, docs/GNN_MODELS_PLAN.md §2):
+# feature sets the gnn_classify stage trains and scores instead of
+# df-analyze. graph: real (every relation), rewired (N2's degree-preserving
+# rewired graph, graph_rewired/seed<split seed>/) or none (no edges: an MLP
+# of the same width and depth); norm: mean (GraphSAGE: D^-1 A) or sym
+# (R-GCN-style: D^-1/2 A D^-1/2), per relation. setting_from: use that
+# rung's chosen setting on the same split instead of the grid.
+gnn_models:
+  pilot_g5_sage: {graph: real, norm: mean}
+  pilot_g5g_rgcn: {graph: real, norm: sym}
+  pilot_g6_mlp: {graph: none, norm: mean}
+  pilot_g5n3_sage_rw: {graph: rewired, norm: mean, setting_from: pilot_g5_sage}
+
+gnn_classify:
+  # Each layer: root weight + one weight per relation on A_hat h, summed;
+  # ReLU and dropout; a linear head. Full batch, sparse products.
+  layers: 2
+  # The grid (every combination), chosen per rung and split by mean
+  # out-of-fold PR-AUC on the saved CV folds with the first seed.
+  hidden: [64, 128]
+  dropout: [0.0, 0.3]
+  lr: [0.001, 0.005]
+  # Adam; binary cross-entropy weighted by negatives / positives of the fit
+  # nodes; early stopping on the PR-AUC of a grouped, stratified 1/inner_folds
+  # of each fit's own training nodes (never the held-out fold or test).
+  weight_decay: 0.0005
+  max_epochs: 300
+  patience: 20
+  inner_folds: 5
+  # Seeds seed, seed + 1, ...; probabilities averaged over them.
+  seeds: 5
+  # cpu: bit-identical for a given seed (decided for embeddings 2026-10-19).
+  device: cpu
+
+gnn_oof:
+  # Model 6's gnnsup block (invariant 1's documented exception, 2026-10-31):
+  # the best of these GNN rungs on each split (the first unless another's
+  # mean per-fold out-of-fold PR-AUC gain over it exceeds one SE), with its
+  # chosen setting, nested-cross-fit with gnn_classify's seeds.
+  candidates: [pilot_g5_sage, pilot_g5g_rgcn]
 
 # Input variants: a block named <kind>_<variant> (own_no36, nbr_no36,
 # gnnssl_no36) is built from the own features without the variant's columns:

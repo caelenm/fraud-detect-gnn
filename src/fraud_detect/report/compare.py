@@ -43,7 +43,7 @@ from fraud_detect import columns as C
 from fraud_detect.config import REPO_ROOT, Paths, get_paths
 from fraud_detect.features import blocks
 from fraud_detect.features.graph import adjacency
-from fraud_detect.models import df_analyze_report, evaluation
+from fraud_detect.models import df_analyze_report, evaluation, gnn_outputs
 from fraud_detect.report import web
 from fraud_detect.runlog import git_commit
 
@@ -108,6 +108,8 @@ def load_side(config: dict[str, Any], feature_set: str) -> Side:
             f"feature_set={feature_set}` first."
         )
     summary = _read_json(summary_path)
+    if gnn_outputs.is_gnn_summary(summary):
+        return _load_gnn_side(config, feature_set, p, summary)
     latest = p.df_analyze_output_dir / "latest.txt"
     if (
         not latest.is_file()
@@ -157,6 +159,41 @@ def load_side(config: dict[str, Any], feature_set: str) -> Side:
         test=test.drop(columns=C.TARGET).rename(columns=renames),
         used_columns=sorted({_block_column(c, renames) for c in entry["selected_cols"]}),
         classifiers=sorted(set(metrics["model"]) - {df_analyze_report.BASELINE_MODEL}),
+    )
+
+
+def _load_gnn_side(
+    config: dict[str, Any], feature_set: str, p: Paths, summary: dict[str, Any]
+) -> Side:
+    """A GNN classifier rung (gnn_classify): the same Model A summary, with
+    its test probabilities from gnn_test.parquet and the own-feature tables
+    df_analyze_input wrote for it."""
+    test_ids = pd.read_csv(p.test_ids)
+    try:
+        prob = gnn_outputs.test_probabilities(p.model_reports_dir, test_ids)
+    except (OSError, ValueError) as e:
+        raise CompareError(f"{feature_set}: {e}") from e
+    info = _read_json(p.df_analyze_input_dir / "feature_set.json")
+    renames = {safe: c["block_column"] for safe, c in info["columns"].items()}
+    train = pd.read_parquet(p.df_analyze_input_dir / "train.parquet")
+    test = pd.read_parquet(p.df_analyze_input_dir / "test.parquet")
+    if not np.array_equal(test[C.TARGET].to_numpy(), test_ids[C.LABEL].to_numpy()):
+        raise CompareError(
+            f"{feature_set}: its test table does not line up with {p.test_ids}"
+        )
+    a = summary["model_a"]
+    return Side(
+        feature_set=feature_set,
+        blocks=list(info["blocks"]),
+        run=str(summary["run"]),
+        summary=summary,
+        prob=prob,
+        threshold=float(a["threshold"]),
+        test_ids=test_ids,
+        train=train.drop(columns=C.TARGET).rename(columns=renames),
+        test=test.drop(columns=C.TARGET).rename(columns=renames),
+        used_columns=sorted(summary["gnn"]["own_columns"]),
+        classifiers=[str(a["model"])],
     )
 
 

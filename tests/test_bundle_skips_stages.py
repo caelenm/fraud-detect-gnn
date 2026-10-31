@@ -74,11 +74,17 @@ def test_a_new_feature_set_runs_only_its_block_and_the_model_stages(tmp_path):
         return plan_stages(STAGE_NAMES, False, get_paths(config, root=b))
 
     model_stages = STAGE_NAMES[STAGE_NAMES.index("df_analyze_input") :]
-    assert planned("m5_own_gnnssl") == ["gnn_embed", *model_stages]
-    # gnn_embed is listed because it comes later, but has nothing to build.
-    assert planned("m2_own_nbr") == ["neighbour_agg", "gnn_embed", *model_stages]
+    assert planned("m5_own_gnnssl") == ["gnn_embed", "gnn_oof", *model_stages]
+    # gnn_embed and gnn_oof are listed because they come later, but have
+    # nothing to build.
+    assert planned("m2_own_nbr") == [
+        "neighbour_agg", "gnn_embed", "gnn_oof", *model_stages,
+    ]  # fmt: skip
     # The same blocks under another name: only the model stages.
     assert planned("pilot_m1_own") == model_stages
     # own_no36 is a view of own: nothing to build either.
     assert planned("m1_own_no36") == model_stages
-    assert planned("m5_own_gnnssl_no36") == ["gnn_embed", *model_stages]
+    assert planned("m5_own_gnnssl_no36") == ["gnn_embed", "gnn_oof", *model_stages]
+    # A GNN classifier rung: the same stages are planned, but the df-analyze
+    # ones do nothing for it (tests/test_gnn_supervised.py runs one).
+    assert planned("pilot_g5_sage") == model_stages

@@ -33,7 +33,7 @@ from fraud_detect.config import (
     load_config,
     with_dataset,
 )
-from fraud_detect.models import contrasts
+from fraud_detect.models import contrasts, gnn_outputs
 from fraud_detect.runstate import atomic_write_csv, atomic_write_text
 
 RUNGS = {"m1": "m1_own", "m2": "m2_own_nbr", "m5": "m5_own_gnnssl"}
@@ -52,9 +52,13 @@ def side(cfg: dict, feature_set: str) -> tuple[dict, pd.Series]:
     """Model A's summary and its per-fold CV PR-AUC for one feature set."""
     p = get_paths({**cfg, "feature_set": feature_set})
     summary = json.loads((p.model_reports_dir / "model_a.json").read_text("utf-8"))
+    y = pd.read_parquet(p.df_analyze_input_dir / "train.parquet")[C.TARGET].to_numpy()
+    if gnn_outputs.is_gnn_summary(summary):  # a GNN classifier rung (gnn_classify)
+        return summary, contrasts.fold_pr_auc(
+            gnn_outputs.oof_rows(p.model_reports_dir), y
+        )
     run = p.df_analyze_output_dir / summary["run"]
     oof = pd.read_parquet(run / "oof_predictions.parquet")
-    y = pd.read_parquet(p.df_analyze_input_dir / "train.parquet")[C.TARGET].to_numpy()
     rows = contrasts.model_a_oof(oof, summary["model_a"])
     return summary, contrasts.fold_pr_auc(rows, y)
 
