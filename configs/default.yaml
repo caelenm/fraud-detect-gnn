@@ -154,6 +154,11 @@ feature_sets:
   m1_own_no19: [own_no19]
   m2_own_nbr_no19: [own_no19, nbr_no19]
   m5_own_gnnssl_no19: [own_no19, gnnssl_no19]
+  # 2026-10-31 (docs/GNN_MODELS_PLAN.md, RESEARCH_PLAN §11 fifth amendment),
+  # every feature as in published work. E7: neighbour means and GNN
+  # embeddings together (Model 2 + Model 5); E7r with the untrained encoder.
+  pilot_m7_own_nbr_gnnssl: [own, nbr, gnnssl]
+  pilot_m7r_own_nbr_gnnrand: [own, nbr, gnnrand]
 
 # Input variants: a block named <kind>_<variant> (own_no36, nbr_no36,
 # gnnssl_no36) is built from the own features without the variant's columns:

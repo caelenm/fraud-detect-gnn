@@ -150,7 +150,13 @@ There are two separate environments. Do not try to merge them.
 
 These are hard invariants. If a change would violate one, stop and ask.
 
-1. **Labels enter only through the training loss.** No feature, aggregate, node attribute or graph input uses any node's label. This includes neighbour fraud rates and target encoding, even computed on training data only. (A later, documented exception may permit supervised out-of-fold GNN features for Model 6; that is an open decision, not a current rule.)
+1. **Labels enter only through the training loss.** No feature, aggregate, node attribute or graph input uses any node's label. This includes neighbour fraud rates and target encoding, even computed on training data only. **One documented exception (amended 2026-10-31 by Caelen, for Model 6):** the `gnn_oof` stage alone may fit supervised GNNs on training labels to build the `gnnsup` block (out-of-fold GNN scores). Its rules:
+   - Each training row's score comes from models fit without that row's CV fold.
+   - Test rows get the mean of those fold models. No test label is ever read.
+   - The shared CV (`select_model`) uses nested scores, so the rows a fold's model is fit on never carry a score built with that fold's labels.
+   - Tests enforce all three (`tests/test_gnn_supervised.py`). Every other feature builder stays label-blind.
+
+   The GNN classifiers of Models 3–4 (`gnn_classify`) use labels only through their training loss, as any classifier does.
 2. **Grouped splits.** No YelpChi user (`net_rur` connected component) and no Amazon duplicate-feature group appears in more than one of train/test, or in more than one CV fold.
 3. **Amazon nodes 0–3,304 are never labelled examples.** They are unlabelled graph context only.
 4. **The test set is frozen.** Every model on a dataset is evaluated on exactly the same test node IDs. Thresholds, feature choices, hyperparameters, model choice, early stopping and (later) graph settings are chosen on training data or its saved CV folds, never on the test set.
@@ -202,11 +208,11 @@ Still to do (later branches; tracked as GitHub issues):
 
 Ask before implementing anything that commits to one of these (plan §10):
 
-- **Model 6:** amending invariant 1 to allow supervised out-of-fold GNN features.
+- **Model 6:** decided 2026-10-31 (invariant 1 amended; see the decision log).
 - **Which dataset is the main one:** decided 2026-10-26 (Amazon main, YelpChi validation; see the decision log). The group is to confirm the RQ1–RQ3 framing.
 - **Features flagged by the audit as possible shortcuts:** for Amazon ([#36](https://github.com/caelenm/fraud-detect-gnn/issues/36)) the user decided on 2026-10-19 to **report both ways** (see the decision log); keep #36 open until the group has seen both. A literature check (`docs/RESEARCH_PLAN.md` §11, 2026-10-19) suggests, without documentation, that `f19` is a helpfulness-vote count (leakage) and `f13`/`f15`/`f18` are rating statistics. Which variant is the headline, and whether to add a variant without every vote-derived column, is for the group after the local checks in §12. Never drop a feature without asking.
 - **The earlier pilot's place in the final report** (the state at `main@3336d87`, see the decision log): omit it, or mention it as the motivating pilot.
-- Adding any architecture beyond GraphSAGE and its graph-free control, any dataset beyond YelpChi and Amazon, or any text data. D4 was decided on 2026-10-26: no other datasets. Also ask before downloading the raw Amazon reviews (V1), adding `igraph` (N2's rewiring), running GADBench (P1), an ungrouped split (S1), GraphSAGE (E5, E6, N3), the autoencoder (E4), any YelpChi run, or backfilling the results database.
+- Adding any architecture beyond GraphSAGE and its graph-free control, any dataset beyond YelpChi and Amazon, or any text data. D4 was decided on 2026-10-26: no other datasets. Also ask before downloading the raw Amazon reviews (V1), adding `igraph` (N2's rewiring), running GADBench (P1), an ungrouped split (S1), the autoencoder (E4), YelpChi runs beyond the 2026-10-31 round, or backfilling the results database. GraphSAGE (E5, E6, N3), its R-GCN-style variant (E5g) and the 2026-10-31 YelpChi runs were approved on 2026-10-31; HGT was declined.
 - **The phase 3 questions D1–D5** in [`docs/PHASE3_FEEDBACK_PLAN.md`](docs/PHASE3_FEEDBACK_PLAN.md) (what "DeepTune to reduce", "training the GNN" and "4 important features" mean, which datasets, backfilling the results database).
 
 Also ask before changing the metrics, the split proportions or grouping rule, the classifiers, or the tuning settings.
@@ -250,6 +256,13 @@ Also ask before changing the metrics, the split proportions or grouping rule, th
   - **Datasets:** Amazon is the main dataset and YelpChi the validation dataset. No other dataset is in scope (this settles D4).
   - **Amazon feature variants going forward:** all 25 (comparable with published work) and **`no19`** (every column except `own__f19`; also left out of every neighbour and GNN input), the **candidate headline**. The `no36`, `only36` and `top4` runs are finished and stay in the report.
   - **Branch `exp/rq-plan`:** commit locally; do not push or open a PR until Caelen says so. Draft GitHub issue text in `docs/drafts/` (never committed) instead of posting it.
+- **2026-10-31 (decisions by Caelen; [`docs/GNN_MODELS_PLAN.md`](docs/GNN_MODELS_PLAN.md)):**
+  - **GNN classifiers approved:** heterogeneous GraphSAGE (E5, Model 4), its edge-free twin (E6, Model 3), E5 on the rewired graph (N3) and the R-GCN-style normalisation variant (E5g). HGT is declined.
+  - **Model 6 approved:** invariant 1 amended for the `gnn_oof` stage (supervised out-of-fold GNN scores, nested cross-fitting).
+  - **E7 approved:** own + neighbour means + GNN embeddings in df-analyze.
+  - **Feature variant for this round:** every feature, as published studies do (Amazon all 25 with `f19`, YelpChi all 32). `f19`'s large effect is reported as an observation. No with/without-leak variants are run for these rungs unless asked.
+  - **YelpChi is the validation dataset** for this round's rungs (approved runs: B, E1, E2, E7, E5, E5g, E6, E8 on 3 splits).
+  - **Scheduling:** start everything at once and keep the queue running. This lifts the "ask before a job over 1 hour" rule for this round's queue only.
 - **Kept from earlier work:** Model A uses df-analyze classifiers **`lgbm`, `lr`, `catboost`, `gandalf`, `rf`, `knn`** (plus the automatic dummy; `mlp` is left out because it is CPU-only in df-analyze and adds about 4 h per run), 100 tuning trials, tuned on **balanced accuracy** for every model (`htune_cls_metric: bal-acc`; not `acc`, which suits imbalanced classes poorly; not `auroc`, which df-analyze applies inconsistently across models), with `--filter-pred-classify auroc` for the prediction-based feature filter; Model A is **chosen by shared 5-fold CV PR-AUC on the training set** (`select_model`), not by df-analyze's tuning score; CatBoost and GANDALF run on the GPU; `--df-tests-method` is never passed (it hits an enum bug in df-analyze 4.1.0).
 
 ## Code conventions

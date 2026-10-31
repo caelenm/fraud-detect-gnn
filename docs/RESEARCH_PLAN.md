@@ -970,6 +970,50 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
     - Summary of the five pairs: `20261030T042833Z_amazon_39555d`. It extends `20261029T111325Z_amazon_956956`, which stays.
     - All three are tagged `rq-plan` and `full`. [`RQ_RESULTS.md`](RQ_RESULTS.md) is regenerated.
   - **Still to run** (each needs a go): E1, N1 and N2 on splits 3–4 (6 pilot runs, about 1.5 h), if the RQ1 and RQ2 verdicts should also rest on 5 splits.
+- **2026-10-31 (fifth amendment: GNN classifiers, Model 6 and the E7 combination; written ~18:00 UTC, before any run of this round).** Caelen's decisions: [`GNN_MODELS_PLAN.md`](GNN_MODELS_PLAN.md) §7 and AGENTS.md's decision log.
+  - **Feature variant:** every feature (Amazon all 25, YelpChi all 32), as published studies do. `f19`'s effect stays an observation (RQ1). No leak variants this round.
+  - **Splits:** Amazon 0–4 (B, E1, E2, E3 exist on 0–2; 3–4 are added), YelpChi 0–2 (`split.n_repeats: 3`). Pilot df-analyze budget throughout: lgbm, lr, catboost; 10 trials.
+  - **Setups:**
+
+    | ID | Feature set | What |
+    |---|---|---|
+    | B, E1, E2, E3 | `pilot_m1_own`, `pilot_m2_own_nbr`, `pilot_m5_own_gnnssl`, `pilot_m5r_own_gnnrand` (E3 Amazon only) | as before |
+    | E7 | `pilot_m7_own_nbr_gnnssl` | own + nbr + gnnssl (d = 8) |
+    | E7r | `pilot_m7r_own_nbr_gnnrand` | own + nbr + gnnrand (Amazon only) |
+    | E5 | `pilot_g5_sage` | heterogeneous GraphSAGE (mean per relation, root weight, 2 layers) |
+    | E5g | `pilot_g5g_rgcn` | E5 with symmetric (R-GCN-style) normalisation |
+    | E6 | `pilot_g6_mlp` | E5 with every edge removed (MLP) |
+    | N3 | `pilot_g5n3_sage_rw` | E5 on N2's rewired graph, with E5's setting (Amazon only) |
+    | E8 | `pilot_m8_own_nbr_gnnsup` | own + nbr + the best GNN's out-of-fold score (nested cross-fitting) |
+    | E8s | `pilot_m8s_own_gnnsup` | own + that score (Amazon only) |
+
+  - **GNN protocol** (GNN_MODELS_PLAN §2.2):
+    - out-of-fold predictions on the saved grouped folds;
+    - early stopping on a grouped, stratified fifth of each fit's training nodes (validation PR-AUC, patience 20, ≤ 300 epochs);
+    - test = mean of the 5 fold models; 5 seeds, probabilities averaged;
+    - grid hidden {64, 128} × dropout {0, 0.3} × lr {1e-3, 5e-3} (Adam, weight decay 5e-4), chosen per rung and split by mean fold PR-AUC with seed 0. N3 takes E5's setting. If one Amazon fit takes over 60 s, hidden 128 is dropped, decided on time only.
+    - Threshold max F1 on the out-of-fold predictions, and the same metrics and bootstrap as Model A.
+  - **Best GNN for E8, per split:** E5g if its mean per-fold out-of-fold PR-AUC gain over E5 exceeds one SE (SD/√5), else E5.
+  - **Primary contrasts and expectations** (B − A as written; verdict rule of 2026-10-19; Holm within each family, reported beside the verdicts):
+
+    | Family | Contrast | Expected |
+    |---|---|---|
+    | Amazon (5 splits) | E5 − E6 | supported |
+    | | E5 − N3 | supported |
+    | | E7 − E1 | not supported |
+    | | E8 − E1 | not supported (little headroom with `f19`: E1 0.929) |
+    | YelpChi (3 splits) | E1 − B | supported |
+    | | E2 − B | supported |
+    | | E5 − E6 | supported |
+    | | E7 − E1 | not supported |
+    | | E8 − E1 | not supported |
+
+  - **Secondary** (verdicts reported, no family):
+    - E5 − B, E6 − B, E5 − E1 (model families; expected E5 below E1, as in GADBench's finding that tree models with neighbour aggregates beat most GNNs);
+    - E5g − E5, E7 − E2, E7 − E7r, E8 − E7, E8 − E5best, E8s − B, E8 − E8s;
+    - the 5-split all-25 re-verdicts E1 − B, E2 − B, E2 − E1, E2 − E3.
+  - **YelpChi audit:** a feature with univariate AUROC ≥ 0.85 is noted, not dropped (this round's feature rule).
+  - **What was known when this was written:** Amazon all 25 on splits 0–2: B 0.918, E1 0.929, E2 0.929, E3 0.933. No GNN classifier, E7 or E8 result existed. YelpChi: only the 2026-10-08 smoke test (B 0.831).
 
 ---
 
