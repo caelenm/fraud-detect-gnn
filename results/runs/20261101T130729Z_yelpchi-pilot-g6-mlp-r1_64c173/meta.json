@@ -1,0 +1,129 @@
+{
+  "schema_version": 1,
+  "run_id": "20261101T130729Z_yelpchi-pilot-g6-mlp-r1_64c173",
+  "recorded_utc": "2026-11-01T13:29:54Z",
+  "started_utc": "2026-11-01T13:07:29Z",
+  "finished_utc": "2026-11-01T13:29:53Z",
+  "duration_min": 22.4,
+  "device": "rtx4060-laptop",
+  "device_details": {
+    "os": "Linux",
+    "platform": "Linux-5.10.16.3-microsoft-standard-WSL2-x86_64-with-glibc2.41",
+    "wsl": true,
+    "python": "3.13.15",
+    "cpu": "Intel(R) Core(TM) Ultra 9 185H",
+    "gpus": [
+      {
+        "name": "NVIDIA GeForce RTX 4060 Laptop GPU",
+        "driver": "571.96",
+        "memory": "8188 MiB"
+      }
+    ]
+  },
+  "description": "YelpChi validation, E6: the GNN without edges (MLP), all 32 features, split 1, pilot (GNN plan)",
+  "kind": "pipeline",
+  "status": "ok",
+  "dataset": "yelpchi",
+  "feature_set": "pilot_g6_mlp",
+  "split_repeat": 1,
+  "seed": 555,
+  "git_commit": "a064974a1295fd97d4ac072143929544df687376",
+  "git_dirty": false,
+  "df_analyze_run": "gnn-20261101T132953Z",
+  "headline": {
+    "model_a": "MLP (GNN without edges) (gnn)",
+    "test_pr_auc": 0.607000821055393,
+    "test_pr_auc_low": 0.587076572290703,
+    "test_pr_auc_high": 0.6262199174919413,
+    "test_auroc": 0.8703927099242753,
+    "test_auroc_low": 0.8628213445771378,
+    "test_auroc_high": 0.8778510225447067,
+    "no_skill_pr_auc": 0.14529728553554916,
+    "cv_pr_auc": 0.6353797317114387,
+    "cv_pr_auc_std": 0.020738349271906955,
+    "f1": 0.570394498733261,
+    "threshold": 0.653884568006346,
+    "n_train": 27571,
+    "n_test": 18383,
+    "sanity_warning": "Model A's test PR-AUC 0.607 is more than 0.05 below the sanity band (0.80, from an untuned gradient-boosting model; docs/RESEARCH_PLAN.md \u00a72). Assume a pipeline bug (mis-typed features, a wrong label vector, a misaligned split) and investigate before reporting."
+  },
+  "settings": {
+    "seed": 555,
+    "feature_set": "pilot_g6_mlp",
+    "split.repeat": 1,
+    "split.n_repeats": 3,
+    "df_analyze.classifiers": [
+      "lgbm",
+      "lr",
+      "catboost"
+    ],
+    "df_analyze.htune_trials": 10,
+    "df_analyze.htune_cls_metric": "bal-acc",
+    "df_analyze.commit": "199e5638620693c267dac715784f1fd0e33fa796",
+    "gnn_embed": {
+      "layers": 2,
+      "hidden": 64,
+      "out_dim": 64,
+      "lr": 0.001,
+      "max_epochs": 300,
+      "patience": 20,
+      "pca_components": 8,
+      "device": "cpu",
+      "usu_edge_fraction": 1.0
+    },
+    "neighbour_agg": {
+      "statistics": [
+        "mean"
+      ],
+      "log1p_degree": true,
+      "rewire_swaps_per_edge": 10
+    },
+    "blocks": [
+      "own"
+    ]
+  },
+  "source": "outputs/yelpchi_repeat1/pilot_g6_mlp",
+  "command": "--dataset yelpchi --set split.n_repeats=3 --set df_analyze.classifiers=[lgbm,lr,catboost] --set df_analyze.htune_trials=10 --set split.repeat=1 --set feature_set=pilot_g6_mlp",
+  "packages": {
+    "numpy": "2.5.3",
+    "pandas": "3.0.6",
+    "pyarrow": "25.0.1",
+    "scikit-learn": "1.9.1",
+    "scipy": "1.18.1",
+    "pyyaml": "6.0.3",
+    "torch": "2.9.1",
+    "torch-geometric": "2.8.1"
+  },
+  "tags": [
+    "pilot",
+    "gnn-plan"
+  ],
+  "results_rows": 1,
+  "results_columns": [
+    "model",
+    "selection",
+    "embed_selector",
+    "cv_pr_auc",
+    "cv_pr_auc_std",
+    "cv_auroc",
+    "cv_auroc_std",
+    "tuning_metric",
+    "pr_auc",
+    "auroc",
+    "f1",
+    "precision",
+    "recall",
+    "accuracy",
+    "balanced_accuracy",
+    "tp",
+    "fp",
+    "fn",
+    "tn",
+    "threshold",
+    "f1_at_05",
+    "precision_at_05",
+    "recall_at_05",
+    "accuracy_at_05",
+    "balanced_accuracy_at_05"
+  ]
+}

@@ -56,4 +56,21 @@ Best GNN for E8 (pre-registered one-SE rule, training folds of each split):
 
 ## YelpChi (validation; all 32 features), 3 splits
 
-_Not run yet._
+| Setup | What | Splits | Test PR-AUC | CV PR-AUC | No skill | Model A / GNN setting per split |
+|---|---|---|---|---|---|---|
+| B | df-analyze on own features | 2 | 0.835 ± 0.007 | 0.823 | 0.145 | lgbm (embed); lgbm (none) |
+| E1 | + neighbour means | 2 | 0.878 ± 0.009 | 0.870 | 0.145 | lgbm (embed); lgbm (none) |
+| E2 | + DGI embeddings | 2 | 0.885 ± 0.005 | 0.870 | 0.145 | lgbm (assoc); lgbm (assoc) |
+| E7 | + neighbour means + DGI embeddings | 2 | 0.850 ± 0.027 | 0.843 | 0.145 | catboost (embed); lgbm (none) |
+| E8 | + neighbour means + best GNN's out-of-fold score | 2 | 0.810 ± 0.014 | 0.809 | 0.145 | catboost (none); catboost (pred) |
+| E5 | GNN: heterogeneous GraphSAGE | 3 | 0.767 ± 0.007 | 0.761 | 0.145 | h128 d0.3 lr0.005; h128 d0.3 lr0.005; h128 d0.3 lr0.001 (per-seed SD ≤ 0.006) |
+| E5g | GNN: R-GCN-style normalisation | 2 | 0.765 ± 0.006 | 0.768 | 0.145 | h128 d0.3 lr0.005; h128 d0.3 lr0.005 (per-seed SD ≤ 0.006) |
+| E6 | GNN without edges (MLP) | 2 | 0.623 ± 0.023 | 0.629 | 0.145 | h128 d0.3 lr0.005; h128 d0.3 lr0.005 (per-seed SD ≤ 0.002) |
+
+Best GNN for E8 (pre-registered one-SE rule, training folds of each split):
+- split 0: g5_sage (gain over the first candidate: g5g_rgcn -0.0028 (SE 0.0027))
+- split 1: g5g_rgcn (gain over the first candidate: g5g_rgcn +0.0023 (SE 0.0012))
+
+_Primary contrasts: not summarised yet._
+
+_Secondary contrasts: not summarised yet._
