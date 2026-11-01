@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "run_id": "20261101T061101Z_amazon_0b023c",
+  "recorded_utc": "2026-11-01T06:18:19Z",
+  "started_utc": "2026-11-01T06:11:01Z",
+  "finished_utc": "2026-11-01T06:18:18Z",
+  "duration_min": 7.3,
+  "device": "rtx4060-laptop",
+  "device_details": {
+    "os": "Linux",
+    "platform": "Linux-5.10.16.3-microsoft-standard-WSL2-x86_64-with-glibc2.41",
+    "wsl": true,
+    "python": "3.13.15",
+    "cpu": "Intel(R) Core(TM) Ultra 9 185H",
+    "gpus": [
+      {
+        "name": "NVIDIA GeForce RTX 4060 Laptop GPU",
+        "driver": "571.96",
+        "memory": "8188 MiB"
+      }
+    ]
+  },
+  "description": "GNN plan, Amazon all 25 features, 5 splits: primary family E5-E6, E5-N3, E7-E1, E8-E1 (pilot)",
+  "kind": "compare",
+  "status": "ok",
+  "dataset": "amazon",
+  "feature_set": null,
+  "split_repeat": null,
+  "seed": null,
+  "git_commit": "1bede69e6ea79a2d359d71cb747d413961536ccd",
+  "git_dirty": false,
+  "command": "scripts/repeat_summary.py --dataset amazon --repeats 5 --prefix pilot_ --name gnn_amazon_primary --pairs g6_mlp:g5_sage g5n3_sage_rw:g5_sage m2_own_nbr:m7_own_nbr_gnnssl m2_own_nbr:m8_own_nbr_gnnsup",
+  "tags": [
+    "pilot",
+    "gnn-plan",
+    "splits5"
+  ],
+  "source": "outputs/amazon/compare/gnn_amazon_primary.csv",
+  "results_rows": 4,
+  "results_columns": [
+    "variant",
+    "contrast",
+    "a",
+    "b",
+    "test_delta_split0",
+    "test_delta_split1",
+    "test_delta_split2",
+    "test_delta_split3",
+    "test_delta_split4",
+    "test_delta_mean",
+    "test_delta_sd",
+    "test_pr_auc_a_mean",
+    "test_pr_auc_a_sd",
+    "test_pr_auc_b_mean",
+    "test_pr_auc_b_sd",
+    "cv_folds",
+    "cv_delta_mean",
+    "corrected_t",
+    "p",
+    "verdict"
+  ]
+}

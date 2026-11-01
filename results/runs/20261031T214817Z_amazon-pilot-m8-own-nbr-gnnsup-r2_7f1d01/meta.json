@@ -1,0 +1,135 @@
+{
+  "schema_version": 1,
+  "run_id": "20261031T214817Z_amazon-pilot-m8-own-nbr-gnnsup-r2_7f1d01",
+  "recorded_utc": "2026-10-31T22:42:04Z",
+  "started_utc": "2026-10-31T21:48:17Z",
+  "finished_utc": "2026-10-31T22:41:57Z",
+  "duration_min": 53.7,
+  "device": "rtx4060-laptop",
+  "device_details": {
+    "os": "Linux",
+    "platform": "Linux-5.10.16.3-microsoft-standard-WSL2-x86_64-with-glibc2.41",
+    "wsl": true,
+    "python": "3.13.15",
+    "cpu": "Intel(R) Core(TM) Ultra 9 185H",
+    "gpus": [
+      {
+        "name": "NVIDIA GeForce RTX 4060 Laptop GPU",
+        "driver": "571.96",
+        "memory": "8188 MiB"
+      }
+    ]
+  },
+  "description": "E8: own + neighbour means + best GNN out-of-fold score, all 25 features, split 2, pilot (GNN plan)",
+  "kind": "pipeline",
+  "status": "ok",
+  "dataset": "amazon",
+  "feature_set": "pilot_m8_own_nbr_gnnsup",
+  "split_repeat": 2,
+  "seed": 555,
+  "git_commit": "1bede69e6ea79a2d359d71cb747d413961536ccd",
+  "git_dirty": false,
+  "df_analyze_run": "20261031T222445Z",
+  "headline": {
+    "model_a": "catboost (embed)",
+    "test_pr_auc": 0.9302938282002866,
+    "test_pr_auc_low": 0.9067910104847269,
+    "test_pr_auc_high": 0.9505708453932858,
+    "test_auroc": 0.9828242935562348,
+    "test_auroc_low": 0.9751368871249128,
+    "test_auroc_high": 0.989470945760656,
+    "no_skill_pr_auc": 0.09490740740740741,
+    "cv_pr_auc": 0.942925348267788,
+    "cv_pr_auc_std": 0.0205359856200506,
+    "f1": 0.8723747980613893,
+    "threshold": 0.47199247437084146,
+    "n_train": 5183,
+    "n_test": 3456
+  },
+  "settings": {
+    "htune_trials": 10,
+    "seed": 555,
+    "feature_set": "pilot_m8_own_nbr_gnnsup",
+    "split.repeat": 2,
+    "split.n_repeats": 3,
+    "df_analyze.classifiers": [
+      "lgbm",
+      "lr",
+      "catboost"
+    ],
+    "df_analyze.htune_trials": 10,
+    "df_analyze.htune_cls_metric": "bal-acc",
+    "df_analyze.commit": "199e5638620693c267dac715784f1fd0e33fa796",
+    "gnn_embed": {
+      "layers": 2,
+      "hidden": 64,
+      "out_dim": 64,
+      "lr": 0.001,
+      "max_epochs": 300,
+      "patience": 20,
+      "pca_components": 8,
+      "device": "cpu",
+      "usu_edge_fraction": 1.0
+    },
+    "neighbour_agg": {
+      "statistics": [
+        "mean"
+      ],
+      "log1p_degree": true,
+      "rewire_swaps_per_edge": 10
+    },
+    "blocks": [
+      "own",
+      "nbr",
+      "gnnsup"
+    ]
+  },
+  "source": "outputs/amazon_repeat2/pilot_m8_own_nbr_gnnsup",
+  "command": "--dataset amazon --set split.n_repeats=3 --set df_analyze.classifiers=[lgbm,lr,catboost] --set df_analyze.htune_trials=10 --set split.repeat=2 --set feature_set=pilot_m8_own_nbr_gnnsup",
+  "packages": {
+    "numpy": "2.5.3",
+    "pandas": "3.0.6",
+    "pyarrow": "25.0.1",
+    "scikit-learn": "1.9.1",
+    "scipy": "1.18.1",
+    "pyyaml": "6.0.3",
+    "torch": "2.9.1",
+    "torch-geometric": "2.8.1"
+  },
+  "tags": [
+    "pilot",
+    "gnn-plan"
+  ],
+  "results_rows": 16,
+  "results_columns": [
+    "model",
+    "selection",
+    "embed_selector",
+    "cv_pr_auc",
+    "cv_pr_auc_std",
+    "cv_auroc",
+    "cv_bal_acc",
+    "cv_pr_auc_default",
+    "cv_auroc_default",
+    "cv_tuning_gain",
+    "tuning_metric",
+    "tuning_score",
+    "pr_auc",
+    "auroc",
+    "f1",
+    "precision",
+    "recall",
+    "accuracy",
+    "balanced_accuracy",
+    "tp",
+    "fp",
+    "fn",
+    "tn",
+    "threshold",
+    "f1_at_05",
+    "precision_at_05",
+    "recall_at_05",
+    "accuracy_at_05",
+    "balanced_accuracy_at_05"
+  ]
+}

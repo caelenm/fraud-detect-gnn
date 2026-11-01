@@ -178,6 +178,9 @@ def main(argv: list[str] | None = None) -> int:
     for dataset, n in DATASETS.items():
         lines += ["", f"## {DATASET_LABELS[dataset]}, {n} splits", ""]
         rows = setup_rows(config, dataset, n)
+        if not rows:
+            lines.append("_Not run yet._")
+            continue
         lines += [
             "| Setup | What | Splits | Test PR-AUC | CV PR-AUC | No skill | "
             "Model A / GNN setting per split |",

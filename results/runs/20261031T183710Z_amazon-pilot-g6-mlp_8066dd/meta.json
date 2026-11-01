@@ -1,0 +1,128 @@
+{
+  "schema_version": 1,
+  "run_id": "20261031T183710Z_amazon-pilot-g6-mlp_8066dd",
+  "recorded_utc": "2026-10-31T18:40:41Z",
+  "started_utc": "2026-10-31T18:37:10Z",
+  "finished_utc": "2026-10-31T18:40:39Z",
+  "duration_min": 3.5,
+  "device": "rtx4060-laptop",
+  "device_details": {
+    "os": "Linux",
+    "platform": "Linux-5.10.16.3-microsoft-standard-WSL2-x86_64-with-glibc2.41",
+    "wsl": true,
+    "python": "3.13.15",
+    "cpu": "Intel(R) Core(TM) Ultra 9 185H",
+    "gpus": [
+      {
+        "name": "NVIDIA GeForce RTX 4060 Laptop GPU",
+        "driver": "571.96",
+        "memory": "8188 MiB"
+      }
+    ]
+  },
+  "description": "E6: the GNN without edges (MLP), all 25 features, split 0, pilot (GNN plan)",
+  "kind": "pipeline",
+  "status": "ok",
+  "dataset": "amazon",
+  "feature_set": "pilot_g6_mlp",
+  "split_repeat": 0,
+  "seed": 555,
+  "git_commit": "1bede69e6ea79a2d359d71cb747d413961536ccd",
+  "git_dirty": false,
+  "df_analyze_run": "gnn-20261031T184039Z",
+  "headline": {
+    "model_a": "MLP (GNN without edges) (gnn)",
+    "test_pr_auc": 0.9069745424761683,
+    "test_pr_auc_low": 0.8796914368942653,
+    "test_pr_auc_high": 0.930182191804708,
+    "test_auroc": 0.9729976295926642,
+    "test_auroc_low": 0.9623755085006039,
+    "test_auroc_high": 0.9827070055520954,
+    "no_skill_pr_auc": 0.09490740740740741,
+    "cv_pr_auc": 0.9084352148413766,
+    "cv_pr_auc_std": 0.03614437206896923,
+    "f1": 0.8434504792332268,
+    "threshold": 0.7622317590162413,
+    "n_train": 5183,
+    "n_test": 3456
+  },
+  "settings": {
+    "seed": 555,
+    "feature_set": "pilot_g6_mlp",
+    "split.repeat": 0,
+    "split.n_repeats": 3,
+    "df_analyze.classifiers": [
+      "lgbm",
+      "lr",
+      "catboost"
+    ],
+    "df_analyze.htune_trials": 10,
+    "df_analyze.htune_cls_metric": "bal-acc",
+    "df_analyze.commit": "199e5638620693c267dac715784f1fd0e33fa796",
+    "gnn_embed": {
+      "layers": 2,
+      "hidden": 64,
+      "out_dim": 64,
+      "lr": 0.001,
+      "max_epochs": 300,
+      "patience": 20,
+      "pca_components": 8,
+      "device": "cpu",
+      "usu_edge_fraction": 1.0
+    },
+    "neighbour_agg": {
+      "statistics": [
+        "mean"
+      ],
+      "log1p_degree": true,
+      "rewire_swaps_per_edge": 10
+    },
+    "blocks": [
+      "own"
+    ]
+  },
+  "source": "outputs/amazon/pilot_g6_mlp",
+  "command": "--dataset amazon --set split.n_repeats=3 --set df_analyze.classifiers=[lgbm,lr,catboost] --set df_analyze.htune_trials=10 --set split.repeat=0 --set feature_set=pilot_g6_mlp",
+  "packages": {
+    "numpy": "2.5.3",
+    "pandas": "3.0.6",
+    "pyarrow": "25.0.1",
+    "scikit-learn": "1.9.1",
+    "scipy": "1.18.1",
+    "pyyaml": "6.0.3",
+    "torch": "2.9.1",
+    "torch-geometric": "2.8.1"
+  },
+  "tags": [
+    "pilot",
+    "gnn-plan"
+  ],
+  "results_rows": 1,
+  "results_columns": [
+    "model",
+    "selection",
+    "embed_selector",
+    "cv_pr_auc",
+    "cv_pr_auc_std",
+    "cv_auroc",
+    "cv_auroc_std",
+    "tuning_metric",
+    "pr_auc",
+    "auroc",
+    "f1",
+    "precision",
+    "recall",
+    "accuracy",
+    "balanced_accuracy",
+    "tp",
+    "fp",
+    "fn",
+    "tn",
+    "threshold",
+    "f1_at_05",
+    "precision_at_05",
+    "recall_at_05",
+    "accuracy_at_05",
+    "balanced_accuracy_at_05"
+  ]
+}

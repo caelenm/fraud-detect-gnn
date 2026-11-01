@@ -1014,6 +1014,77 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
     - the 5-split all-25 re-verdicts E1 − B, E2 − B, E2 − E1, E2 − E3.
   - **YelpChi audit:** a feature with univariate AUROC ≥ 0.85 is noted, not dropped (this round's feature rule).
   - **What was known when this was written:** Amazon all 25 on splits 0–2: B 0.918, E1 0.929, E2 0.929, E3 0.933. No GNN classifier, E7 or E8 result existed. YelpChi: only the 2026-10-08 smoke test (B 0.831).
+- **2026-11-01 (fifth amendment, Amazon results).** The queue started at 17:29 UTC on 2026-10-31. The Amazon part (48 runs and 2 summaries) finished at 06:39 UTC on 2026-11-01; YelpChi is running.
+  - **Run facts:**
+    - Every entry was recorded from a clean tree: 2 at `19ba553`, 2 at `2ffb71d`, and 46 at `1bede69`, which only adds `scripts/gnn_report.py` to `2ffb71d`.
+    - Every df-analyze run passed the split and column-type checks.
+    - All 10 E8/E8s runs scored the shared CV with the nested out-of-fold `gnnsup` on each fold's fit rows.
+    - The 60-s rule for hidden 128 never applied: the slowest grid point took 84 s for its 5 fold fits.
+    - **One stop:** at 23:17 UTC, uv 0.12.19 aborted (exit 134, a panic in its own argument parser) on the `results_db.py add` after split 3's E5g. The run itself had finished and saved everything. Its entry was added by hand from those outputs, the job scripts now retry exit 134 only, and the runner restarted at 23:19 UTC.
+  - **Scores** (test PR-AUC of Model A or the GNN rung, mean ± SD over the 5 splits; no skill 0.095; per split in [`GNN_RESULTS.md`](GNN_RESULTS.md)):
+
+    | Setup | Test PR-AUC | CV PR-AUC |
+    |---|---|---|
+    | B (own) | 0.922 ± 0.007 | 0.924 |
+    | E1 (+ nbr) | 0.933 ± 0.008 | 0.937 |
+    | E2 (+ gnnssl) | 0.934 ± 0.007 | 0.935 |
+    | E3 (+ gnnrand) | 0.934 ± 0.003 | 0.938 |
+    | E7 (+ nbr + gnnssl) | 0.938 ± 0.007 | 0.937 |
+    | E7r (+ nbr + gnnrand) | 0.936 ± 0.005 | 0.939 |
+    | E8 (+ nbr + gnnsup) | 0.930 ± 0.007 | 0.937 |
+    | E8s (+ gnnsup) | 0.928 ± 0.004 | 0.932 |
+    | E5 (GraphSAGE) | 0.900 ± 0.014 | 0.905 |
+    | E5g (R-GCN-style) | 0.911 ± 0.011 | 0.913 |
+    | E6 (no edges) | 0.898 ± 0.013 | 0.904 |
+    | N3 (rewired graph) | 0.887 ± 0.014 | 0.891 |
+
+    - The GNN rungs' per-seed SD of test PR-AUC is at most 0.007.
+    - **Best GNN for E8 (one-SE rule):** E5 on splits 0 and 3, E5g on splits 1, 2 and 4.
+  - **Primary family (Amazon):** no contrast is supported. The smallest Holm p is 0.60 (E5 − N3).
+
+    | Contrast | Mean Δ ± SD | Splits > 0 | CV Δ | CV p | Verdict | Expected |
+    |---|---|---|---|---|---|---|
+    | E5 − E6 | +0.002 ± 0.011 | 2 of 5 | +0.001 | 0.92 | not distinguishable | supported |
+    | E5 − N3 | +0.013 ± 0.013 | 5 of 5 | +0.014 | 0.15 | not distinguishable | supported |
+    | E7 − E1 | +0.005 ± 0.002 | 5 of 5 | −0.000 | 0.99 | not distinguishable | not supported |
+    | E8 − E1 | −0.003 ± 0.008 | 2 of 5 | −0.000 | 0.99 | worse (lower mean) | not supported |
+
+  - **Secondary** ("worse" with p ≥ 0.05 is a lower mean, not a significant drop):
+    - **Supported:**
+      - E1 − B: +0.011 ± 0.006, p 0.021.
+      - E2 − B: +0.011 ± 0.002, p 0.028. This and E1 − B confirm the 3-split verdicts on 5 splits.
+      - E8 − E5: +0.030 ± 0.014, p 0.0095.
+    - **Significantly worse:**
+      - E5 − E1: −0.033 ± 0.017, p 0.011.
+      - E6 − B: −0.024 ± 0.011, p 0.043.
+    - **Lower mean:**
+      - E5 − B: −0.023, p 0.12.
+      - E8 − E7: −0.008 ± 0.006, below on all 5 splits, CV Δ 0.000.
+      - E2 − E3: −0.000.
+    - **Not distinguishable:**
+      - E5g − E5: +0.011 ± 0.004, above on all 5 splits, CV p 0.22.
+      - E7 − E2: +0.004.
+      - E7 − E7r: +0.002.
+      - E8s − B: +0.005, p 0.24.
+      - E8 − E8s: +0.002.
+      - E2 − E1: +0.001.
+  - **Readings** (pilot budget; all 25 features, so B starts at 0.92 and little headroom is left):
+    - **The GNN classifiers trail df-analyze.** GraphSAGE is 0.023 below B and 0.033 below E1 (significant), as pre-registered for E5 − E1 and in line with GADBench.
+    - **The edges do not measurably help the GNN.** Against its edge-free twin, E5 is ahead on only 2 of 5 splits. Against the rewired graph it is ahead on all 5, but mean Δ ≈ SD and CV p 0.15. Both "supported" expectations fail. With `f19` present, a node's own features carry nearly all of the signal (RQ1).
+    - **Symmetric normalisation is ahead of the mean on every split** (+0.011, about the size of E1 − B). The CV test does not separate the two (p 0.22).
+    - **Combining helps on the test set but not in CV.** E7 has the highest mean (0.938), and E7 − E1 is positive on all 5 test splits with mean > SD. Its CV Δ is zero (p 0.99), so it is not supported, as expected. E7 is also not distinguishable from E7r (DGI training adds nothing again; E2 − E3 likewise).
+    - **Model 6's supervised score adds nothing over neighbour means.**
+      - E8 − E1 is −0.003, and E8 is below E7 on every split.
+      - On its own, the score lifts B by +0.005 (not distinguishable). That is about half the gain the neighbour means give.
+      - The label-free aggregates already hold what the supervised GNN learns from the graph.
+  - **Caveats:**
+    - Pilot budget, with each side's Model A chosen on the same folds.
+    - CV p values are two-sided, and Holm is reported only as a sensitivity check.
+    - YelpChi, the validation dataset, is not in yet.
+  - **Results DB:**
+    - 48 pipeline entries, tags `gnn-plan` and `pilot`.
+    - Primary summary `20261101T061101Z_amazon_0b023c`, secondary summary `20261101T061819Z_amazon_0ae1da`.
+    - [`GNN_RESULTS.md`](GNN_RESULTS.md) is generated by `scripts/gnn_report.py`.
 
 ---
 
