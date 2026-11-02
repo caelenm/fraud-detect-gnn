@@ -63,9 +63,9 @@ The exported models of the best setups, on split 0. They already existed from th
 | # | Deliverable | Done when | Outcome |
 |---|---|---|---|
 | M1 | Registry and data layer | Every pipeline entry maps to a setup; `setup_summary` reproduces the means in `docs/GNN_RESULTS.md` and `docs/RQ_RESULTS.md` to 3 decimals; budgets never mix | Met; `tests/test_dashboard_committed.py` |
-| M2 | Server and page, no model | `--no-model` works on a fresh clone with no `outputs/`; toggles change every chart; checked on Linux/WSL2 and macOS | Met on Linux/WSL2. **macOS was not checked** |
+| M2 | Server and page, no model | `--no-model` works on a fresh clone with no `outputs/`; toggles change every chart; checked on Linux/WSL2 and macOS | Met on Linux/WSL2, from a fresh clone. **macOS was not checked** |
 | M3 | Model worker | The worker's P(fraud) for every test row of each best setup matches df-analyze's saved probabilities within `tolerance_for`; `predict.py` still passes its tests | Met: 3,456, 3,456 and 18,383 rows, largest difference 0. The server repeats this check at every start |
-| M4 | Classify panel | Each button returns in < 1 s; stratified draws only return the asked class; the verified mark shows; the GNN fallback works on a synthetic GNN output | Met: about 34 ms per click |
+| M4 | Classify panel | Each button returns in < 1 s; stratified draws only return the asked class; the verified mark shows; the GNN fallback works on a synthetic GNN output | Met: at most 30 ms per click, from a fresh clone with unpacked bundles |
 | M5 | Polish | B comparison on each draw, history strip, URL state, README section | Met, except that screenshots for slides were not made |
 
 ## 7. Tests

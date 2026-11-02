@@ -15,7 +15,7 @@ It has two parts, and they need different things:
 
 ## Running it on another Windows machine (WSL2)
 
-Everything except the browser runs inside WSL. These steps were tested from a fresh clone and real bundles on the group laptop, under WSL2 with Debian. They were not tested on a second physical machine, or on macOS.
+Everything except the browser runs inside WSL. Steps 3–5 were tested from a fresh clone and real bundles on the group laptop, under WSL2 with Debian, where WSL, uv and df-analyze were already installed. So installing those three from nothing, a second physical machine and macOS have not been tested.
 
 ### Step 1: Install WSL
 
@@ -95,6 +95,8 @@ uv run unpack_artifacts.py --dataset amazon
 uv run unpack_artifacts.py --dataset yelpchi
 ```
 
+Each one lists which stages count as done. The YelpChi bundle lists some as "will run": that list is for the default feature set, which YelpChi never ran, and the dashboard does not need it. Nothing runs unless you start the pipeline.
+
 **5c. Install df-analyze next to the repository, at the tested commit.** The models need its environment. No GPU is needed to predict.
 
 ```bash
@@ -119,7 +121,7 @@ uv sync --locked --python '>=3.13.11,<3.14' --directory ../df-analyze
 uv run scripts/dashboard.py
 ```
 
-The results sections are up at once. The classify panels take a little longer, because each model is loaded and then checked on its whole test set. A panel is ready when it says **Live, verified on all N test rows**.
+The results sections are up at once. The classify panels take a few seconds more (6 on the group laptop), because each model is loaded and then checked on its whole test set. The first start can take minutes if uv still has to build df-analyze's environment. A panel is ready when it says **Live, verified on all N test rows**.
 
 If you skip 5c, `uv run scripts/dashboard.py --no-model` still shows the panels, using the saved test predictions, and says so.
 
