@@ -1,12 +1,12 @@
 # GNN models plan: end-to-end GNNs against df-analyze, then the best GNN combined with neighbour means
 
-**Status:** approved by Caelen on 2026-10-31 (decisions in §7); running. The pre-registration is RESEARCH_PLAN §11, 2026-10-31 (fifth amendment). This plan extends `docs/ANALYSIS_PLAN.md` §8 (GraphSAGE; still a draft in the dev worktree) and uses its framework: the axes, the justification rules J1–J6, the strength levels and the verdict rule. If it conflicts with `AGENTS.md`, `AGENTS.md` wins: stop and ask.
+**Status:** approved by the user on 2026-10-31 (decisions in §7); running. The pre-registration is RESEARCH_PLAN §11, 2026-10-31 (fifth amendment). This plan extends `docs/ANALYSIS_PLAN.md` §8 (GraphSAGE; still a draft in the dev worktree) and uses its framework: the axes, the justification rules J1–J6, the strength levels and the verdict rule. If it conflicts with `AGENTS.md`, `AGENTS.md` wins: stop and ask.
 
 **Where the proposal came from.** A suggested list of three models: heterogeneous GraphSAGE, R-GCN and HGT. Its wording ("test complaints", relations "company, product, state, text-similarity") describes the CFPB complaint graph that was dropped on 2026-10-07. This plan rereads each suggestion for the graphs we actually use:
 - **Amazon:** users; U-P-U, U-S-U and U-V-U.
 - **YelpChi:** reviews; R-U-R, R-T-R and R-S-R.
 
-**Feature variant for this round (Caelen, 2026-10-31).** The main comparison uses every feature, as published studies do: all 25 on Amazon (with `f19`) and all 32 on YelpChi. The large effect of `f19` (RQ1: B falls from 0.918 to 0.539 without it) is reported as an observation, not as a second variant. No with/without-leak variants are run for these rungs unless the group asks. YelpChi is the validation dataset.
+**Feature variant for this round (the user, 2026-10-31).** The main comparison uses every feature, as published studies do: all 25 on Amazon (with `f19`) and all 32 on YelpChi. The large effect of `f19` (RQ1: B falls from 0.918 to 0.539 without it) is reported as an observation, not as a second variant. No with/without-leak variants are run for these rungs unless the group asks. YelpChi is the validation dataset.
 
 ## 1. How useful each suggestion is here
 
@@ -137,7 +137,7 @@ Inputs are the own block, all features, standardised with a scaler fit on traini
 - df-analyze: B, E1, E2, E7, E8 × 3 splits (15 runs; 40–90 min each by extrapolation);
 - GNN: E5, E5g, E6 × 3, then gnnsup × 3.
 
-The queue runs continuously from 2026-10-31 (Caelen: "start everything now, do not stop"), Amazon first.
+The queue runs continuously from 2026-10-31 (the user: "start everything now, do not stop"), Amazon first.
 
 ## 5. Order of work
 
@@ -162,7 +162,7 @@ The queue runs continuously from 2026-10-31 (Caelen: "start everything now, do n
 6. **With `f19` the Amazon headroom is small** (B 0.918). A null on Amazon may mean "no room left", so the YelpChi verdicts carry more weight for the graph question.
 7. **The best-GNN choice and its setting use all of a split's training labels** before gnnsup's out-of-fold scores are built. That is a second-order selection effect, standard for stacking.
 
-## 7. Decisions (Caelen, 2026-10-31)
+## 7. Decisions (the user, 2026-10-31)
 
 | # | Decision | Answer |
 |---|---|---|

@@ -624,7 +624,7 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
   - **Caveats:**
     - Pilot budget, one seed per run. Each side's Model A was chosen on the same CV folds the t-test uses.
     - **`top4` was chosen on split 0's training folds.** Splits 1 and 2 put some of those nodes in their test sets, so their `top4` results are mildly optimistic. Re-ranked on their own training folds (`outputs/amazon_repeat{1,2}/probe/top_features.csv`), splits 1 and 2 keep `f19`, `f00` and `f23` but pick `f12` for the fourth place instead of `f18` (ranks 3–5 are within noise). Split 0's contrast (+0.006 for m1_top4 − m1) has no such issue. The same caveat applies, more weakly, to the #36 set, flagged by the split-0 audit.
-- **2026-10-26 (decisions by Caelen; the group is to confirm the framing).** Branch `exp/rq-plan`, committed locally, not pushed.
+- **2026-10-26 (decisions by the user; the group is to confirm the framing).** Branch `exp/rq-plan`, committed locally, not pushed.
   - **Research questions.** RQ1 (headline): how much of Amazon's published performance, and of the graph's apparent benefit, depends on the leaked vote column `f19`? RQ2: once leaks are removed, how much of the remaining graph gain is real relational structure, and how much is degree and extra columns? RQ3: does training the GNN encoder matter when its embeddings feed df-analyze, and how small can those embeddings be?
   - **Datasets:** Amazon main, YelpChi validation, nothing else (settles D4).
   - **Feature variants on Amazon going forward:** all 25, and `no19` (all except `own__f19`, also left out of every neighbour and GNN input) as the candidate headline. The `no36`, `only36` and `top4` runs stay in the report as answered questions.
@@ -663,7 +663,7 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
     | f24 | review sentiment, −1 / 0 / 1 (35) | text |
 
   - **Reading.** `f19` is label-derived by construction and is the only vote column left. `f13`, `f15` and `f18` are rating statistics: close in meaning to a "downvoted user" label, but not built from votes, so they are not leaks. `no19` is the leak-controlled variant; `no36` stays as the stricter one. What remains unproven without the raw reviews (V1): that `amz_features_36.npz` was built by this `build_features`; the identities make that very likely for columns 0–18 and 31–35, but none of them tests column 30 directly.
-- **2026-10-26 (overnight queue: rules written BEFORE any of these runs).** Caelen's message of 2026-10-26 is the "go" for these runs only. One job at a time on the RTX 4060 laptop (`outputs/amazon/rq_logs/queue.txt`, `bin/runner.sh`); pilot settings as every earlier pilot (lgbm, lr, catboost; 10 trials; `bal-acc`; seed 555; splits 0, 1, 2 with `split.n_repeats: 3`).
+- **2026-10-26 (overnight queue: rules written BEFORE any of these runs).** The user's message of 2026-10-26 is the "go" for these runs only. One job at a time on the RTX 4060 laptop (`outputs/amazon/rq_logs/queue.txt`, `bin/runner.sh`); pilot settings as every earlier pilot (lgbm, lr, catboost; 10 trials; `bal-acc`; seed 555; splits 0, 1, 2 with `split.n_repeats: 3`).
   - **New inputs (branch `exp/rq-plan`):** the variant `no19` (`own__f19` left out of own, nbr and gnnssl/gnnrand inputs); the `deg` block (log1p(degree) per relation, 3 columns, built in the `neighbour_agg` stage; the same values as nbr's `log1p_degree` columns; label-blind and deterministic by test); the per-split variant `top4no19` (`keep_by_repeat`, resolved for the active split repeat).
   - **F5's four features, fixed now** (`scripts/top_features.py --variant no19 --repeat k`: the probe is fit on the 24 columns other than `f19`, permutation importance on each split's own training folds; `outputs/amazon*/probe/top_features_no19.csv`): split 0 `f07`, `f15`, `f18`, `f23`; split 1 `f15`, `f18`, `f23`, `f24`; split 2 `f13`, `f18`, `f23`, `f24`. Only `f18` and `f23` are in all three. Unlike 2026-10-23's `top4`, each split's list comes from its own training folds only.
   - **Z1 probe** (`scripts/feedback_probes.py --task z1 --variant no19`; split 0 training CV; recorded with `--kind probe`): own + gnnssl (E2, DGI size 64) and own + gnnrand (E3, 5 initialisation seeds) at d = 2, 4, 8, 16, 32, 64 PCA components per relation and raw, with each raw embedding's effective rank. The chosen d per block is the smallest d whose mean CV PR-AUC is within one standard error of the best d's (for gnnrand, on the mean over seeds). It changes no run tonight; the chosen d and raw 64 go to later pilot rungs (Step 2, item 5).
@@ -681,7 +681,7 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
     - N1 − B "supported" means degree alone accounts for part of the graph gain. E1 − N1 "supported" means neighbour means add something beyond degree. Whether that something is real structure is N2's question, not tonight's.
     - F5 "not distinguishable" or positive means four non-vote columns carry the 24-column result. "Worse" means they do not.
   - **Not run tonight:** N2 (needs `igraph` or a decision on the rewiring tool), V1, GraphSAGE, E4, YelpChi, full-budget runs.
-  - **Status:** Caelen put the queue on hold the same day. It was stopped 2 minutes into the Z1 probe, before any df-analyze run; nothing was recorded.
+  - **Status:** the user put the queue on hold the same day. It was stopped 2 minutes into the Z1 probe, before any df-analyze run; nothing was recorded.
 - **2026-10-26 (N2 probe, RQ2; training CV of split 0 only, no19; `scripts/null_graph_probe.py`; results DB `20261026T150141Z_amazon_dd4a8c`).**
   - **Rewiring.** `features/graph.py` `swap_rewire`: double-edge swaps (a-b, c-d → a-d, c-b), 10 per edge, rejecting self-loops, existing edges and repeats. It is NumPy only, so no `igraph` is needed. Every node keeps exactly its degree in every relation, which the script checks each time.
   - **How random the rewired graphs are.** Real edges still present after rewiring: U-P-U 22%, U-S-U 36%, U-V-U 16%. U-S-U is dense (3.57M edges on 11,944 nodes), so a random graph with the same degrees necessarily shares many of its edges. U-S-U takes about 55 s per rewiring on one CPU.
@@ -691,7 +691,7 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
   - **Side finding:** own features without `f19` score 0.498 on CV, the same as without all four #36 features (0.500, 2026-10-19). That fits the column map: `f13`, `f15` and `f18` can be computed from the star counts `f02`–`f06`, so dropping them loses nothing, and `f19` alone carries the #36 signal.
   - **Not done:** N2 pilot runs need a pipeline block of neighbour means on the rewired graph, with the rewiring seed tied to the split repeat and the graph saved for N3. That block is not built, and the runs need a go. The question of which rewiring tool to use (`igraph`) is moot if the group accepts this implementation.
   - **Recording note:** the results-DB entry's `git_dirty` is true. The only uncommitted change at the time was README text; the probe code was committed (`b75f377`).
-- **2026-10-26 (amendment to the overnight pre-registration: N2 added, written BEFORE any pilot run; the queue is still on hold).** Caelen asked for the N2 block and its pilots.
+- **2026-10-26 (amendment to the overnight pre-registration: N2 added, written BEFORE any pilot run; the queue is still on hold).** The user asked for the N2 block and its pilots.
   - **Block:** `nbrrw` is the `nbr` block (1-hop means of every own feature plus log1p(degree), per relation) built on a rewired graph. Stage `neighbour_agg`, `features/graph.py` `swap_rewire`, 10 double-edge swaps per edge.
   - **Rewiring seed:** tied to the split repeat. It is the split seed plus the relation index: split 0 uses 555 / 556 / 557, split 1 uses 1555 / 1556 / 1557, split 2 uses 2555 / 2556 / 2557.
   - **Saved graph:** `data/processed/amazon*/graph_rewired/seed<split seed>/`, with a manifest, and reused while the settings match, so a later GraphSAGE control (N3) sees the same graph.
@@ -708,7 +708,7 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
     - E1 − N2 "supported" means the real edges add something that a degree-matched random graph does not.
     - N2 − N1 "worse" or "not distinguishable" means that, on a random graph, neighbour means add nothing beyond degree.
     - Because the rewired U-S-U keeps 36% of the real edges, a positive E1 − N2 is a lower bound on the real-structure part.
-- **2026-10-27 01:55 UTC (second amendment, written BEFORE these runs; the queue started at 01:41 UTC).** Caelen asked for the embedding-size rungs, then the graph on the four features, with the laptop free by 8 am Atlantic (11:00 UTC). A guard skips any of these jobs that would start after 10:30 UTC (summaries 10:45).
+- **2026-10-27 01:55 UTC (second amendment, written BEFORE these runs; the queue started at 01:41 UTC).** The user asked for the embedding-size rungs, then the graph on the four features, with the laptop free by 8 am Atlantic (11:00 UTC). A guard skips any of these jobs that would start after 10:30 UTC (summaries 10:45).
   - **Z1 result** (training CV, split 0, no19; results DB `20261027T014148Z_amazon_1552db`). CV PR-AUC by d:
 
     | Block | 2 | 4 | 8 | 16 | 32 | 64 | raw |
@@ -813,7 +813,7 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
     - The 32 pilot runs are tagged `rq-plan` (`uv run scripts/results_db.py list --tag rq-plan`).
     - The one-page summary is `uv run scripts/rq_report.py --dataset amazon` → `outputs/amazon/compare/rq_results.md`, copied to [`RQ_RESULTS.md`](RQ_RESULTS.md).
   - **Still to run** (each needs a go): the four-feature graph runs and their summary (about 2 h); E3 raw on split 2 and its summary (about 25 min).
-- **2026-10-29 ~01:40 UTC (third amendment, written BEFORE any of the runs it adds; the 3-split results above were known).** Caelen's go (2026-10-28 22:15 Atlantic): last night's leftovers, then splits 3–4, sizes 2 and 4, and full-budget runs. The laptop should be free by 8 am Atlantic (11:00 UTC), and "a bit over is OK". The queue restarted at 01:18 UTC with the leftovers, which are pre-registered in the second amendment; only their guard times moved to tonight. Order and guards:
+- **2026-10-29 ~01:40 UTC (third amendment, written BEFORE any of the runs it adds; the 3-split results above were known).** The user's go (2026-10-28 22:15 Atlantic): last night's leftovers, then splits 3–4, sizes 2 and 4, and full-budget runs. The laptop should be free by 8 am Atlantic (11:00 UTC), and "a bit over is OK". The queue restarted at 01:18 UTC with the leftovers, which are pre-registered in the second amendment; only their guard times moved to tonight. Order and guards:
   1. **Leftovers.** E1 and E2 on `top4no19` (splits 0–2) and `top4no19_summary`. Then E3 raw on split 2 (job `r2_pilot_m5r_own_gnnrand_no19raw_rerun`) and `sizeraw_e3_summary` (3-split: E3raw − B; secondary E2raw − E3raw and E3raw − E3₈).
   2. **Splits 3 and 4** (split seeds 3555, 4555; `--set split.n_repeats=5`; the split seed is `seed + 1000 × repeat`, so splits 0–2 are unchanged).
      - Runs: `pilot_m1_own_no19`, `pilot_m5_own_gnnssl_no19`, `pilot_m5r_own_gnnrand_no19`, and the same at 16 and at raw 64 (`…_no19d16`, `…_no19raw`). That is 7 rungs × 2 splits = 14 runs, pilot settings.
@@ -824,7 +824,7 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
        - secondary: E2_d − E3_d, E2_d − E2₈ and E3_d − E3₈;
        - for d = 8, 16 and raw.
      - Rule: **supported** if Δ > 0 on all 5 splits, the mean Δ exceeds its SD, and the Nadeau–Bengio corrected test over the 25 CV folds gives p < 0.05. Otherwise, as before, a positive mean is not distinguishable and a negative mean is worse.
-     - **Caelen's decision: the 5-split verdict replaces the 3-split verdict** for these contrasts. The 3-split verdicts stay in this log for reference.
+     - **The user's decision: the 5-split verdict replaces the 3-split verdict** for these contrasts. The 3-split verdicts stay in this log for reference.
      - The readings are the second amendment's (size rule, "training helps" rule).
   4. **Sizes 2 and 4** (3 splits, 0–2).
      - Runs: `pilot_m5_own_gnnssl_no19d{2,4}` and `pilot_m5r_own_gnnrand_no19d{2,4}` (12 runs), then `size24_summary`.
@@ -865,7 +865,7 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
     | E2 on F5's four | `pilot_m5_own_gnnssl_top4no19` | 0.651 / 0.657 / 0.643 |
     | B, full budget | `m1_own_no19` | split 0 only: 0.525 [0.471, 0.585] (CatBoost; AUROC 0.894 [0.874, 0.910]) |
 
-  - **Verdicts** (test Δ, B − A as written; Nadeau–Bengio p, two-sided; "worse" = negative mean, significant only if p < 0.05). By Caelen's decision the 5-split rows replace the 3-split rows of 2026-10-27 and the 3-split `sizeraw_e3_summary` of tonight:
+  - **Verdicts** (test Δ, B − A as written; Nadeau–Bengio p, two-sided; "worse" = negative mean, significant only if p < 0.05). By the user's decision the 5-split rows replace the 3-split rows of 2026-10-27 and the 3-split `sizeraw_e3_summary` of tonight:
 
     | Contrast | Role | Splits | Δ per split | Mean ± SD | p | Verdict |
     |---|---|---|---|---|---|---|
@@ -925,7 +925,7 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
     - The 33 pilot runs are tagged `rq-plan`; the summaries of 5 splits are also tagged `splits5`.
     - [`RQ_RESULTS.md`](RQ_RESULTS.md) is regenerated from all 17 summaries.
   - **Still to run** (each needs a go): full-budget E1 and E2 without `f19` on split 0 (about 1.5–2 h each); E1, N1 and N2 on splits 3–4, if the RQ1 and RQ2 verdicts should also rest on 5 splits (6 runs, about 1.5 h).
-- **2026-10-29 ~11:30 UTC (fourth amendment, written BEFORE the runs it adds; every result above was known).** Caelen asked to queue the two full-budget runs the guard skipped. They are queued in `outputs/amazon/rq_logs/queue.txt` but not started; the runner starts on Caelen's go.
+- **2026-10-29 ~11:30 UTC (fourth amendment, written BEFORE the runs it adds; every result above was known).** The user asked to queue the two full-budget runs the guard skipped. They are queued in `outputs/amazon/rq_logs/queue.txt` but not started; the runner starts on the user's go.
   - **Runs**, split 0 only, at the full Model A settings (6 classifiers, 100 trials), in this order: `m2_own_nbr_no19` (E1), then `m5_own_gnnssl_no19` (E2).
     - Both reuse split 0's `nbr_no19` and `gnnssl_no19` blocks, the ones their pilots used, so only the df-analyze budget differs from the pilots.
     - Job names `full2_…`, so last night's skip logs are kept.
@@ -935,7 +935,7 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
     - added now: E1_full − E1_pilot and E2_full − E2_pilot (does the full budget change the graph rungs?).
   - **Descriptive only** (one split, no verdict): each run's test PR-AUC with its group-bootstrap 95% interval, each pair's paired Δ with its interval from the comparison page, and the 5-fold CV p next to it.
   - **What was known when this was written:** on split 0, the pilots scored E1 0.703 and E2 0.662, and full-budget B scored 0.525 (pilot 0.516).
-- **2026-10-30 (fourth amendment, results).** On Caelen's go, the runner started at 01:46 UTC on 2026-10-30, and all three jobs exited 0 by 04:30 UTC. Every guard was met, and nothing was skipped. Both runs were on commit `59d6554` with a clean tree. Both passed the split and column-type checks: 99 columns for E1 and 48 for E2, none dropped. Model A decoded and reproduces its test probabilities in each, as do 18 of the 28 tuned models. Wall-clock time, including `select_model`, was 1 h 27 min for E1 and 1 h 14 min for E2.
+- **2026-10-30 (fourth amendment, results).** On the user's go, the runner started at 01:46 UTC on 2026-10-30, and all three jobs exited 0 by 04:30 UTC. Every guard was met, and nothing was skipped. Both runs were on commit `59d6554` with a clean tree. Both passed the split and column-type checks: 99 columns for E1 and 48 for E2, none dropped. Model A decoded and reproduces its test probabilities in each, as do 18 of the 28 tuned models. Wall-clock time, including `select_model`, was 1 h 27 min for E1 and 1 h 14 min for E2.
   - **Scores** (split 0, test set; group-bootstrap 95% intervals; no skill 0.095):
 
     | Setup | Feature set | Model A | Test PR-AUC | AUROC | CV PR-AUC of Model A | Pilot, split 0 |
@@ -970,7 +970,7 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
     - Summary of the five pairs: `20261030T042833Z_amazon_39555d`. It extends `20261029T111325Z_amazon_956956`, which stays.
     - All three are tagged `rq-plan` and `full`. [`RQ_RESULTS.md`](RQ_RESULTS.md) is regenerated.
   - **Still to run** (each needs a go): E1, N1 and N2 on splits 3–4 (6 pilot runs, about 1.5 h), if the RQ1 and RQ2 verdicts should also rest on 5 splits.
-- **2026-10-31 (fifth amendment: GNN classifiers, Model 6 and the E7 combination; written ~18:00 UTC, before any run of this round).** Caelen's decisions: [`GNN_MODELS_PLAN.md`](GNN_MODELS_PLAN.md) §7 and AGENTS.md's decision log.
+- **2026-10-31 (fifth amendment: GNN classifiers, Model 6 and the E7 combination; written ~18:00 UTC, before any run of this round).** The user's decisions: [`GNN_MODELS_PLAN.md`](GNN_MODELS_PLAN.md) §7 and AGENTS.md's decision log.
   - **Feature variant:** every feature (Amazon all 25, YelpChi all 32), as published studies do. `f19`'s effect stays an observation (RQ1). No leak variants this round.
   - **Splits:** Amazon 0–4 (B, E1, E2, E3 exist on 0–2; 3–4 are added), YelpChi 0–2 (`split.n_repeats: 3`). Pilot df-analyze budget throughout: lgbm, lr, catboost; 10 trials.
   - **Setups:**
@@ -1162,7 +1162,7 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
     - 24 pipeline entries, tags `gnn-plan` and `pilot`.
     - Primary summary `20261102T111849Z_yelpchi_7f5b15`, secondary summary `20261102T174428Z_yelpchi_2e772f`.
     - Tuned-versus-default checks `20261102T175623Z_yelpchi_b779cf` and `20261102T175623Z_amazon_dbcf85`.
-- **2026-11-02 (default-settings sensitivity check on YelpChi: pre-registered, written before any default-settings model was scored on a test set).** Caelen approved the check after the entry above. It asks whether the tuned-versus-default pattern in CV carries over to the test set.
+- **2026-11-02 (default-settings sensitivity check on YelpChi: pre-registered, written before any default-settings model was scored on a test set).** The user approved the check after the entry above. It asks whether the tuned-versus-default pattern in CV carries over to the test set.
   - **Status:** a labelled sensitivity check. It replaces no verdict, Model A stays the best tuned row (invariant 8), and the test set chooses nothing (invariant 4).
   - **Setups:** B, E1, E2, E7 and E8 on YelpChi splits 0–2 (15 fits). The GNN rungs have no df-analyze tuning, so they are not included.
   - **Model, per setup and split:** the `settings == default` row with the highest shared-CV PR-AUC in `model_selection_cv.csv` (classifier and feature selection), first row on a tie. It is fit on the whole training export with df-analyze's default hyperparameters and seed 555, and predicts the test export. E8's training rows carry the out-of-fold `gnnsup`, as for its tuned Model A. Only PR-AUC is reported, so no threshold is needed.
@@ -1219,7 +1219,7 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
     - It does not make E8 the best model. E8's default score is above every tuned setup, but comparing across settings was not pre-registered, and default settings were chosen by no one as the method.
     - Which part of the tuning is responsible is still not separated. Amazon's test sets were not scored this way; its CV shows no such gap (at most 0.003).
   - **Results DB:** contrasts `20261102T180319Z_yelpchi_833c47`, scores per setup and split `20261102T180319Z_yelpchi_3ec316`.
-- **2026-11-02 (up to 100 trials on YelpChi: pre-registered, written before any of these runs started).** Caelen approved the runs after the entry above. They ask whether the pilot's 10 trials explain E7's and E8's shortfall against E1.
+- **2026-11-02 (up to 100 trials on YelpChi: pre-registered, written before any of these runs started).** The user approved the runs after the entry above. They ask whether the pilot's 10 trials explain E7's and E8's shortfall against E1.
   - **Status:** a labelled sensitivity check. It replaces no verdict: the pilot verdicts of the YelpChi results entry stand as pre-registered. Within each run, Model A stays the best tuned row by shared CV (invariant 8), and the test set chooses nothing (invariant 4).
   - **Setups:** B, E1, E2, E7 and E8 on YelpChi splits 0–2 (15 runs), as new feature sets `t100_*`, so the pilot's folders are not touched. The GNN rungs have no df-analyze tuning, so they are not included.
   - **What changes:** only `df_analyze.htune_trials`, from 10 to 100. The classifiers (LightGBM, logistic regression, CatBoost), the balanced-accuracy objective, df-analyze's random internal CV, the prediction filter, the seed, the splits and the feature blocks stay the same. The `nbr`, `gnnssl` and `gnnsup` blocks are reused, not rebuilt. This is not the full Model A budget, which has six classifiers.

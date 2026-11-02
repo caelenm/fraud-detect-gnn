@@ -6,7 +6,7 @@ Instructions for AI coding agents (primarily Claude Code) working in this reposi
 
 We ask: **does using a graph improve fraud classification over the same kind of model without one, and can a GNN's representations improve a tabular AutoML pipeline (df-analyze)?** The datasets are two graph fraud benchmarks with tabular node features: **YelpChi** (main; nodes are hotel and restaurant reviews, labelled spam by Yelp's filter, three review–review relations) and **Amazon** (replication; nodes are users, labelled fraudulent or not, three user–user relations). Both come from the preprocessed `.mat` files of the CARE-GNN repository. The model ladder (plan §1) is: (1) df-analyze on each node's own features (Model A); (2) df-analyze plus label-free neighbour aggregates per relation; (3) GraphSAGE with all edges removed; (4) heterogeneous GraphSAGE over all relations; (5) df-analyze plus self-supervised GNN embeddings; (6) df-analyze plus supervised, out-of-fold GNN features (needs a rule change). Every model on a dataset is trained on the same split and scored on the same frozen, grouped test set. The headline metric is PR-AUC, always reported next to the no-skill baseline (the test positive rate). Model 1 and the interfaces the later rungs need (node table, relation edge lists, feature blocks, feature sets) were implemented first. Phase 2 ([`docs/PHASE2_GNN_PLAN.md`](docs/PHASE2_GNN_PLAN.md)) adds Models 2 and 5 as feature blocks (`nbr`, `gnnssl`) and a comparison page; GraphSAGE (Models 3–4) comes later. **Phase 3 ([`docs/PHASE3_FEEDBACK_PLAN.md`](docs/PHASE3_FEEDBACK_PLAN.md)) is the current plan:** it answers the professor's feedback of 2026-10-21 (embedding size and DeepTune, whether training the GNN helps, the 4 important features, more datasets).
 
-## Current state (2026-10-30): read this first
+## Current state (2026-11-02): read this first
 
 **New on 2026-10-21:** the professor's feedback and the plan that answers it ([`docs/PHASE3_FEEDBACK_PLAN.md`](docs/PHASE3_FEEDBACK_PLAN.md); its open questions D1–D5 need the group); the [results database](#results-database) (`results/runs/`); and commits no longer need a PR ([Git workflow](#git-workflow)).
 
@@ -23,7 +23,7 @@ We ask: **does using a graph improve fraud classification over the same kind of 
 
 The four-feature graph runs and E3 raw on split 2, not run that night, ran on 2026-10-29.
 
-**New on 2026-10-29 (branch `exp/rq-plan`, second overnight queue, 33 pilot runs + 1 full-budget run + 7 summaries, tag `rq-plan`; third pre-registration amendment in RESEARCH_PLAN §11):** B, E2 and E3 at sizes 8, 16 and raw 64 now have 5 splits, and their 5-split verdicts replace the 3-split ones (Caelen's decision).
+**New on 2026-10-29 (branch `exp/rq-plan`, second overnight queue, 33 pilot runs + 1 full-budget run + 7 summaries, tag `rq-plan`; third pre-registration amendment in RESEARCH_PLAN §11):** B, E2 and E3 at sizes 8, 16 and raw 64 now have 5 splits, and their 5-split verdicts replace the 3-split ones (the user's decision).
 - Sizes 2 and 4 were added. Both embeddings beat B at every size from 2 to raw 64. Size 8 does not measurably beat 2, so by the rule 2 per relation is enough. Above 8, only the untrained encoder at raw 64 beats 8 (+0.031).
 - DGI training adds nothing measurable at any size.
 - On the four non-`f19` columns the graph still helps: E1 +0.144, E2 +0.121.
@@ -35,6 +35,12 @@ The four-feature graph runs and E3 raw on split 2, not run that night, ran on 20
 - No rung moves measurably with the larger budget.
 
 Not run: E1/N1/N2 on splits 3–4.
+
+**New on 2026-10-31 to 2026-11-02 (GNN round, [`docs/GNN_MODELS_PLAN.md`](docs/GNN_MODELS_PLAN.md); tag `gnn-plan`):** GraphSAGE and its edge-free twin (E5, E5g, E6), the m2 + m5 combination (E7) and the supervised GNN score (E8, Model 6), on Amazon (main, 5 splits, all 25 features) and YelpChi (validation, 3 splits, all 32 features). Every score and verdict is in [`docs/GNN_RESULTS.md`](docs/GNN_RESULTS.md) and RESEARCH_PLAN §11.
+- Amazon: no primary contrast was supported.
+- YelpChi: E1 − B, E2 − B and E5 − E6 were supported; E7 − E1 was not (lower mean, p 0.24); E8 − E1 was significantly worse (p 0.0015).
+- A default-settings check on YelpChi ties E7's and E8's shortfall to the pilot's tuning. The gain from graph features holds at both settings; the order of the setups does not.
+- Started 2026-11-02: YelpChi's five df-analyze setups at up to 100 trials (`t100_*`, queue in the WSL clone's `outputs/yelpchi/t100_logs/`), pre-registered in §11.
 
 The details are in [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md) §11 (decision log and every result) and §12 (next steps); a short summary is in the README ("Results").
 
@@ -60,13 +66,12 @@ The details are in [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md) §11 (decisi
 - What f19 is. It is probably a helpfulness-vote count; the label is the share of helpful votes (< 20% fraud, > 80% benign), and `Amazon.mat` holds no votes.
 - Whether other columns are vote-derived.
 - Tuned-embedding results for the graph methods, and full-budget graph results beyond split 0 without `f19`.
-- YelpChi.
-- GraphSAGE (Models 3–4).
+- Which part of the pilot's tuning causes E7's and E8's shortfall on YelpChi (the trial count, the balanced-accuracy objective or the random internal CV).
 
-**Not run yet:** #36 checks (c)–(e) in RESEARCH_PLAN §12, step 0; a variant without only the vote-derived columns; full-budget m2/m5 with all features or without #36 (without `f19` they ran on 2026-10-30, split 0); YelpChi beyond a smoke test; Models 3, 4, 6.
+**Not run yet:** #36 checks (c)–(e) in RESEARCH_PLAN §12, step 0; a variant without only the vote-derived columns; full-budget m2/m5 with all features or without #36 (without `f19` they ran on 2026-10-30, split 0).
 
 **Where things are:**
-- **Code:** on `main`; the phase 3 plan and work (branches `claude/awesome-wozniak-wm548a` and `exp/phase3-feedback`) were merged with PR #39 (`f4175e3`). The 2026-10-26 work (RQ1–RQ3: `no19`, the `deg` block, the #36 column map) is on `exp/rq-plan`, committed locally and not pushed.
+- **Code:** on `main`; the phase 3 plan and work (branches `claude/awesome-wozniak-wm548a` and `exp/phase3-feedback`) were merged with PR #39 (`f4175e3`). The work since 2026-10-26 (RQ1–RQ3 and the GNN round) reached `main` on 2026-11-02 by fast-forward from `exp/rq-plan`, the branch the WSL clone stays on.
 - **Results database:** `results/runs/` (committed; see [Results database](#results-database)). It holds the phase 3 runs of 2026-10-23 and the RQ runs from 2026-10-26 on (tag `rq-plan`); the earlier runs above have not been recorded in it (D5).
 - **Overnight queue (2026-10-23):** the job runner and its logs live in the WSL clone's `outputs/amazon/phase3_logs/` (never committed): `bin/runner.sh` runs each line of `queue.txt` not yet in `done.txt`, `bin/pilot.sh` runs one pilot rung and records it, and `bin/summary.sh` builds the comparison pages and a verdict table. The RQ queue (2026-10-27 and 2026-10-29) works the same way in `outputs/amazon/rq_logs/`, with `bin/pilot5.sh` (5 split repeats), `bin/summaryN.sh`, `bin/full.sh` and `bin/fullsum.sh`.
 - **Results:** in the WSL clone's `outputs/amazon*` and `data/processed/amazon*`. Split repeats 1–2 live in `outputs/amazon_repeat1/2`, which `pack_artifacts.py` does not pack (it packs repeat 0 only).
@@ -150,7 +155,7 @@ There are two separate environments. Do not try to merge them.
 
 These are hard invariants. If a change would violate one, stop and ask.
 
-1. **Labels enter only through the training loss.** No feature, aggregate, node attribute or graph input uses any node's label. This includes neighbour fraud rates and target encoding, even computed on training data only. **One documented exception (amended 2026-10-31 by Caelen, for Model 6):** the `gnn_oof` stage alone may fit supervised GNNs on training labels to build the `gnnsup` block (out-of-fold GNN scores). Its rules:
+1. **Labels enter only through the training loss.** No feature, aggregate, node attribute or graph input uses any node's label. This includes neighbour fraud rates and target encoding, even computed on training data only. **One documented exception (amended 2026-10-31 by the user, for Model 6):** the `gnn_oof` stage alone may fit supervised GNNs on training labels to build the `gnnsup` block (out-of-fold GNN scores). Its rules:
    - Each training row's score comes from models fit without that row's CV fold.
    - Test rows get the mean of those fold models. No test label is ever read.
    - The shared CV (`select_model`) uses nested scores, so the rows a fold's model is fit on never carry a score built with that fold's labels.
@@ -258,18 +263,21 @@ Also ask before changing the metrics, the split proportions or grouping rule, th
   - **No PR requirement.** Commits may go straight to `main`; unchecked commits are fine (it is a course project, not public software). The never-commit list, and never force-pushing or rewriting history, still apply.
   - **Results database** in `results/runs/` (one folder per run, written by `scripts/results_db.py`); every agent records the runs it finishes. Created empty; earlier runs are not backfilled unless the user asks.
   - **Professor's feedback** (embedding size, "potentially use DeepTune to reduce"; see if training the GNN helps; run on just the 4 important features; more datasets) is addressed by [`docs/PHASE3_FEEDBACK_PLAN.md`](docs/PHASE3_FEEDBACK_PLAN.md).
-- **2026-10-26 (decisions by Caelen; the group is to confirm the framing):**
+- **2026-10-26 (decisions by the user; the group is to confirm the framing):**
   - **Three research questions:** RQ1 (how much do Amazon's results and the graph's apparent benefit depend on the leaked vote column `f19`?), RQ2 (once leaks are removed, how much of the graph gain is real relational structure, and how much is degree and extra columns?), RQ3 (does training the GNN encoder matter when its embeddings feed df-analyze, and how small can they be?). They reuse the ladder plus two controls (degree-only features, a degree-preserving rewired graph) and one verification (rebuilding `f19` from the raw reviews).
   - **Datasets:** Amazon is the main dataset and YelpChi the validation dataset. No other dataset is in scope (this settles D4).
   - **Amazon feature variants going forward:** all 25 (comparable with published work) and **`no19`** (every column except `own__f19`; also left out of every neighbour and GNN input), the **candidate headline**. The `no36`, `only36` and `top4` runs are finished and stay in the report.
-  - **Branch `exp/rq-plan`:** commit locally; do not push or open a PR until Caelen says so. Draft GitHub issue text in `docs/drafts/` (never committed) instead of posting it.
-- **2026-10-31 (decisions by Caelen; [`docs/GNN_MODELS_PLAN.md`](docs/GNN_MODELS_PLAN.md)):**
+  - **Branch `exp/rq-plan`:** commit locally; do not push or open a PR until the user says so (see 2026-11-02 below). Draft GitHub issue text in `docs/drafts/` (never committed) instead of posting it.
+- **2026-10-31 (decisions by the user; [`docs/GNN_MODELS_PLAN.md`](docs/GNN_MODELS_PLAN.md)):**
   - **GNN classifiers approved:** heterogeneous GraphSAGE (E5, Model 4), its edge-free twin (E6, Model 3), E5 on the rewired graph (N3) and the R-GCN-style normalisation variant (E5g). HGT is declined.
   - **Model 6 approved:** invariant 1 amended for the `gnn_oof` stage (supervised out-of-fold GNN scores, nested cross-fitting).
   - **E7 approved:** own + neighbour means + GNN embeddings in df-analyze.
   - **Feature variant for this round:** every feature, as published studies do (Amazon all 25 with `f19`, YelpChi all 32). `f19`'s large effect is reported as an observation. No with/without-leak variants are run for these rungs unless asked.
   - **YelpChi is the validation dataset** for this round's rungs (approved runs: B, E1, E2, E7, E5, E5g, E6, E8 on 3 splits).
   - **Scheduling:** start everything at once and keep the queue running. This lifts the "ask before a job over 1 hour" rule for this round's queue only.
+- **2026-11-02 (user decisions):**
+  - **`exp/rq-plan` to GitHub `main`:** the user asked for the work so far on `main`; it went by fast-forward. That was one request: ask again before pushing later commits.
+  - **YelpChi at up to 100 trials:** B, E1, E2, E7 and E8 on 3 splits (`t100_*`, RESEARCH_PLAN §11). A sensitivity check; the pilot verdicts stand.
 - **Kept from earlier work:** Model A uses df-analyze classifiers **`lgbm`, `lr`, `catboost`, `gandalf`, `rf`, `knn`** (plus the automatic dummy; `mlp` is left out because it is CPU-only in df-analyze and adds about 4 h per run), 100 tuning trials, tuned on **balanced accuracy** for every model (`htune_cls_metric: bal-acc`; not `acc`, which suits imbalanced classes poorly; not `auroc`, which df-analyze applies inconsistently across models), with `--filter-pred-classify auroc` for the prediction-based feature filter; Model A is **chosen by shared 5-fold CV PR-AUC on the training set** (`select_model`), not by df-analyze's tuning score; CatBoost and GANDALF run on the GPU; `--df-tests-method` is never passed (it hits an enum bug in df-analyze 4.1.0).
 
 ## Code conventions
