@@ -94,3 +94,17 @@ Best GNN for E8 (pre-registered one-SE rule, training folds of each split):
 | E7 − E2 | -0.058 | -0.012 | -0.017 | -0.029 ± 0.025 | -25% | 0.011 | worse |
 | E8 − E7 | -0.012 | -0.069 | -0.033 | -0.038 ± 0.029 | -26% | 0.0091 | worse |
 | E8 − E5 | +0.049 | +0.041 | +0.061 | +0.050 ± 0.010 | +22% | 1e-05 | supported |
+
+### Sensitivity check: default settings (not the verdicts)
+
+Each df-analyze setup at default settings, chosen on training CV and scored on the test set (RESEARCH_PLAN §11, 2026-11-02). Read the E7 and E8 verdicts above together with it.
+
+| Contrast | Δ 0 | Δ 1 | Δ 2 | Mean ± SD | CV p | Verdict |
+|---|---|---|---|---|---|---|
+| E1 − B | +0.068 | +0.080 | +0.064 | +0.071 ± 0.008 | 1.6e-07 | supported |
+| E2 − B | +0.038 | +0.032 | +0.027 | +0.032 ± 0.006 | 5.2e-05 | supported |
+| E7 − E1 | -0.006 | -0.008 | +0.004 | -0.003 ± 0.006 | 0.52 | worse |
+| E8 − E1 | +0.014 | +0.007 | +0.010 | +0.010 ± 0.003 | 0.073 | not distinguishable from zero |
+| E2 − E1 | -0.030 | -0.048 | -0.038 | -0.039 ± 0.009 | 1.6e-07 | worse |
+| E7 − E2 | +0.024 | +0.040 | +0.042 | +0.035 ± 0.010 | 1.8e-07 | supported |
+| E8 − E7 | +0.019 | +0.015 | +0.006 | +0.014 ± 0.007 | 0.0039 | supported |

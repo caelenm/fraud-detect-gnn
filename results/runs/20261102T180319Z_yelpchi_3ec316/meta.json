@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "run_id": "20261102T180319Z_yelpchi_3ec316",
+  "recorded_utc": "2026-11-02T18:06:20Z",
+  "started_utc": "2026-11-02T18:03:19Z",
+  "finished_utc": "2026-11-02T18:05:14Z",
+  "duration_min": 1.9,
+  "device": "rtx4060-laptop",
+  "device_details": {
+    "os": "Linux",
+    "platform": "Linux-5.10.16.3-microsoft-standard-WSL2-x86_64-with-glibc2.41",
+    "wsl": true,
+    "python": "3.13.15",
+    "cpu": "Intel(R) Core(TM) Ultra 9 185H",
+    "gpus": [
+      {
+        "name": "NVIDIA GeForce RTX 4060 Laptop GPU",
+        "driver": "571.96",
+        "memory": "8188 MiB"
+      }
+    ]
+  },
+  "description": "Default-settings sensitivity check, test PR-AUC per setup and split with the tuned Model A code check (pilot)",
+  "kind": "check",
+  "status": "ok",
+  "dataset": "yelpchi",
+  "feature_set": null,
+  "split_repeat": null,
+  "seed": null,
+  "git_commit": "c5d2932bd2835d1dfd3d3f74e35a78986a7d8b3f",
+  "git_dirty": false,
+  "command": "scripts/default_settings_check.py",
+  "tags": [
+    "pilot",
+    "gnn-plan",
+    "splits3"
+  ],
+  "source": "outputs/yelpchi/compare/gnn_yelpchi_default_settings_scores.csv",
+  "results_rows": 15,
+  "results_columns": [
+    "setup",
+    "feature_set",
+    "split_repeat",
+    "default_model",
+    "default_selection",
+    "n_features",
+    "cv_pr_auc_default",
+    "test_pr_auc_default",
+    "test_pr_auc_model_a",
+    "test_pr_auc_model_a_refit",
+    "code_check_ok"
+  ]
+}

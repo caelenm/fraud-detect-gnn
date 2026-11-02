@@ -178,15 +178,18 @@ def report(scores: pd.DataFrame, table: pd.DataFrame) -> str:
         "Pre-registered in docs/RESEARCH_PLAN.md §11 (2026-11-02). Not a verdict on "
         "the ladder: Model A stays the best tuned row.",
         "",
-        "| Setup | Test PR-AUC, tuned Model A | Test PR-AUC, default | CV PR-AUC, default |",
+        "| Setup | Test PR-AUC, tuned Model A | Test PR-AUC, default | "
+        "CV PR-AUC, default |",
         "|---|---|---|---|",
     ]
     for setup, r in means.iterrows():
         lines.append(f"| {setup} | {r['test_pr_auc_model_a']:.3f} | "
-                     f"{r['test_pr_auc_default']:.3f} | {r['cv_pr_auc_default']:.3f} |")  # fmt: skip
+                     f"{r['test_pr_auc_default']:.3f} | "
+                     f"{r['cv_pr_auc_default']:.3f} |")  # fmt: skip
     lines += [
         "",
-        "| Contrast | Δ split 0 | Δ split 1 | Δ split 2 | Mean ± SD | CV Δ | p | Verdict |",
+        "| Contrast | Δ split 0 | Δ split 1 | Δ split 2 | Mean ± SD | CV Δ | p | "
+        "Verdict |",
         "|---|---|---|---|---|---|---|---|",
     ]
     for r in table.to_dict("records"):

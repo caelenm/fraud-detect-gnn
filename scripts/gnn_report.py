@@ -152,6 +152,21 @@ def contrast_table(frame: pd.DataFrame, n: int, family: bool) -> list[str]:
     return lines
 
 
+def sensitivity_table(frame: pd.DataFrame, n: int) -> list[str]:
+    """scripts/default_settings_check.py's contrasts; never the verdicts above."""
+    splits = " | ".join(f"Δ {k}" for k in range(n))
+    lines = [
+        f"| Contrast | {splits} | Mean ± SD | CV p | Verdict |",
+        "|" + "---|" * (n + 4),
+    ]
+    for r in frame.to_dict("records"):
+        deltas = " | ".join(f"{r[f'test_delta_split{k}']:+.3f}" for k in range(n))
+        lines.append(f"| {r['contrast'].replace(' - ', ' − ')} | {deltas} | "
+                     f"{r['test_delta_mean']:+.3f} ± {r['test_delta_sd']:.3f} | "
+                     f"{r['p']:.2g} | {r['verdict']} |")  # fmt: skip
+    return lines
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
@@ -205,6 +220,18 @@ def main(argv: list[str] | None = None) -> int:
             frame = pd.read_csv(path)
             lines += ["", f"### {kind.capitalize()} contrasts (B − A as written)", ""]
             lines += contrast_table(frame, n, family)
+        path = compare_dir / f"gnn_{dataset}_default_settings.csv"
+        if path.is_file():
+            lines += [
+                "",
+                "### Sensitivity check: default settings (not the verdicts)",
+                "",
+                "Each df-analyze setup at default settings, chosen on training CV "
+                "and scored on the test set (RESEARCH_PLAN §11, 2026-11-02). "
+                "Read the E7 and E8 verdicts above together with it.",
+                "",
+            ]
+            lines += sensitivity_table(pd.read_csv(path), n)
     text = "\n".join(lines) + "\n"
     atomic_write_text(args.out, text)
     print(text)

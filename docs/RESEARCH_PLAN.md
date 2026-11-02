@@ -1184,6 +1184,41 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
     - **Otherwise:** the CV pattern did not carry over, and the cause stays open.
   - **Code check:** the same script also refits each tuned Model A. If any of its test PR-AUCs differs from the pipeline's by more than 0.005, the check is reported as failed.
   - **Not answered, whatever the outcome:** which part of the tuning is responsible (the 10 trials, the balanced-accuracy objective, or the random internal CV).
+- **2026-11-02 (default-settings sensitivity check on YelpChi: results).** Ran once, 18:03–18:05 UTC, at `c5d2932`, after the pre-registration above. By shared CV, all 15 fits took LightGBM with every column. The code check passed: each tuned Model A's refit is within 0.0032 of the pipeline's test PR-AUC (tolerance 0.005).
+  - **Scores** (PR-AUC, mean over the 3 splits; no skill 0.145):
+
+    | Setup | Test, tuned Model A | Test, default | CV, tuned | CV, default |
+    |---|---|---|---|---|
+    | B | 0.838 | 0.812 | 0.822 | 0.798 |
+    | E1 | 0.871 | 0.883 | 0.860 | 0.873 |
+    | E2 | 0.884 | 0.844 | 0.868 | 0.834 |
+    | E7 | 0.855 | 0.879 | 0.845 | 0.870 |
+    | E8 | 0.817 | 0.893 | 0.811 | 0.879 |
+
+  - **Contrasts at default settings:**
+
+    | Contrast | Mean test Δ ± SD | Splits > 0 | CV Δ | CV p | Verdict | Expected |
+    |---|---|---|---|---|---|---|
+    | E1 − B | +0.071 ± 0.008 | 3 of 3 | +0.075 | 1.6e-07 | supported | supported |
+    | E2 − B | +0.032 ± 0.006 | 3 of 3 | +0.037 | 5.2e-05 | supported | supported |
+    | E7 − E1 | −0.003 ± 0.006 | 1 of 3 | −0.002 | 0.52 | worse (lower mean) | not supported |
+    | E8 − E1 | +0.010 ± 0.003 | 3 of 3 | +0.006 | 0.073 | not distinguishable | not supported |
+    | E2 − E1 | −0.039 ± 0.009 | 0 of 3 | −0.038 | 1.6e-07 | worse (significant) | worse |
+    | E7 − E2 | +0.035 ± 0.010 | 3 of 3 | +0.036 | 1.8e-07 | supported | supported |
+    | E8 − E7 | +0.014 ± 0.007 | 3 of 3 | +0.008 | 0.0039 | supported | not supported |
+
+  - **Outcome under the rule fixed beforehand: the shortfall is tied to tuning.** At default settings E7 − E1 is −0.003 and E8 − E1 is +0.010, both above −0.01, and neither has a negative CV Δ with p < 0.05. "The combination helps" is not met: E8 − E1 is above zero on all 3 splits, but its CV p is 0.073.
+  - **Expectations:** six of seven match. E8 − E7 was expected to be unsupported and came out supported.
+  - **Readings:**
+    - **The tuned verdict on E8 should not be read as the supervised score hurting the model.** E8 falls from 0.893 to 0.817 when tuned, while E1 moves from 0.883 to 0.871. The verdicts of the YelpChi results entry stand as pre-registered, but for E7 and E8 they describe the pilot's tuning as much as the columns.
+    - **The gain from graph features holds at both settings.** E1 − B and E2 − B are supported either way.
+    - **The order of the setups does not.** Tuned: E2 > E1 > E7 > B > E8. Default: E8 > E1 > E7 > E2 > B. Tuning moves a setup's test PR-AUC by −0.076 to +0.040, as much as the contrasts being tested, so the pilot's tuning is not a stable basis for ranking YelpChi's setups against each other.
+    - **Tuning is not simply bad.** It helps B (+0.026) and E2 (+0.040) on the test set and hurts E1 (−0.012), E7 (−0.024) and E8 (−0.076). The three it hurts are the ones with the neighbour-mean columns, which may be a clue, but that was not tested.
+  - **Caveats:**
+    - A sensitivity check on 3 splits, proposed after the tuned verdicts and the CV pattern were known.
+    - It does not make E8 the best model. E8's default score is above every tuned setup, but comparing across settings was not pre-registered, and default settings were chosen by no one as the method.
+    - Which part of the tuning is responsible is still not separated. Amazon's test sets were not scored this way; its CV shows no such gap (at most 0.003).
+  - **Results DB:** contrasts `20261102T180319Z_yelpchi_833c47`, scores per setup and split `20261102T180319Z_yelpchi_3ec316`.
 
 ---
 
