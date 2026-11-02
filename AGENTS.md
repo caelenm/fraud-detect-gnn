@@ -44,6 +44,11 @@ Not run: E1/N1/N2 on splits 3–4.
 
 **New on 2026-11-02 (results dashboard, [`docs/DASHBOARD.md`](docs/DASHBOARD.md)):** `uv run scripts/dashboard.py` shows every method, per dataset and across them, with live classification of a random test node. 20 earlier Amazon runs were backfilled into the results database (tag `backfill`), so every recorded setup now has its splits there.
 
+**Also recorded on 2026-11-02 (full-budget ladders from a second machine, `rtx4060-desktop`; tags `full`, `backfill`):** B, E1 and E2 at 6 classifiers and 100 trials on splits 0–2, run 2026-10-20 to 2026-10-22: Amazon with all 25 features and without #36 (18 runs) and YelpChi (9 runs), plus both verdict tables. README ("Results (full-budget ladders)") and RESEARCH_PLAN §11.
+- Amazon: the pilot's verdicts hold (E1 − B supported both ways; E2 − B supported only without #36).
+- YelpChi: E1 − B +0.015 supported; E2 − B +0.018 not distinguishable. The graph gains are smaller than at the pilot budget (+0.033, +0.046).
+- Amazon B on split 0 now has two full-budget runs per variant (laptop and desktop). The dashboard counts the earliest separate df-analyze run of a split and keeps later ones as replications (in the database, not in its numbers).
+
 The details are in [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md) §11 (decision log and every result) and §12 (next steps); a short summary is in the README ("Results").
 
 **What has been run (Amazon only, seed 555, one RTX 4060 laptop under WSL2).** Every df-analyze run passed the split and column-type checks.
@@ -70,7 +75,7 @@ The details are in [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md) §11 (decisi
 - Tuned-embedding results for the graph methods, and full-budget graph results beyond split 0 without `f19`.
 - Which part of the pilot's tuning causes E7's and E8's shortfall on YelpChi (the trial count, the balanced-accuracy objective or the random internal CV).
 
-**Not run yet:** #36 checks (c)–(e) in RESEARCH_PLAN §12, step 0; a variant without only the vote-derived columns; full-budget m2/m5 with all features or without #36 (without `f19` they ran on 2026-10-30, split 0).
+**Not run yet:** #36 checks (c)–(e) in RESEARCH_PLAN §12, step 0; a variant without only the vote-derived columns; full-budget E7, E8 and GNN-round setups; full-budget no19 runs beyond split 0.
 
 **Where things are:**
 - **Code:** on `main`; the phase 3 plan and work (branches `claude/awesome-wozniak-wm548a` and `exp/phase3-feedback`) were merged with PR #39 (`f4175e3`). The work since 2026-10-26 (RQ1–RQ3 and the GNN round) reached `main` on 2026-11-02 by fast-forward from `exp/rq-plan`, the branch the WSL clone stays on.

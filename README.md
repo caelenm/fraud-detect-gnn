@@ -4,7 +4,7 @@
 
 Course project for CS555: Data Mining and Machine Learning, St. Francis Xavier University (StFX).
 
-> **Status:** Model 1 (df-analyze on each node's own features) is implemented end to end for both datasets, and **phase 1 (Amazon) is done** ([Results](#results-phase-1-amazon)). **Phase 2** ([`docs/PHASE2_GNN_PLAN.md`](docs/PHASE2_GNN_PLAN.md) is the plan; branch `feat/gnn-embeddings`) adds two graph rungs as feature blocks for df-analyze: **Model 2** (`nbr`, label-free neighbour means) and **Model 5** (`gnnssl`, self-supervised GNN embeddings), each also without the four features of issue [#36](https://github.com/caelenm/fraud-detect-gnn/issues/36), and a [comparison page](#comparing-two-feature-sets) that shows two rungs' Model A test node by test node. Amazon pilot results are in [Results (phase 2 pilot)](#results-phase-2-pilot-amazon). GraphSAGE (Models 3–4) and Model 6 came later, in the GNN round of 2026-10-31 ([plan](docs/GNN_MODELS_PLAN.md), [results](docs/GNN_RESULTS.md)). **Phase 3** ([`docs/PHASE3_FEEDBACK_PLAN.md`](docs/PHASE3_FEEDBACK_PLAN.md)) answers the professor's feedback of 2026-10-21: the size of the GNN embeddings and how to reduce them, whether training the GNN helps, the four important features alone, and more datasets. **Since 2026-10-26** the project is framed around three research questions, on Amazon (main) and YelpChi (validation): **RQ1**, how much of Amazon's results, and of the graph's apparent benefit, comes from `f19`, a column built from the same helpfulness votes as the label ([Limitations](#limitations)); **RQ2**, how much of the remaining graph gain is real structure rather than degree and extra columns (null-graph controls: degree only, and a degree-preserving rewired graph); **RQ3**, whether training the GNN encoder matters and how small its embeddings can be. **The GNN round of 2026-10-31** added GraphSAGE, its edge-free control, the m2 + m5 combination and Model 6, on both datasets ([Results](#results-gnn-round-2026-10-31-to-2026-11-02)). **To see every result, start the [dashboard](#the-results-dashboard).** Every run is recorded in the [results database](#results-database). The working plan is [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md). An earlier version of this project used CFPB complaint narratives; that state is preserved at commit `3336d87` on `main`.
+> **Status:** Model 1 (df-analyze on each node's own features) is implemented end to end for both datasets, and **phase 1 (Amazon) is done** ([Results](#results-phase-1-amazon)). **Phase 2** ([`docs/PHASE2_GNN_PLAN.md`](docs/PHASE2_GNN_PLAN.md) is the plan; branch `feat/gnn-embeddings`) adds two graph rungs as feature blocks for df-analyze: **Model 2** (`nbr`, label-free neighbour means) and **Model 5** (`gnnssl`, self-supervised GNN embeddings), each also without the four features of issue [#36](https://github.com/caelenm/fraud-detect-gnn/issues/36), and a [comparison page](#comparing-two-feature-sets) that shows two rungs' Model A test node by test node. Amazon pilot results are in [Results (phase 2 pilot)](#results-phase-2-pilot-amazon). GraphSAGE (Models 3–4) and Model 6 came later, in the GNN round of 2026-10-31 ([plan](docs/GNN_MODELS_PLAN.md), [results](docs/GNN_RESULTS.md)). **Phase 3** ([`docs/PHASE3_FEEDBACK_PLAN.md`](docs/PHASE3_FEEDBACK_PLAN.md)) answers the professor's feedback of 2026-10-21: the size of the GNN embeddings and how to reduce them, whether training the GNN helps, the four important features alone, and more datasets. **Since 2026-10-26** the project is framed around three research questions, on Amazon (main) and YelpChi (validation): **RQ1**, how much of Amazon's results, and of the graph's apparent benefit, comes from `f19`, a column built from the same helpfulness votes as the label ([Limitations](#limitations)); **RQ2**, how much of the remaining graph gain is real structure rather than degree and extra columns (null-graph controls: degree only, and a degree-preserving rewired graph); **RQ3**, whether training the GNN encoder matters and how small its embeddings can be. **The GNN round of 2026-10-31** added GraphSAGE, its edge-free control, the m2 + m5 combination and Model 6, on both datasets ([Results](#results-gnn-round-2026-10-31-to-2026-11-02)). **Full-budget ladders** (B, E1, E2 at 6 classifiers and 100 trials, 3 splits) exist for Amazon (all features and without #36) and YelpChi ([Results](#results-full-budget-ladders-3-splits-amazon-and-yelpchi)). **To see every result, start the [dashboard](#the-results-dashboard).** Every run is recorded in the [results database](#results-database). The working plan is [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md). An earlier version of this project used CFPB complaint narratives; that state is preserved at commit `3336d87` on `main`.
 
 ---
 
@@ -228,6 +228,52 @@ What these do and do not show:
 
 One machine, one base seed, mostly the pilot budget. Differences smaller than the spread across splits should be treated as noise.
 
+## Results (full-budget ladders, 3 splits, Amazon and YelpChi)
+
+B (`m1_own`), E1 (`m2_own_nbr`) and E2 (`m5_own_gnnssl`) at the **full Model A budget**: 6 classifiers (LightGBM, logistic regression, CatBoost, GANDALF, LightGBM random forest, kNN) plus the dummy, 100 tuning trials, `bal-acc`, seed 555, the default embedding settings, on splits 0–2 (the same splits as the pilots). They ran one at a time on one RTX 4060 desktop under WSL2 (device `rtx4060-desktop`), Amazon on 2026-10-20/21 and YelpChi on 2026-10-20 to 2026-10-22. Every run passed the split and column-type checks and hit no tuning time limit. Verdicts use the rule of 2026-10-19. All 27 runs and both verdict tables are in the [results database](#results-database) (tags `full`, `backfill`).
+
+**Amazon** (no skill 0.095; all 25 features and without the #36 four):
+
+| Setup | Split 0 | Split 1 | Split 2 | Mean ± SD |
+|---|---|---|---|---|
+| B | 0.916 | 0.908 | 0.921 | 0.915 ± 0.006 |
+| E1 | 0.932 | 0.934 | 0.935 | **0.934 ± 0.002** |
+| E2 | 0.926 | 0.929 | 0.931 | 0.929 ± 0.002 |
+| B without #36 | 0.523 | 0.543 | 0.571 | 0.546 ± 0.024 |
+| E1 without #36 | 0.675 | 0.705 | 0.723 | **0.701 ± 0.024** |
+| E2 without #36 | 0.673 | 0.687 | 0.662 | 0.674 ± 0.012 |
+
+| Variant | Contrast | Δ, splits 0 / 1 / 2 | Mean ± SD | CV p | Verdict |
+|---|---|---|---|---|---|
+| All 25 | E1 − B | +0.016 / +0.025 / +0.014 | +0.019 ± 0.006 | 0.026 | supported |
+| All 25 | E2 − B | +0.010 / +0.021 / +0.010 | +0.014 ± 0.006 | 0.15 | not distinguishable from zero |
+| All 25 | E2 − E1 | −0.006 / −0.004 / −0.004 | −0.005 ± 0.001 | 0.45 | worse (not significant) |
+| Without #36 | E1 − B | +0.152 / +0.162 / +0.152 | +0.155 ± 0.006 | 4e-7 | supported |
+| Without #36 | E2 − B | +0.150 / +0.144 / +0.091 | +0.128 ± 0.033 | 3e-5 | supported |
+| Without #36 | E2 − E1 | −0.002 / −0.018 / −0.061 | −0.027 ± 0.031 | 0.024 | worse |
+
+**YelpChi** (no skill 0.145; all 32 features):
+
+| Setup | Split 0 | Split 1 | Split 2 | Mean ± SD | Pilot (GNN round) |
+|---|---|---|---|---|---|
+| B | 0.831 | 0.841 | 0.852 | 0.841 ± 0.011 | 0.838 ± 0.007 |
+| E1 | 0.849 | 0.855 | 0.864 | **0.856 ± 0.007** | 0.871 ± 0.013 |
+| E2 | 0.886 | 0.834 | 0.857 | 0.859 ± 0.026 | 0.884 ± 0.004 |
+
+| Contrast | Δ, splits 0 / 1 / 2 | Mean ± SD | CV p | Verdict |
+|---|---|---|---|---|
+| E1 − B | +0.019 / +0.014 / +0.012 | +0.015 ± 0.004 | 0.031 | supported |
+| E2 − B | +0.056 / −0.007 / +0.006 | +0.018 ± 0.033 | 0.17 | not distinguishable from zero |
+| E2 − E1 | +0.037 / −0.021 / −0.007 | +0.003 ± 0.030 | 0.90 | not distinguishable from zero |
+
+What these do and do not show:
+
+- **On Amazon the full budget gives the pilot's verdicts.** With all features, only neighbour means pass the rule. Without #36, both graph setups pass, and neighbour means beat the DGI embeddings.
+- **On YelpChi the graph gains shrink at the full budget.** E1 − B falls from +0.033 (pilot) to +0.015 and is still supported. E2 − B falls from +0.046 to +0.018 and is no longer distinguishable from zero. B barely moves (+0.003 on average); E1 and E2 drop by 0.015 and 0.025. So, as with the default-settings check, YelpChi's ranking of setups depends on the tuning, while the neighbour-means gain holds.
+- **This is not the stopped 100-trial check.** That check kept the pilot's 3 classifiers and included E7 and E8. These runs use all 6 classifiers and have no E7 or E8, so whether the trial count explains E7's and E8's shortfall is still open.
+- **One split is not enough.** On YelpChi split 0, E2 led E1 by +0.037; splits 1 and 2 reversed that. The DGI setup varies more across splits (SD 0.026) than neighbour means (0.007).
+- **Two Amazon split-0 runs exist for B** (all features and without #36): the earlier ones on the laptop (0.919 and 0.518) and these reruns on the desktop (0.916 and 0.523). df-analyze's feature selection is not seeded. The dashboard counts the earlier run and keeps the rerun as a replication (in the database, not in its numbers); the verdict table above used the reruns.
+
 ## Graph feature blocks (Models 2 and 5)
 
 The graph reaches df-analyze as extra columns per node, joined next to the own features; df-analyze then treats each node as a table row exactly as in Model 1. Every rung uses the same split, folds, tuning and test scoring; only the input columns differ.
@@ -402,6 +448,8 @@ df-analyze's runtime grows with the number of classifiers, the trials and the nu
 - **YelpChi** (about 27.6k training rows) will take longer.
 - **Amazon** (about 5.2k) far less.
 - **Amazon full run (100 trials, RTX 4060 laptop GPU, WSL2):** 2 h 05 min in total: df-analyze 1 h 57 min (CatBoost 47 min and GANDALF 46 min of tuning; every other model under 8 min), `select_model` 8 min, `export_model` 15 s.
+- **Amazon full ladder (100 trials, 6 classifiers, RTX 4060 desktop, WSL2, 2026-10-20/21), per split:** B 1 h 08–1 h 11 min, E1 1 h 27–1 h 33 min, E2 1 h 01–1 h 13 min, and 1 h 03–1 h 23 min for each setup without #36. The neighbour block takes under a second and the CPU embeddings under a minute.
+- **YelpChi full ladder (same machine, 2026-10-20 to 2026-10-22), per split:** B 2 h 51 min–4 h 11 min, E1 3 h 38–3 h 45 min, E2 2 h 54 min–3 h 48 min (embeddings about 1 min); 9 runs in about 31 h.
 - **Amazon pilot (10 trials per model, CPU only):** df-analyze 20 min (GANDALF alone 9 min), `select_model` 4.5 min. Details are in the decision log in [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md).
 
 Ask the group before any run expected to take more than about an hour.
@@ -520,7 +568,7 @@ fraud-detect-gnn/
     - 0.518 (without the #36 four) also drops three legitimate rating features.
     - The candidate headline is **`no19`**: every column except `f19`, which is also left out of every graph input. Its pilot runs are pre-registered and queued (`docs/RESEARCH_PLAN.md` §11, 2026-10-26).
 - **GNN embedding settings are untuned** (64-d, up to 300 epochs, 8 PCA components per relation, the plan's defaults). Some relations were still improving at 300 epochs. Choosing them, on training CV only, is phase 3.
-- **The graph comparison uses a reduced budget** (10 trials, 3 classifiers) on 3 seeded splits with one tuning seed; see the pilot section. The full-budget runs (6 classifiers, 100 trials) exist only on split 0: for Model 1 (with all features, without the #36 four, and without `f19`), and for E1 and E2 without `f19`.
+- **The graph comparison uses a reduced budget** (10 trials, 3 classifiers) on 3 seeded splits with one tuning seed; see the pilot section. At the full budget (6 classifiers, 100 trials), B, E1 and E2 exist on 3 splits for Amazon (all 25 features and without the #36 four) and YelpChi (all 32), and on split 0 only without `f19`. E7, E8 and every variant beyond these are pilot-budget only.
 - **df-analyze's internal CV is not grouped.** Its tuning and feature-selection folds are random, so a YelpChi user's reviews can sit on both sides of them. This makes its tuning scores optimistic, which is one more reason Model A is chosen by our grouped CV. The test set is grouped, so final scores are not affected; the tuned hyperparameters may still be slightly over-fitted to user-level leakage.
 - **df-analyze scales continuous features over train and test together,** and infers types on both. No labels are used, but test rows influence the clip points. Our own type decisions use training nodes only.
 - **Single split by default.** Bootstrap intervals cover test-set sampling only. Amazon is small, and its scores vary across splits; `split.n_repeats` measures this at the cost of one df-analyze run per repeat.

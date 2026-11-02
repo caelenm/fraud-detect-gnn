@@ -1255,6 +1255,15 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
   - **Sharing (D5):** local only, row-level data never leaves the machine.
   - **Checks at start-up:** twelve sanity checks recompute results from the database, including every stored verdict from its deltas and p, every per-split delta against the two runs' own scores (356 deltas), and that each run's Model A has the highest shared-CV score in its own results table. All pass.
   - **Live model:** each served model reproduced df-analyze's saved test probabilities on every test row (3,456, 3,456 and 18,383 rows; largest difference 0). The server repeats this at every start and for every click.
+- **2026-11-02 (full-budget ladders: recorded).** At the user's request, the full-budget ladders run on a second machine (an RTX 4060 desktop under WSL2, device `rtx4060-desktop`) were added to the results database and the docs. Nothing was rerun, and no existing entry was changed or superseded.
+  - **What ran:** B (`m1_own`), E1 (`m2_own_nbr`) and E2 (`m5_own_gnnssl`) at the full Model A budget (6 classifiers + dummy, 100 trials, `bal-acc`, seed 555, default embedding settings) on splits 0–2. Amazon ran with all 25 features and without the #36 four (18 runs, 2026-10-20/21). YelpChi ran with all 32 (9 runs, 2026-10-20 to 2026-10-22). B with all features on split 0 ran at `b4d5b43` on both datasets (Amazon as a rerun of phase 1's run; YelpChi as Model 1 with one split repeat, the same split as repeat 0), before phase 2 was merged; the other runs ran at `f89d182` (the phase 2 merge) or `9824b95`, which adds only a probe script to it. The ladder reused those split-0 runs, so on split 0 B and E1/E2 come from different commits. Every run passed the split and column-type checks and hit no tuning time limit. Both verdict tables come from `repeat_summary.py`; this ladder was not pre-registered beyond the 2026-10-19 rule and the m2 − m1, m5 − m1 and m5 − m2 contrasts.
+  - **Amazon** (no skill 0.095): B 0.915 ± 0.006, E1 0.934 ± 0.002, E2 0.929 ± 0.002. Without #36: 0.546 ± 0.024, 0.701 ± 0.024 and 0.674 ± 0.012. Verdicts as at the pilot budget:
+    - All 25: E1 − B +0.019 supported (p 0.026); E2 − B +0.014 not distinguishable (p 0.15); E2 − E1 −0.005 worse (p 0.45).
+    - Without #36: E1 − B +0.155 supported; E2 − B +0.128 supported; E2 − E1 −0.027 worse (p 0.024).
+  - **YelpChi** (no skill 0.145): B 0.841 ± 0.011, E1 0.856 ± 0.007, E2 0.859 ± 0.026. E1 − B +0.015 supported (p 0.031); E2 − B +0.018 not distinguishable (+0.056 / −0.007 / +0.006, p 0.17); E2 − E1 +0.003 not distinguishable (p 0.90).
+  - **Against the GNN round's pilots on the same splits** (descriptive): on YelpChi, B moves by +0.003 on average, E1 by −0.015 and E2 by −0.025. E1 − B falls from +0.033 to +0.015 and E2 − B from +0.046 to +0.018, so the gain from neighbour means holds while the order of E1 and E2 does not, in line with the default-settings check. On Amazon, every setup is within 0.005 of its pilot on average. This is not the stopped 100-trial check: that kept the pilot's 3 classifiers and included E7 and E8, so it remains unanswered.
+  - **Two runs of one split:** Amazon B on split 0 (all 25 and without #36) already had full-budget entries from the laptop (0.919 and 0.518). The desktop reran both (0.916 and 0.523; df-analyze's feature selection is not seeded), and the verdict table above used the reruns. With the user's agreement, both are kept: the dashboard now counts the earliest separate df-analyze run of a (dataset, feature set, split) and keeps later ones as replications (in the database and the duplicate check's summary, not in its numbers); the same run recorded twice still fails its duplicate check. Its contrast check accepts a delta that matches any recorded run of each side. The dashboard's best setups are unchanged (all chosen at the pilot budget, which is the only one with every setup).
+  - **Results DB:** 27 pipeline entries and two compare entries, tags `full` and `backfill` (and `splits3` for the verdict tables).
 
 ---
 
@@ -1264,7 +1273,7 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
 
 - **Which Amazon variant is the headline:** all 25 features or without f19. The dashboard opens on all 25 with a warning; RQ1 treats f19 as a likely leak.
 - **Which part of the pilot's tuning moves YelpChi's ranking:** the trial count, the balanced-accuracy objective or the random internal CV. None has been separated.
-- **Full-budget runs:** only B has one with all features on Amazon, and YelpChi has none.
+- **Full-budget runs:** B, E1 and E2 have them on 3 splits, on Amazon (all 25 and without #36) and YelpChi (§11, "full-budget ladders: recorded"). On YelpChi the graph gains shrink at that budget; only E1 − B stays supported. E7, E8 and the no19 setups beyond split 0 have none.
 
 The rest of this section is the state as of 2026-10-20, kept for the record.
 
