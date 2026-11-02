@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "run_id": "20261027T142345Z_yelpchi_c845b4",
+  "recorded_utc": "2026-11-02T21:40:56Z",
+  "started_utc": "2026-10-27T14:23:45Z",
+  "finished_utc": "2026-10-27T14:23:45Z",
+  "duration_min": 0.0,
+  "device": "rtx4060-desktop",
+  "device_details": {
+    "os": "Linux",
+    "platform": "Linux-6.6.87.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "wsl": true,
+    "python": "3.13.16",
+    "cpu": "AMD Ryzen 7 7700 8-Core Processor",
+    "gpus": [
+      {
+        "name": "NVIDIA GeForce RTX 4060",
+        "driver": "621.01",
+        "memory": "8188 MiB"
+      }
+    ]
+  },
+  "description": "Full-budget 3-split verdicts m2-m1, m5-m1, m5-m2, all 32 features",
+  "kind": "compare",
+  "status": "ok",
+  "dataset": "yelpchi",
+  "feature_set": null,
+  "split_repeat": null,
+  "seed": null,
+  "git_commit": "c8f5039955e4fc86cf31ba662077850b9bd88482",
+  "git_dirty": false,
+  "command": "uv run scripts/repeat_summary.py --dataset yelpchi --repeats 3 --prefix '' --pairs m1_own:m2_own_nbr m1_own:m5_own_gnnssl m2_own_nbr:m5_own_gnnssl",
+  "tags": [
+    "full",
+    "backfill",
+    "splits3"
+  ],
+  "notes": "Backfilled on 2026-11-02 from the saved summary; its times are the file's last-written time.",
+  "source": "outputs/yelpchi/compare/repeat_summary.csv",
+  "results_rows": 3,
+  "results_columns": [
+    "variant",
+    "contrast",
+    "a",
+    "b",
+    "test_delta_split0",
+    "test_delta_split1",
+    "test_delta_split2",
+    "test_delta_mean",
+    "test_delta_sd",
+    "test_pr_auc_a_mean",
+    "test_pr_auc_a_sd",
+    "test_pr_auc_b_mean",
+    "test_pr_auc_b_sd",
+    "cv_folds",
+    "cv_delta_mean",
+    "corrected_t",
+    "p",
+    "verdict"
+  ]
+}

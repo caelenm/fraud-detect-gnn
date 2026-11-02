@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "run_id": "20261021T070109Z_amazon-m2-own-nbr-no36-r2_ba30bd",
+  "recorded_utc": "2026-11-02T21:40:36Z",
+  "started_utc": "2026-10-21T07:01:09Z",
+  "finished_utc": "2026-10-21T08:24:12Z",
+  "duration_min": 83.0,
+  "device": "rtx4060-desktop",
+  "device_details": {
+    "os": "Linux",
+    "platform": "Linux-6.6.87.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "wsl": true,
+    "python": "3.13.16",
+    "cpu": "AMD Ryzen 7 7700 8-Core Processor",
+    "gpus": [
+      {
+        "name": "NVIDIA GeForce RTX 4060",
+        "driver": "621.01",
+        "memory": "8188 MiB"
+      }
+    ]
+  },
+  "description": "Full-budget ladder, E1: + neighbour means, without #36, split 2, 6 classifiers, 100 trials",
+  "kind": "pipeline",
+  "status": "ok",
+  "dataset": "amazon",
+  "feature_set": "m2_own_nbr_no36",
+  "split_repeat": 2,
+  "seed": 555,
+  "git_commit": "f89d1821c7d4346f3ef8c2df28bffe17379fdae8",
+  "git_dirty": false,
+  "df_analyze_run": "20261021T070109Z",
+  "headline": {
+    "model_a": "catboost (assoc)",
+    "test_pr_auc": 0.722662545649638,
+    "test_pr_auc_low": 0.6776492566108913,
+    "test_pr_auc_high": 0.7658575346249609,
+    "test_auroc": 0.9334843428357557,
+    "test_auroc_low": 0.9177216003768024,
+    "test_auroc_high": 0.9476357112404735,
+    "no_skill_pr_auc": 0.09490740740740741,
+    "cv_pr_auc": 0.7000113937639272,
+    "cv_pr_auc_std": 0.0233232109916794,
+    "f1": 0.6458036984352774,
+    "threshold": 0.2610244631330902,
+    "n_train": 5183,
+    "n_test": 3456,
+    "sanity_warning": "Model A's test PR-AUC 0.723 is more than 0.05 below the sanity band (0.91, from an untuned gradient-boosting model; docs/RESEARCH_PLAN.md \u00a72). Assume a pipeline bug (mis-typed features, a wrong label vector, a misaligned split) and investigate before reporting."
+  },
+  "settings": {
+    "htune_trials": 100,
+    "seed": 555,
+    "feature_set": "m2_own_nbr_no36",
+    "split.repeat": 2,
+    "split.n_repeats": 3,
+    "df_analyze.classifiers": [
+      "lgbm",
+      "lr",
+      "catboost",
+      "gandalf",
+      "rf",
+      "knn"
+    ],
+    "df_analyze.htune_trials": 100,
+    "df_analyze.htune_cls_metric": "bal-acc",
+    "df_analyze.commit": "199e5638620693c267dac715784f1fd0e33fa796",
+    "gnn_embed": {
+      "layers": 2,
+      "hidden": 64,
+      "out_dim": 64,
+      "lr": 0.001,
+      "max_epochs": 300,
+      "patience": 20,
+      "pca_components": 8,
+      "device": "cpu",
+      "usu_edge_fraction": 1.0
+    },
+    "neighbour_agg": {
+      "statistics": [
+        "mean"
+      ],
+      "log1p_degree": true
+    },
+    "blocks": [
+      "own_no36",
+      "nbr_no36"
+    ]
+  },
+  "source": "outputs/amazon_repeat2/m2_own_nbr_no36",
+  "command": "--dataset amazon --set feature_set=m2_own_nbr_no36 --set split.n_repeats=3",
+  "packages": {
+    "numpy": "2.5.3",
+    "pandas": "3.0.6",
+    "pyarrow": "25.0.1",
+    "scikit-learn": "1.9.1",
+    "scipy": "1.18.1",
+    "pyyaml": "6.0.3",
+    "torch": "2.9.1",
+    "torch-geometric": "2.8.1"
+  },
+  "tags": [
+    "full",
+    "backfill"
+  ],
+  "results_rows": 28,
+  "results_columns": [
+    "model",
+    "selection",
+    "embed_selector",
+    "cv_pr_auc",
+    "cv_pr_auc_std",
+    "cv_auroc",
+    "cv_bal_acc",
+    "cv_pr_auc_default",
+    "cv_auroc_default",
+    "cv_tuning_gain",
+    "tuning_metric",
+    "tuning_score",
+    "pr_auc",
+    "auroc",
+    "f1",
+    "precision",
+    "recall",
+    "accuracy",
+    "balanced_accuracy",
+    "tp",
+    "fp",
+    "fn",
+    "tn",
+    "threshold",
+    "f1_at_05",
+    "precision_at_05",
+    "recall_at_05",
+    "accuracy_at_05",
+    "balanced_accuracy_at_05"
+  ]
+}

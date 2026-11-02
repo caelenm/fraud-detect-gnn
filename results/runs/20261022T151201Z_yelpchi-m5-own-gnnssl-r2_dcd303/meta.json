@@ -1,0 +1,136 @@
+{
+  "schema_version": 1,
+  "run_id": "20261022T151201Z_yelpchi-m5-own-gnnssl-r2_dcd303",
+  "recorded_utc": "2026-11-02T21:40:41Z",
+  "started_utc": "2026-10-22T15:12:01Z",
+  "finished_utc": "2026-10-22T18:05:19Z",
+  "duration_min": 173.3,
+  "device": "rtx4060-desktop",
+  "device_details": {
+    "os": "Linux",
+    "platform": "Linux-6.6.87.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "wsl": true,
+    "python": "3.13.16",
+    "cpu": "AMD Ryzen 7 7700 8-Core Processor",
+    "gpus": [
+      {
+        "name": "NVIDIA GeForce RTX 4060",
+        "driver": "621.01",
+        "memory": "8188 MiB"
+      }
+    ]
+  },
+  "description": "Full-budget ladder, E2: + DGI embeddings, all 32, split 2, 6 classifiers, 100 trials",
+  "kind": "pipeline",
+  "status": "ok",
+  "dataset": "yelpchi",
+  "feature_set": "m5_own_gnnssl",
+  "split_repeat": 2,
+  "seed": 555,
+  "git_commit": "9824b954cdca425bcfef54e470d45680845c3fe1",
+  "git_dirty": false,
+  "df_analyze_run": "20261022T151315Z",
+  "headline": {
+    "model_a": "lgbm (assoc)",
+    "test_pr_auc": 0.8570812165607857,
+    "test_pr_auc_low": 0.8449192574011551,
+    "test_pr_auc_high": 0.8691865278400718,
+    "test_auroc": 0.9597272426017447,
+    "test_auroc_low": 0.9554822368157813,
+    "test_auroc_high": 0.9636912001716689,
+    "no_skill_pr_auc": 0.14526659412404788,
+    "cv_pr_auc": 0.8352450107459312,
+    "cv_pr_auc_std": 0.009371699758064,
+    "f1": 0.772033118675253,
+    "threshold": 0.27256750943095387,
+    "n_train": 27574,
+    "n_test": 18380
+  },
+  "settings": {
+    "htune_trials": 100,
+    "seed": 555,
+    "feature_set": "m5_own_gnnssl",
+    "split.repeat": 2,
+    "split.n_repeats": 3,
+    "df_analyze.classifiers": [
+      "lgbm",
+      "lr",
+      "catboost",
+      "gandalf",
+      "rf",
+      "knn"
+    ],
+    "df_analyze.htune_trials": 100,
+    "df_analyze.htune_cls_metric": "bal-acc",
+    "df_analyze.commit": "199e5638620693c267dac715784f1fd0e33fa796",
+    "gnn_embed": {
+      "layers": 2,
+      "hidden": 64,
+      "out_dim": 64,
+      "lr": 0.001,
+      "max_epochs": 300,
+      "patience": 20,
+      "pca_components": 8,
+      "device": "cpu",
+      "usu_edge_fraction": 1.0
+    },
+    "neighbour_agg": {
+      "statistics": [
+        "mean"
+      ],
+      "log1p_degree": true
+    },
+    "blocks": [
+      "own",
+      "gnnssl"
+    ]
+  },
+  "source": "outputs/yelpchi_repeat2/m5_own_gnnssl",
+  "command": "--dataset yelpchi --set feature_set=m5_own_gnnssl --set split.n_repeats=3 --set split.repeat=2",
+  "packages": {
+    "numpy": "2.5.3",
+    "pandas": "3.0.6",
+    "pyarrow": "25.0.1",
+    "scikit-learn": "1.9.1",
+    "scipy": "1.18.1",
+    "pyyaml": "6.0.3",
+    "torch": "2.9.1",
+    "torch-geometric": "2.8.1"
+  },
+  "tags": [
+    "full",
+    "backfill"
+  ],
+  "results_rows": 28,
+  "results_columns": [
+    "model",
+    "selection",
+    "embed_selector",
+    "cv_pr_auc",
+    "cv_pr_auc_std",
+    "cv_auroc",
+    "cv_bal_acc",
+    "cv_pr_auc_default",
+    "cv_auroc_default",
+    "cv_tuning_gain",
+    "tuning_metric",
+    "tuning_score",
+    "pr_auc",
+    "auroc",
+    "f1",
+    "precision",
+    "recall",
+    "accuracy",
+    "balanced_accuracy",
+    "tp",
+    "fp",
+    "fn",
+    "tn",
+    "threshold",
+    "f1_at_05",
+    "precision_at_05",
+    "recall_at_05",
+    "accuracy_at_05",
+    "balanced_accuracy_at_05"
+  ]
+}
