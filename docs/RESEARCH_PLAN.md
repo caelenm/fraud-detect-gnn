@@ -1162,6 +1162,28 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
     - 24 pipeline entries, tags `gnn-plan` and `pilot`.
     - Primary summary `20261102T111849Z_yelpchi_7f5b15`, secondary summary `20261102T174428Z_yelpchi_2e772f`.
     - Tuned-versus-default checks `20261102T175623Z_yelpchi_b779cf` and `20261102T175623Z_amazon_dbcf85`.
+- **2026-11-02 (default-settings sensitivity check on YelpChi: pre-registered, written before any default-settings model was scored on a test set).** Caelen approved the check after the entry above. It asks whether the tuned-versus-default pattern in CV carries over to the test set.
+  - **Status:** a labelled sensitivity check. It replaces no verdict, Model A stays the best tuned row (invariant 8), and the test set chooses nothing (invariant 4).
+  - **Setups:** B, E1, E2, E7 and E8 on YelpChi splits 0–2 (15 fits). The GNN rungs have no df-analyze tuning, so they are not included.
+  - **Model, per setup and split:** the `settings == default` row with the highest shared-CV PR-AUC in `model_selection_cv.csv` (classifier and feature selection), first row on a tie. It is fit on the whole training export with df-analyze's default hyperparameters and seed 555, and predicts the test export. E8's training rows carry the out-of-fold `gnnsup`, as for its tuned Model A. Only PR-AUC is reported, so no threshold is needed.
+  - **Contrasts and verdicts:** the 2026-10-19 rule, with test Δ from these fits and the CV p from the same default rows' saved out-of-fold predictions. No Holm, as this is not a confirmatory family.
+
+    | Contrast | Default-settings CV Δ (known) | Expected |
+    |---|---|---|
+    | E1 − B | +0.075 | supported |
+    | E2 − B | +0.036 | supported |
+    | E7 − E1 | −0.003 | not supported |
+    | E8 − E1 | +0.006 | not supported |
+    | E2 − E1 | −0.039 | worse |
+    | E7 − E2 | +0.036 | supported |
+    | E8 − E7 | +0.009 | not supported |
+
+  - **How it will be read, fixed now:**
+    - **Shortfall tied to tuning:** at default settings, E7 − E1 and E8 − E1 each have a mean test Δ of at least −0.01, and neither has a negative CV Δ with p < 0.05.
+    - **The combination helps:** E7 − E1 or E8 − E1 gets the verdict "supported". Even then it is a sensitivity result and needs a pre-registered run to count.
+    - **Otherwise:** the CV pattern did not carry over, and the cause stays open.
+  - **Code check:** the same script also refits each tuned Model A. If any of its test PR-AUCs differs from the pipeline's by more than 0.005, the check is reported as failed.
+  - **Not answered, whatever the outcome:** which part of the tuning is responsible (the 10 trials, the balanced-accuracy objective, or the random internal CV).
 
 ---
 
