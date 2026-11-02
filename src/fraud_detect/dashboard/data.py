@@ -101,6 +101,8 @@ RUN_COLUMNS = (
     "split_repeat",
     "status",
     "superseded",
+    "replication",
+    "df_analyze_run",
     "backfilled",
     "setup_id",
     "display_id",
@@ -140,6 +142,8 @@ def _run_row(entry: Entry) -> dict[str, Any]:
         "split_repeat": int(meta.get("split_repeat") or 0),
         "status": meta["status"],
         "superseded": entry.superseded,
+        "replication": False,
+        "df_analyze_run": meta.get("df_analyze_run"),
         "backfilled": BACKFILL_TAG in entry.tags,
         "setup_id": fs.setup.setup_id,
         "display_id": fs.display_id,
@@ -168,8 +172,9 @@ def _run_row(entry: Entry) -> dict[str, Any]:
 
 
 def runs_table(entries: list[Entry]) -> pd.DataFrame:
-    """One row per pipeline entry whose feature set is known. Failed and
-    superseded runs are included and marked; usable_runs drops them."""
+    """One row per pipeline entry whose feature set is known. Failed,
+    superseded and replication runs are included and marked; usable_runs
+    drops them."""
     rows = [
         _run_row(e)
         for e in entries
@@ -178,11 +183,35 @@ def runs_table(entries: list[Entry]) -> pd.DataFrame:
     table = pd.DataFrame(rows, columns=list(RUN_COLUMNS))
     for column in ("test_pr_auc", "test_auroc", "no_skill", "cv_pr_auc"):
         table[column] = pd.to_numeric(table[column])
+    _mark_replications(table)
     return table
 
 
+def _mark_replications(table: pd.DataFrame) -> None:
+    """A later, separate df-analyze run of a (dataset, feature set, split) that
+    already has one (e.g. a rerun on another machine) is a replication: kept
+    and shown, but the earliest run is the one counted. The same df-analyze run
+    recorded twice, or a run with no df_analyze_run, is not a replication and
+    still fails the duplicate check."""
+    ok = (table["status"] == "ok") & ~table["superseded"].astype(bool)
+    keys = ["dataset", "feature_set", "split_repeat"]
+    for _, group in table[ok].sort_values("started_utc").groupby(keys, sort=False):
+        first = group.iloc[0]["df_analyze_run"]
+        if not first:
+            continue
+        seen = {first}
+        for index, run in group.iloc[1:].iterrows():
+            if run["df_analyze_run"] and run["df_analyze_run"] not in seen:
+                table.loc[index, "replication"] = True
+                seen.add(run["df_analyze_run"])
+
+
 def usable_runs(runs: pd.DataFrame) -> pd.DataFrame:
-    return runs[(runs["status"] == "ok") & ~runs["superseded"].astype(bool)]
+    return runs[
+        (runs["status"] == "ok")
+        & ~runs["superseded"].astype(bool)
+        & ~runs["replication"].astype(bool)
+    ]
 
 
 def duplicate_runs(runs: pd.DataFrame) -> list[str]:

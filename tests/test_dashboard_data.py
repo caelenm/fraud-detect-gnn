@@ -116,6 +116,43 @@ def test_a_run_recorded_twice_stops_the_summary(tmp_path):
         data.setup_summary(runs, "amazon", reg.PILOT, reg.ALL)
 
 
+def test_a_separate_rerun_is_a_replication_and_the_earliest_run_counts(tmp_path):
+    fake_run_entry(
+        tmp_path,
+        "amazon",
+        "m1_own",
+        0,
+        test=0.9,
+        tag_id="b",
+        started_utc="2026-01-02T00:00:00Z",
+        df_analyze_run="20260102T000000Z",
+    )
+    fake_run_entry(
+        tmp_path,
+        "amazon",
+        "m1_own",
+        0,
+        test=0.8,
+        tag_id="a",
+        started_utc="2026-01-01T00:00:00Z",
+        df_analyze_run="20260101T000000Z",
+    )
+    _, runs = load(tmp_path)
+    assert runs["replication"].sum() == 1 and data.duplicate_runs(runs) == []
+    (row,) = data.setup_summary(runs, "amazon", reg.FULL, reg.ALL)
+    assert row["n_splits"] == 1 and row["test_pr_auc"] == pytest.approx(0.8)
+
+
+def test_the_same_df_analyze_run_recorded_twice_is_still_a_duplicate(tmp_path):
+    for tag in ("a", "b"):
+        fake_run_entry(
+            tmp_path, "amazon", "m1_own", 0, tag_id=tag, df_analyze_run="20260101T000000Z"
+        )
+    _, runs = load(tmp_path)
+    assert runs["replication"].sum() == 0
+    assert data.duplicate_runs(runs) == ["amazon/m1_own/split 0"]
+
+
 def test_normalised_skill_formula():
     assert data.normalised_skill(0.1, 0.1) == pytest.approx(0.0)
     assert data.normalised_skill(1.0, 0.1) == pytest.approx(1.0)

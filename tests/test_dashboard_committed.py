@@ -188,8 +188,21 @@ def test_every_early_amazon_run_is_now_in_the_database(db):
         got = usable[(usable["feature_set"] == name) & (usable["dataset"] == "amazon")]
         assert sorted(got["split_repeat"]) == [0, 1, 2, 3, 4], name
     for name in ("m1_own", "m1_own_no36"):
-        got = usable[usable["feature_set"] == name]
+        got = usable[
+            (usable["feature_set"] == name)
+            & (usable["dataset"] == "amazon")
+            & (usable["split_repeat"] == 0)
+        ]
         assert len(got) == 1 and got.iloc[0]["backfilled"], name
+        # The original run counts; the later rerun on another machine is a replication.
+        assert got.iloc[0]["device"] == "rtx4060-laptop", name
+        reruns = runs[
+            (runs["feature_set"] == name)
+            & (runs["dataset"] == "amazon")
+            & (runs["split_repeat"] == 0)
+            & runs["replication"]
+        ]
+        assert len(reruns) == 1, name
 
 
 def test_the_stopped_100_trial_check_is_on_record_and_counts_for_nothing(db):

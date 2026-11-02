@@ -169,14 +169,14 @@ Each panel holds its dataset's best setup by CV, and that setup's Model A on spl
 | Results database is valid | A row-level column, a table too long, a bad UTC time |
 | Every run maps to a setup | A feature set the registry cannot read |
 | Corrections point at real entries | A `supersedes` naming no entry |
-| No run is counted twice | One (dataset, feature set, split) recorded twice; this one stops the server |
+| No run is counted twice | One (dataset, feature set, split) recorded twice by the same df-analyze run (or without one); this one stops the server. A later, separate run of the same split (a rerun, e.g. on another machine) is a replication: kept in the database and counted in this check's summary, but left out of the numbers; the earliest run counts |
 | Metrics are in range | A PR-AUC outside [0, 1] or its interval, or not above no skill |
 | Each split has one test set | Setups on one split with different test sizes or base rates |
 | Budget labels match the logged settings | A "pilot" run that did not log 10 trials and 3 classifiers, or a "full" one that did not log 100 and 6 |
 | Model A was chosen by shared CV, not by test | A Model A without the highest shared-CV score in its own results table |
 | Verdicts follow the pre-registered rule | A stored verdict the rule does not give from its deltas and p |
 | Contrast arithmetic adds up | A mean or SD that does not match its deltas, or the wrong CV fold count |
-| Contrasts agree with the runs | A per-split Δ that differs from the two runs' own test PR-AUC |
+| Contrasts agree with the runs | A per-split Δ that differs from the two runs' own test PR-AUC (any recorded run of each side, replications included) |
 | No verdict was replaced by one on fewer splits | A replacement with fewer splits than what it replaced |
 
 **For each classify panel,** before any node is shown:

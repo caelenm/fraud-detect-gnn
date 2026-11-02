@@ -89,7 +89,7 @@ def check_no_duplicates(runs: pd.DataFrame) -> Check:
     return _result(
         "No run is counted twice",
         f"{len(data.usable_runs(runs))} usable runs, each (dataset, feature set, split) "
-        "once",
+        f"once; {int(runs['replication'].sum())} later reruns kept as replications",
         dup,
     )
 
@@ -243,26 +243,30 @@ def check_contrast_arithmetic(rows: list[dict[str, Any]]) -> Check:
 
 
 def check_contrasts_match_runs(rows: list[dict[str, Any]], runs: pd.DataFrame) -> Check:
-    """Contrasts and runs are recorded separately; they must agree, split by split."""
+    """Contrasts and runs are recorded separately; they must agree, split by split.
+    A contrast may have been built from a replication run (a later rerun of the
+    same split), so a delta agrees if any recorded run of each side gives it."""
     problems = []
-    usable = data.usable_runs(runs)
-    score = {
-        (r.dataset, r.feature_set, r.split_repeat): r.test_pr_auc
-        for r in usable.itertuples()
-    }
+    usable = data.usable_runs(runs.assign(replication=False))
+    score: dict[tuple, list[float]] = {}
+    for r in usable.itertuples():
+        score.setdefault((r.dataset, r.feature_set, r.split_repeat), []).append(
+            r.test_pr_auc
+        )
     checked = unknown = 0
     for row in rows:
         for k, delta in enumerate(row["deltas"]):
-            a = score.get((row["dataset"], row["a"], k))
-            b = score.get((row["dataset"], row["b"], k))
-            if a is None or b is None:
+            a_all = score.get((row["dataset"], row["a"], k))
+            b_all = score.get((row["dataset"], row["b"], k))
+            if a_all is None or b_all is None:
                 unknown += 1
                 continue
             checked += 1
-            if abs((b - a) - delta) > DELTA_TOLERANCE:
+            gaps = [(b - a) for a in a_all for b in b_all]
+            if min(abs(g - delta) for g in gaps) > DELTA_TOLERANCE:
                 problems.append(
                     f"{row['run_id']} {row['b_id']} − {row['a_id']} split {k}: recorded "
-                    f"{delta:+.6f}, runs give {b - a:+.6f}"
+                    f"{delta:+.6f}, runs give {gaps[0]:+.6f}"
                 )
     return _result(
         "Contrasts agree with the runs",
