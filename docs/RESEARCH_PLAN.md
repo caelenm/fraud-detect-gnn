@@ -1219,6 +1219,31 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
     - It does not make E8 the best model. E8's default score is above every tuned setup, but comparing across settings was not pre-registered, and default settings were chosen by no one as the method.
     - Which part of the tuning is responsible is still not separated. Amazon's test sets were not scored this way; its CV shows no such gap (at most 0.003).
   - **Results DB:** contrasts `20261102T180319Z_yelpchi_833c47`, scores per setup and split `20261102T180319Z_yelpchi_3ec316`.
+- **2026-11-02 (up to 100 trials on YelpChi: pre-registered, written before any of these runs started).** Caelen approved the runs after the entry above. They ask whether the pilot's 10 trials explain E7's and E8's shortfall against E1.
+  - **Status:** a labelled sensitivity check. It replaces no verdict: the pilot verdicts of the YelpChi results entry stand as pre-registered. Within each run, Model A stays the best tuned row by shared CV (invariant 8), and the test set chooses nothing (invariant 4).
+  - **Setups:** B, E1, E2, E7 and E8 on YelpChi splits 0–2 (15 runs), as new feature sets `t100_*`, so the pilot's folders are not touched. The GNN rungs have no df-analyze tuning, so they are not included.
+  - **What changes:** only `df_analyze.htune_trials`, from 10 to 100. The classifiers (LightGBM, logistic regression, CatBoost), the balanced-accuracy objective, df-analyze's random internal CV, the prediction filter, the seed, the splits and the feature blocks stay the same. The `nbr`, `gnnssl` and `gnnsup` blocks are reused, not rebuilt. This is not the full Model A budget, which has six classifiers.
+  - **"100 trials" means up to 100:** df-analyze ends a search early when it stops improving (in one full-budget Amazon run, these three classifiers' searches ended at 51–71 of 100), and it has time limits per search (CatBoost 30 min, LightGBM 60 min, logistic regression 15 min). How each search stopped is reported from `tuning_budget.csv`.
+  - **Run-to-run noise:** df-analyze's feature selection is not seeded (see "Pipeline stages" in `AGENTS.md`). The best default row is scored in both runs with the same settings, so its CV difference between them shows the noise.
+  - **Contrasts and verdicts:** the 2026-10-19 rule, from `compare_report.py` and `repeat_summary.py`, each side being that setup's Model A at up to 100 trials. No Holm, as this is not a confirmatory family.
+
+    | Contrast | Test Δ at 10 trials (known) | Test Δ at default settings (known) | Expected at 100 |
+    |---|---|---|---|
+    | E1 − B | +0.033 | +0.071 | supported |
+    | E2 − B | +0.046 | +0.032 | supported |
+    | E7 − E1 | −0.016 | −0.003 | not supported |
+    | E8 − E1 | −0.054 | +0.010 | not supported, with a smaller shortfall than at 10 trials |
+    | E2 − E1 | +0.013 | −0.039 | not supported |
+    | E7 − E2 | −0.029 | +0.035 | not supported |
+    | E8 − E7 | −0.038 | +0.014 | not supported |
+
+  - **The budget itself:** each setup at up to 100 trials minus the same setup at 10, under the same rule. Expected: E8 gains the most of the five. There is no firm expectation for which gains are supported.
+  - **How it will be read, fixed now**, using the thresholds of the default-settings check:
+    - **The trial count explains the shortfall:** at up to 100 trials, E7 − E1 and E8 − E1 each have a mean test Δ of at least −0.01, and neither has a negative CV Δ with p < 0.05.
+    - **The trial count does not explain it:** E7 − E1 and E8 − E1 both fail that test.
+    - **Partly:** one passes and the other fails. It is reported per contrast.
+    - **The combination helps:** E7 − E1 or E8 − E1 gets the verdict "supported". Even then it is a sensitivity result and needs a pre-registered run to count.
+  - **Not answered, whatever the outcome:** whether the balanced-accuracy objective or the random internal CV matters on its own. If the trial count does not explain the shortfall, those two remain candidates; they are not shown to be the cause.
 
 ---
 
