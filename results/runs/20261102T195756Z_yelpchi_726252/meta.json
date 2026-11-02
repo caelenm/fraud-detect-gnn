@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "run_id": "20261102T195756Z_yelpchi_726252",
+  "recorded_utc": "2026-11-02T20:23:00Z",
+  "started_utc": "2026-11-02T19:57:56Z",
+  "finished_utc": "2026-11-02T20:16:16Z",
+  "duration_min": 18.3,
+  "device": "rtx4060-laptop",
+  "device_details": {
+    "os": "Linux",
+    "platform": "Linux-5.10.16.3-microsoft-standard-WSL2-x86_64-with-glibc2.41",
+    "wsl": true,
+    "python": "3.13.15",
+    "cpu": "Intel(R) Core(TM) Ultra 9 185H",
+    "gpus": [
+      {
+        "name": "NVIDIA GeForce RTX 4060 Laptop GPU",
+        "driver": "571.96",
+        "memory": "8188 MiB"
+      }
+    ]
+  },
+  "description": "YelpChi check at up to 100 trials: stopped by request after 18 minutes, 0 of 18 jobs finished, no results",
+  "kind": "other",
+  "status": "failed",
+  "dataset": "yelpchi",
+  "feature_set": null,
+  "split_repeat": null,
+  "seed": null,
+  "git_commit": "cf069e7178146fe8d10d383f697321d9a6ce3a55",
+  "git_dirty": false,
+  "tags": [
+    "t100",
+    "abandoned",
+    "sensitivity"
+  ],
+  "notes": "Pre-registered in RESEARCH_PLAN section 11 (2026-11-02). The group had no time for the runs. So whether the trial count explains E7's and E8's shortfall on YelpChi stays unanswered.",
+  "source": "outputs/yelpchi/t100_logs/abandoned/queue_status.csv",
+  "results_rows": 18,
+  "results_columns": [
+    "job",
+    "state"
+  ]
+}

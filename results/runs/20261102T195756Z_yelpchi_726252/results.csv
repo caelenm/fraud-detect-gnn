@@ -1,0 +1,19 @@
+job,state
+y100_r0_t100_m1_own,stopped while running
+y100_r0_t100_m2_own_nbr,not started
+y100_r0_t100_m5_own_gnnssl,not started
+y100_r0_t100_m7_own_nbr_gnnssl,not started
+y100_r0_t100_m8_own_nbr_gnnsup,not started
+y100_r1_t100_m1_own,not started
+y100_r1_t100_m2_own_nbr,not started
+y100_r1_t100_m5_own_gnnssl,not started
+y100_r1_t100_m7_own_nbr_gnnssl,not started
+y100_r1_t100_m8_own_nbr_gnnsup,not started
+y100_r2_t100_m1_own,not started
+y100_r2_t100_m2_own_nbr,not started
+y100_r2_t100_m5_own_gnnssl,not started
+y100_r2_t100_m7_own_nbr_gnnssl,not started
+y100_r2_t100_m8_own_nbr_gnnsup,not started
+y100_summary,not started
+y100_budget,not started
+y100_trials,not started

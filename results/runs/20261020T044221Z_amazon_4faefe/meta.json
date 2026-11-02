@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "run_id": "20261020T044221Z_amazon_4faefe",
+  "recorded_utc": "2026-11-02T20:23:00Z",
+  "started_utc": "2026-10-20T04:42:21Z",
+  "finished_utc": "2026-10-20T04:42:21Z",
+  "duration_min": 0.0,
+  "device": "rtx4060-laptop",
+  "device_details": {
+    "os": "Linux",
+    "platform": "Linux-5.10.16.3-microsoft-standard-WSL2-x86_64-with-glibc2.41",
+    "wsl": true,
+    "python": "3.13.15",
+    "cpu": "Intel(R) Core(TM) Ultra 9 185H",
+    "gpus": [
+      {
+        "name": "NVIDIA GeForce RTX 4060 Laptop GPU",
+        "driver": "571.96",
+        "memory": "8188 MiB"
+      }
+    ]
+  },
+  "description": "Phase 2: 3-split verdicts m2-m1, m5-m1, m5-m2, all features and without #36, pilot rungs",
+  "kind": "compare",
+  "status": "ok",
+  "dataset": "amazon",
+  "feature_set": null,
+  "split_repeat": null,
+  "seed": null,
+  "git_commit": "cf069e7178146fe8d10d383f697321d9a6ce3a55",
+  "git_dirty": false,
+  "tags": [
+    "backfill",
+    "pilot",
+    "splits3"
+  ],
+  "notes": "Backfilled on 2026-11-02 from the saved summary; its times are the file's last-written time. The all-features rows were later replaced by the 5-split verdicts of the GNN round.",
+  "source": "outputs/amazon/compare/repeat_summary.csv",
+  "results_rows": 6,
+  "results_columns": [
+    "variant",
+    "contrast",
+    "a",
+    "b",
+    "test_delta_split0",
+    "test_delta_split1",
+    "test_delta_split2",
+    "test_delta_mean",
+    "test_delta_sd",
+    "test_pr_auc_a_mean",
+    "test_pr_auc_a_sd",
+    "test_pr_auc_b_mean",
+    "test_pr_auc_b_sd",
+    "cv_folds",
+    "cv_delta_mean",
+    "corrected_t",
+    "p",
+    "verdict"
+  ]
+}

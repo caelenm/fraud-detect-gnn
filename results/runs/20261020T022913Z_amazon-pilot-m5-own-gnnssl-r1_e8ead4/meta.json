@@ -1,0 +1,134 @@
+{
+  "schema_version": 1,
+  "run_id": "20261020T022913Z_amazon-pilot-m5-own-gnnssl-r1_e8ead4",
+  "recorded_utc": "2026-11-02T20:22:57Z",
+  "started_utc": "2026-10-20T02:29:13Z",
+  "finished_utc": "2026-10-20T02:44:13Z",
+  "duration_min": 15.0,
+  "device": "rtx4060-laptop",
+  "device_details": {
+    "os": "Linux",
+    "platform": "Linux-5.10.16.3-microsoft-standard-WSL2-x86_64-with-glibc2.41",
+    "wsl": true,
+    "python": "3.13.15",
+    "cpu": "Intel(R) Core(TM) Ultra 9 185H",
+    "gpus": [
+      {
+        "name": "NVIDIA GeForce RTX 4060 Laptop GPU",
+        "driver": "571.96",
+        "memory": "8188 MiB"
+      }
+    ]
+  },
+  "description": "Phase 2 pilot, E2: + DGI embeddings, all 25, split 1, lgbm/lr/catboost, 10 trials",
+  "kind": "pipeline",
+  "status": "ok",
+  "dataset": "amazon",
+  "feature_set": "pilot_m5_own_gnnssl",
+  "split_repeat": 1,
+  "seed": 555,
+  "git_commit": "18de809e7b6331b9a6fd8e003a17eb7b9060a58c",
+  "git_dirty": false,
+  "df_analyze_run": "20261020T022942Z",
+  "headline": {
+    "model_a": "catboost (assoc)",
+    "test_pr_auc": 0.930574603884167,
+    "test_pr_auc_low": 0.9089889741579322,
+    "test_pr_auc_high": 0.9496423426930772,
+    "test_auroc": 0.9872766047033872,
+    "test_auroc_low": 0.9820786496679287,
+    "test_auroc_high": 0.9915795305377697,
+    "no_skill_pr_auc": 0.09490740740740741,
+    "cv_pr_auc": 0.9358924886785246,
+    "cv_pr_auc_std": 0.0150591005838049,
+    "f1": 0.8422712933753943,
+    "threshold": 0.2888417331011506,
+    "n_train": 5183,
+    "n_test": 3456
+  },
+  "settings": {
+    "htune_trials": 10,
+    "seed": 555,
+    "feature_set": "pilot_m5_own_gnnssl",
+    "split.repeat": 1,
+    "split.n_repeats": 3,
+    "df_analyze.classifiers": [
+      "lgbm",
+      "lr",
+      "catboost"
+    ],
+    "df_analyze.htune_trials": 10,
+    "df_analyze.htune_cls_metric": "bal-acc",
+    "df_analyze.commit": "199e5638620693c267dac715784f1fd0e33fa796",
+    "gnn_embed": {
+      "layers": 2,
+      "hidden": 64,
+      "out_dim": 64,
+      "lr": 0.001,
+      "max_epochs": 300,
+      "patience": 20,
+      "pca_components": 8,
+      "device": "cpu",
+      "usu_edge_fraction": 1.0
+    },
+    "neighbour_agg": {
+      "statistics": [
+        "mean"
+      ],
+      "log1p_degree": true
+    },
+    "blocks": [
+      "own",
+      "gnnssl"
+    ]
+  },
+  "source": "outputs/amazon_repeat1/pilot_m5_own_gnnssl",
+  "command": "--dataset amazon --set split.n_repeats=3 --set df_analyze.classifiers=[lgbm,lr,catboost] --set df_analyze.htune_trials=10 --set split.repeat=1 --set feature_set=pilot_m5_own_gnnssl",
+  "packages": {
+    "numpy": "2.5.3",
+    "pandas": "3.0.6",
+    "pyarrow": "25.0.1",
+    "scikit-learn": "1.9.1",
+    "scipy": "1.18.1",
+    "pyyaml": "6.0.3",
+    "torch": "2.9.1",
+    "torch-geometric": "2.8.1"
+  },
+  "tags": [
+    "backfill",
+    "pilot"
+  ],
+  "notes": "Backfilled on 2026-11-02 from this run's saved outputs and run log, at the user's request, for the dashboard. Nothing was rerun; recorded_utc is the backfill date, started_utc and finished_utc are the run's.",
+  "results_rows": 16,
+  "results_columns": [
+    "model",
+    "selection",
+    "embed_selector",
+    "cv_pr_auc",
+    "cv_pr_auc_std",
+    "cv_auroc",
+    "cv_bal_acc",
+    "cv_pr_auc_default",
+    "cv_auroc_default",
+    "cv_tuning_gain",
+    "tuning_metric",
+    "tuning_score",
+    "pr_auc",
+    "auroc",
+    "f1",
+    "precision",
+    "recall",
+    "accuracy",
+    "balanced_accuracy",
+    "tp",
+    "fp",
+    "fn",
+    "tn",
+    "threshold",
+    "f1_at_05",
+    "precision_at_05",
+    "recall_at_05",
+    "accuracy_at_05",
+    "balanced_accuracy_at_05"
+  ]
+}
