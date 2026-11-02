@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "run_id": "20261102T111849Z_yelpchi_7f5b15",
+  "recorded_utc": "2026-11-02T11:32:25Z",
+  "started_utc": "2026-11-02T11:18:49Z",
+  "finished_utc": "2026-11-02T11:32:24Z",
+  "duration_min": 13.6,
+  "device": "rtx4060-laptop",
+  "device_details": {
+    "os": "Linux",
+    "platform": "Linux-5.10.16.3-microsoft-standard-WSL2-x86_64-with-glibc2.41",
+    "wsl": true,
+    "python": "3.13.15",
+    "cpu": "Intel(R) Core(TM) Ultra 9 185H",
+    "gpus": [
+      {
+        "name": "NVIDIA GeForce RTX 4060 Laptop GPU",
+        "driver": "571.96",
+        "memory": "8188 MiB"
+      }
+    ]
+  },
+  "description": "GNN plan, YelpChi validation, 3 splits: primary family E1-B, E2-B, E5-E6, E7-E1, E8-E1 (pilot)",
+  "kind": "compare",
+  "status": "ok",
+  "dataset": "yelpchi",
+  "feature_set": null,
+  "split_repeat": null,
+  "seed": null,
+  "git_commit": "c060a88d3a48c17c0c08f53a3886b6cc4e367fa8",
+  "git_dirty": false,
+  "command": "scripts/repeat_summary.py --dataset yelpchi --repeats 3 --prefix pilot_ --name gnn_yelpchi_primary --pairs m1_own:m2_own_nbr m1_own:m5_own_gnnssl g6_mlp:g5_sage m2_own_nbr:m7_own_nbr_gnnssl m2_own_nbr:m8_own_nbr_gnnsup",
+  "tags": [
+    "pilot",
+    "gnn-plan",
+    "splits3"
+  ],
+  "source": "outputs/yelpchi/compare/gnn_yelpchi_primary.csv",
+  "results_rows": 5,
+  "results_columns": [
+    "variant",
+    "contrast",
+    "a",
+    "b",
+    "test_delta_split0",
+    "test_delta_split1",
+    "test_delta_split2",
+    "test_delta_mean",
+    "test_delta_sd",
+    "test_pr_auc_a_mean",
+    "test_pr_auc_a_sd",
+    "test_pr_auc_b_mean",
+    "test_pr_auc_b_sd",
+    "cv_folds",
+    "cv_delta_mean",
+    "corrected_t",
+    "p",
+    "verdict"
+  ]
+}

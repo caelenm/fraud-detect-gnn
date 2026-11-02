@@ -58,19 +58,28 @@ Best GNN for E8 (pre-registered one-SE rule, training folds of each split):
 
 | Setup | What | Splits | Test PR-AUC | CV PR-AUC | No skill | Model A / GNN setting per split |
 |---|---|---|---|---|---|---|
-| B | df-analyze on own features | 2 | 0.835 ± 0.007 | 0.823 | 0.145 | lgbm (embed); lgbm (none) |
-| E1 | + neighbour means | 2 | 0.878 ± 0.009 | 0.870 | 0.145 | lgbm (embed); lgbm (none) |
-| E2 | + DGI embeddings | 2 | 0.885 ± 0.005 | 0.870 | 0.145 | lgbm (assoc); lgbm (assoc) |
-| E7 | + neighbour means + DGI embeddings | 2 | 0.850 ± 0.027 | 0.843 | 0.145 | catboost (embed); lgbm (none) |
-| E8 | + neighbour means + best GNN's out-of-fold score | 2 | 0.810 ± 0.014 | 0.809 | 0.145 | catboost (none); catboost (pred) |
+| B | df-analyze on own features | 3 | 0.838 ± 0.007 | 0.822 | 0.145 | lgbm (embed); lgbm (none); lgbm (none) |
+| E1 | + neighbour means | 3 | 0.871 ± 0.013 | 0.860 | 0.145 | lgbm (embed); lgbm (none); catboost (assoc) |
+| E2 | + DGI embeddings | 3 | 0.884 ± 0.004 | 0.868 | 0.145 | lgbm (assoc); lgbm (assoc); lgbm (embed) |
+| E7 | + neighbour means + DGI embeddings | 3 | 0.855 ± 0.021 | 0.845 | 0.145 | catboost (embed); lgbm (none); lgbm (assoc) |
+| E8 | + neighbour means + best GNN's out-of-fold score | 3 | 0.817 ± 0.016 | 0.811 | 0.145 | catboost (none); catboost (pred); catboost (assoc) |
 | E5 | GNN: heterogeneous GraphSAGE | 3 | 0.767 ± 0.007 | 0.761 | 0.145 | h128 d0.3 lr0.005; h128 d0.3 lr0.005; h128 d0.3 lr0.001 (per-seed SD ≤ 0.006) |
-| E5g | GNN: R-GCN-style normalisation | 2 | 0.765 ± 0.006 | 0.768 | 0.145 | h128 d0.3 lr0.005; h128 d0.3 lr0.005 (per-seed SD ≤ 0.006) |
-| E6 | GNN without edges (MLP) | 2 | 0.623 ± 0.023 | 0.629 | 0.145 | h128 d0.3 lr0.005; h128 d0.3 lr0.005 (per-seed SD ≤ 0.002) |
+| E5g | GNN: R-GCN-style normalisation | 3 | 0.767 ± 0.005 | 0.761 | 0.145 | h128 d0.3 lr0.005; h128 d0.3 lr0.005; h128 d0.3 lr0.001 (per-seed SD ≤ 0.006) |
+| E6 | GNN without edges (MLP) | 3 | 0.630 ± 0.020 | 0.625 | 0.145 | h128 d0.3 lr0.005; h128 d0.3 lr0.005; h128 d0.3 lr0.005 (per-seed SD ≤ 0.006) |
 
 Best GNN for E8 (pre-registered one-SE rule, training folds of each split):
 - split 0: g5_sage (gain over the first candidate: g5g_rgcn -0.0028 (SE 0.0027))
 - split 1: g5g_rgcn (gain over the first candidate: g5g_rgcn +0.0023 (SE 0.0012))
+- split 2: g5_sage (gain over the first candidate: g5g_rgcn +0.0012 (SE 0.0014))
 
-_Primary contrasts: not summarised yet._
+### Primary contrasts (B − A as written)
+
+| Contrast | Δ 0 | Δ 1 | Δ 2 | Mean ± SD | Headroom | CV p | Holm p | Verdict |
+|---|---|---|---|---|---|---|---|---|
+| E1 − B | +0.031 | +0.054 | +0.014 | +0.033 ± 0.020 | +20% | 0.0079 | 0.016 | supported |
+| E2 − B | +0.049 | +0.052 | +0.038 | +0.046 ± 0.007 | +29% | 2.4e-06 | 9.5e-06 | supported |
+| E5 − E6 | +0.132 | +0.152 | +0.125 | +0.136 ± 0.014 | +37% | 3.2e-10 | 1.6e-09 | supported |
+| E7 − E1 | -0.040 | -0.014 | +0.007 | -0.016 ± 0.023 | -12% | 0.24 | 0.24 | worse |
+| E8 − E1 | -0.052 | -0.084 | -0.026 | -0.054 ± 0.029 | -42% | 0.0015 | 0.0044 | worse |
 
 _Secondary contrasts: not summarised yet._
