@@ -48,6 +48,38 @@ def oof_table() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def test_best_default_row_ignores_tuned_rows_and_failures():
+    cv = pd.DataFrame(
+        {
+            "model_cls": ["LightGBMClassifier", "LightGBMClassifier", "LRClassifier",
+                          "CatBoostClassifier", "CatBoostClassifier"],
+            "selection": ["none", "none", "none", "none", "assoc"],
+            "embed_selector": [np.nan] * 5,
+            "settings": ["tuned", "default", "default", "default", "default"],
+            "pr_auc_mean": [0.9, 0.7, np.nan, 0.8, 0.8],
+            "error": [np.nan, np.nan, "ValueError: x", np.nan, np.nan],
+        }
+    )  # fmt: skip
+    best = contrasts.best_default_row(cv)
+    assert best["model_cls"] == "CatBoostClassifier" and best["selection"] == "none"
+    with pytest.raises(ValueError):
+        contrasts.best_default_row(cv[cv["settings"] == "tuned"])
+
+
+def test_configuration_oof_finds_one_configuration():
+    oof = oof_table()
+    row = pd.Series({"model_cls": "LightGBMClassifier", "selection": "embed",
+                     "embed_selector": "linear", "settings": "default"})  # fmt: skip
+    rows = contrasts.configuration_oof(oof, row)
+    expected = oof[(oof.embed_selector == "linear") & (oof.settings == "default")]
+    assert rows["prob"].tolist() == expected.sort_values("row")["prob"].tolist()
+    cat = pd.Series({"model_cls": "CatBoostClassifier", "selection": "none",
+                     "embed_selector": np.nan, "settings": "tuned"})  # fmt: skip
+    assert len(contrasts.configuration_oof(oof, cat)) == 20
+    with pytest.raises(ValueError):
+        contrasts.configuration_oof(oof, {**cat, "settings": "default"})
+
+
 def test_model_a_rows_and_fold_scores():
     oof = oof_table()
     rows = contrasts.model_a_oof(

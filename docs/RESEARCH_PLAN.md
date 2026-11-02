@@ -1171,12 +1171,12 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
     | Contrast | Default-settings CV Δ (known) | Expected |
     |---|---|---|
     | E1 − B | +0.075 | supported |
-    | E2 − B | +0.036 | supported |
-    | E7 − E1 | −0.003 | not supported |
+    | E2 − B | +0.037 | supported |
+    | E7 − E1 | −0.002 | not supported |
     | E8 − E1 | +0.006 | not supported |
-    | E2 − E1 | −0.039 | worse |
+    | E2 − E1 | −0.038 | worse |
     | E7 − E2 | +0.036 | supported |
-    | E8 − E7 | +0.009 | not supported |
+    | E8 − E7 | +0.008 | not supported |
 
   - **How it will be read, fixed now:**
     - **Shortfall tied to tuning:** at default settings, E7 − E1 and E8 − E1 each have a mean test Δ of at least −0.01, and neither has a negative CV Δ with p < 0.05.

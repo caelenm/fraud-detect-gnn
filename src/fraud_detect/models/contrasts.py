@@ -67,6 +67,33 @@ def model_a_oof(oof: pd.DataFrame, model_a: dict[str, Any]) -> pd.DataFrame:
     return rows[["row", "fold", "prob"]].reset_index(drop=True)
 
 
+def best_default_row(cv: pd.DataFrame) -> pd.Series:
+    """The default-settings configuration with the highest shared-CV PR-AUC in
+    a model_selection_cv.csv table, the first on a tie. Only for the
+    default-settings sensitivity check (docs/RESEARCH_PLAN.md §11, 2026-11-02);
+    Model A stays the best tuned row."""
+    ok = (cv["settings"] == "default") & (cv["error"].fillna("").astype(str) == "")
+    rows = cv[ok].dropna(subset=["pr_auc_mean"])
+    if rows.empty:
+        raise ValueError("No scored default-settings configuration")
+    return rows.loc[rows["pr_auc_mean"].idxmax()]
+
+
+def configuration_oof(oof: pd.DataFrame, row: pd.Series) -> pd.DataFrame:
+    """Out-of-fold rows (row, fold, prob) of the configuration in one row of
+    model_selection_cv.csv, from oof_predictions.parquet, in row order."""
+    mask = (
+        (oof["settings"] == row["settings"])
+        & (oof["model_cls"] == row["model_cls"])
+        & (oof["selection"] == row["selection"])
+        & (oof["embed_selector"].map(_selector) == _selector(row["embed_selector"]))
+    )
+    rows = oof[mask].sort_values("row")
+    if rows.empty or rows["row"].duplicated().any():
+        raise ValueError(f"No unique out-of-fold predictions for {row['model_cls']}")
+    return rows[["row", "fold", "prob"]].reset_index(drop=True)
+
+
 def fold_pr_auc(rows: pd.DataFrame, y_train: np.ndarray) -> pd.Series:
     """PR-AUC of each held-out fold, indexed by fold."""
     if len(rows) != len(y_train):
