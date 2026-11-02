@@ -93,22 +93,16 @@ def check_df_analyze_dir(
             )
 
 
-def run_df_analyze_script(
-    dfa_dir: Path,
-    script: str,
-    args: list[str],
-    log_path: Path,
-    expected_commit: str | None = None,
-    python: str | None = None,
-) -> list[str]:
-    """Run `uv run --directory dfa_dir [--python SPEC] python <script> <args>`,
-    tee output to a log file, and raise if it fails. Returns the command run.
+def df_analyze_command(
+    dfa_dir: Path, script: str, args: list[str], python: str | None = None
+) -> tuple[list[str], dict[str, str]]:
+    """The command and environment that run a script in df-analyze's environment:
+    `uv run --directory dfa_dir [--python SPEC] python <script> <args>`.
 
     `python` pins the interpreter for df-analyze's environment (e.g.
     ">=3.13.11,<3.14"); without it uv may pick a newer Python for which
     df-analyze's locked dependencies have no prebuilt wheels.
     """
-    check_df_analyze_dir(dfa_dir, script, expected_commit)
     cmd = ["uv", "run", "--directory", str(dfa_dir)]
     if python:
         cmd += ["--python", python]
@@ -117,6 +111,21 @@ def run_df_analyze_script(
     # Our own virtual environment must not leak into df-analyze's.
     env.pop("VIRTUAL_ENV", None)
     env["PYTHONUNBUFFERED"] = "1"  # stream progress instead of buffering it
+    return cmd, env
+
+
+def run_df_analyze_script(
+    dfa_dir: Path,
+    script: str,
+    args: list[str],
+    log_path: Path,
+    expected_commit: str | None = None,
+    python: str | None = None,
+) -> list[str]:
+    """Run a script in df-analyze's environment (df_analyze_command), tee output
+    to a log file, and raise if it fails. Returns the command run."""
+    check_df_analyze_dir(dfa_dir, script, expected_commit)
+    cmd, env = df_analyze_command(dfa_dir, script, args, python)
     log_path.parent.mkdir(parents=True, exist_ok=True)
     print("Running:", " ".join(cmd), flush=True)
     with log_path.open("w", encoding="utf-8") as log:

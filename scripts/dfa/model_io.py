@@ -290,3 +290,18 @@ def load_native(fmt: str, path: Path) -> Any:
         model.load_model(str(path), format="cbm")
         return model
     raise ValueError(f"Unknown model format {fmt!r}")
+
+
+def read_model_meta(model_dir: Path) -> tuple[dict[str, Any], list[str]]:
+    """A saved model's model_a.json, and one warning per package whose installed
+    version differs from the one it was saved with. Shared by predict.py and
+    serve_model.py, so the two cannot disagree. Needs setup_paths()."""
+    from fraud_detect.models import model_export as mx  # noqa: PLC0415
+
+    meta = mx.read_metadata(model_dir / mx.MODEL_A_META)
+    return meta, mx.version_warnings(meta["package_versions"], mx.package_versions())
+
+
+def load_model_a(model_dir: Path, meta: dict[str, Any]) -> Any:
+    """The exported Model A described by `meta` (from read_model_meta)."""
+    return load_native(meta["model_format"], model_dir / meta["model_file"])

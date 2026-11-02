@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fraud GNN Results</title>
+  <link rel="stylesheet" href="/report.css">
+  <link rel="stylesheet" href="/dashboard.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <div>
+        <div class="eyebrow">CS555 course project · results dashboard</div>
+        <h1>Does a graph help fraud classification?</h1>
+      </div>
+      <div class="meta" id="header-meta"></div>
+    </header>
+
+    <div id="check-banner" class="check-banner" hidden></div>
+
+    <form class="controls" id="controls" aria-label="What to show">
+      <fieldset class="control">
+        <legend>Dataset</legend>
+        <div class="segmented" id="dataset-buttons"></div>
+      </fieldset>
+      <label class="control" id="variant-control">
+        <span class="control-label">Amazon features</span>
+        <select id="variant-select"></select>
+      </label>
+      <label class="control">
+        <span class="control-label">Budget</span>
+        <select id="budget-select"></select>
+      </label>
+      <label class="control check">
+        <input type="checkbox" id="zoom-toggle">
+        <span>Zoom the score axis</span>
+      </label>
+      <div class="control push">
+        <button type="button" class="ghost" id="theme-toggle">Theme: auto</button>
+      </div>
+    </form>
+
+    <noscript>
+      <p class="notice">This page draws its charts with JavaScript. The same numbers are in docs/GNN_RESULTS.md and docs/RQ_RESULTS.md.</p>
+    </noscript>
+
+    <main>
+      <section id="read-first" aria-labelledby="read-first-title">
+        <h2 id="read-first-title">Read this first</h2>
+        <p class="lede">The limits of these results, before the results.</p>
+        <div id="dataset-caveats"></div>
+        <div class="grid-2">
+          <div class="panel panel-pad">
+            <h3 class="sub">How to read the numbers</h3>
+            <ul class="plain" id="general-caveats"></ul>
+          </div>
+          <div class="panel panel-pad">
+            <h3 class="sub">How a verdict is decided</h3>
+            <p class="small" id="verdict-rule"></p>
+            <h3 class="sub spaced">Not run</h3>
+            <ul class="plain" id="not-run"></ul>
+          </div>
+        </div>
+      </section>
+
+      <section id="questions" aria-labelledby="questions-title">
+        <h2 id="questions-title">The questions, answered</h2>
+        <p class="lede" id="questions-lede"></p>
+        <div id="questions-body"></div>
+      </section>
+
+      <section id="methods" aria-labelledby="methods-title">
+        <h2 id="methods-title">Every method on this dataset</h2>
+        <p class="lede" id="methods-lede"></p>
+        <div id="best-callout"></div>
+        <div class="panel chart-panel">
+          <div class="legend" id="leaderboard-legend"></div>
+          <div class="chart-scroll" id="leaderboard"></div>
+        </div>
+        <div class="panel table-panel">
+          <div class="table-scroll" id="methods-table"></div>
+        </div>
+        <div id="coverage"></div>
+      </section>
+
+      <section id="verdicts" aria-labelledby="verdicts-title">
+        <h2 id="verdicts-title">Pre-registered contrasts</h2>
+        <p class="lede">Each row is the test PR-AUC of B minus A, on the splits both ran. Written down before the runs.</p>
+        <div id="verdicts-body"></div>
+        <div id="sensitivity"></div>
+      </section>
+
+      <section id="cross" aria-labelledby="cross-title">
+        <h2 id="cross-title">Across the two datasets</h2>
+        <p class="lede">Setups that ran on both, at the pilot budget. This section does not follow the dataset toggle.</p>
+        <div id="cross-body"></div>
+      </section>
+
+      <section id="classify" aria-labelledby="classify-title">
+        <h2 id="classify-title">Classify a random test node</h2>
+        <p class="lede">Each panel holds that dataset's best setup by CV, its saved model on split 0. Only test nodes can be drawn; the model was not fitted on them.</p>
+        <p class="group-banner">Group only: this section shows row-level test data. Do not upload, commit or host it.</p>
+        <ul class="plain small" id="demo-notes"></ul>
+        <div class="classify-grid" id="classify-panels"></div>
+      </section>
+
+      <section id="checks" aria-labelledby="checks-title">
+        <h2 id="checks-title">Sanity checks and coverage</h2>
+        <p class="lede">Recomputed from the results database when this server started. A failure also shows at the top of the page.</p>
+        <div class="panel panel-pad" id="database-facts"></div>
+        <div class="panel table-panel">
+          <div class="table-scroll" id="checks-table"></div>
+        </div>
+        <div id="failed-entries"></div>
+      </section>
+    </main>
+
+    <footer id="page-footer"></footer>
+  </div>
+  <div class="tooltip" id="tooltip" role="status" hidden></div>
+</body>
+</html>

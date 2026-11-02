@@ -28,39 +28,24 @@ from fraud_detect.config import (
     load_config,
     with_dataset,
 )
+from fraud_detect.dashboard import registry as reg
 from fraud_detect.runstate import atomic_write_text
 
-# Feature-set name prefix -> experiment ID (longest prefixes first).
-SETUPS = [
-    ("m5r_own_gnnrand", "E3"),
-    ("m5_own_gnnssl", "E2"),
-    ("m2_own_nbr", "E1"),
-    ("n1_own_deg", "N1"),
-    ("n2_own_nbrrw", "N2"),
-    ("m1_own", "B"),
-]
+# The setups are defined in fraud_detect.dashboard.registry.
 SETUP_LABELS = {
-    "B": "B: df-analyze on own features",
-    "E1": "E1: + neighbour means",
-    "E2": "E2: + DGI embeddings",
-    "E3": "E3: + untrained GNN embeddings",
-    "N1": "N1: + degree only",
-    "N2": "N2: + neighbour means on a rewired graph",
+    setup_id: f"{setup_id}: {reg.BY_ID[setup_id].label}"
+    for setup_id in ("B", "E1", "E2", "E3", "N1", "N2")
 }
-# Variant suffix -> (column, embedding size).
-VARIANTS = {
-    "": ("all 25", ""),
-    "no36": ("without #36", ""),
-    "no19": ("without f19", ""),
-    "no19d2": ("without f19", "2"),
-    "no19d4": ("without f19", "4"),
-    "no19d16": ("without f19", "16"),
-    "no19raw": ("without f19", "raw 64"),
-    "only36": ("#36 four only", ""),
-    "top4": ("top 4 (with f19)", ""),
-    "top4no19": ("top 4 without f19", ""),
+# Feature variant -> this report's column.
+VARIANT_COLUMNS = {
+    reg.ALL: "all 25",
+    reg.NO36: "without #36",
+    reg.NO19: "without f19",
+    reg.ONLY36: "#36 four only",
+    reg.TOP4: "top 4 (with f19)",
+    reg.TOP4NO19: "top 4 without f19",
 }
-COLUMNS = ["all 25", "without #36", "without f19", "top 4 without f19", "#36 four only",
+COLUMNS =["all 25", "without #36", "without f19", "top 4 without f19", "#36 four only",
            "top 4 (with f19)"]  # fmt: skip
 ROW_ORDER = ["B", "E1", "E2 (2)", "E2 (4)", "E2", "E2 (16)", "E2 (raw 64)",
              "E3 (2)", "E3 (4)", "E3", "E3 (16)", "E3 (raw 64)", "N1", "N2"]  # fmt: skip
@@ -94,14 +79,9 @@ def n_splits(frame: pd.DataFrame) -> int:
 
 def parse(feature_set: str) -> tuple[str, str, str]:
     """(experiment ID, column, embedding size) of a pilot feature set."""
-    name = feature_set.removeprefix("pilot_")
-    for prefix, setup in SETUPS:
-        if name == prefix or name.startswith(prefix + "_"):
-            column, size = VARIANTS[name[len(prefix) + 1 :]]
-            if setup in ("E2", "E3") and size:
-                return f"{setup} ({size})", column, size
-            return setup, column, size
-    raise ValueError(f"Unknown feature set {feature_set!r}")
+    fs = reg.parse_feature_set(feature_set)
+    size = "" if fs.embed_size in (None, reg.DEFAULT_EMBED_SIZE) else fs.embed_size
+    return fs.display_id, VARIANT_COLUMNS[fs.variant], size
 
 
 def label(feature_set: str) -> str:

@@ -13,10 +13,9 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
-from helpers import fake_dataset, fake_df_analyze_run, fake_gnnssl_outputs
+from helpers import fake_dataset, fake_gnnssl_outputs, finish_fake_run
 
 from fraud_detect import columns as C
-from fraud_detect.cli import main
 from fraud_detect.config import REPO_ROOT, get_paths
 from fraud_detect.report import compare
 
@@ -25,20 +24,11 @@ CV_A = {("dummy", "none"): 0.2, ("lgbm", "none"): 0.6}
 CV_B = {("dummy", "none"): 0.2, ("lgbm", "none"): 0.5, ("catboost", "none"): 0.7}
 
 
-def finish(path, config, feature_set: str, cv: dict) -> None:
-    """Pipeline through df_analyze_input, a faked df-analyze run, then the
-    report stage, for one feature set."""
-    args = ["--config", str(path), "--set", f"feature_set={feature_set}"]
-    assert main([*args, "--to", "df_analyze_input"]) == 0
-    fake_df_analyze_run(get_paths({**config, "feature_set": feature_set}), cv)
-    assert main([*args, "--only", "df_analyze_report"]) == 0
-
-
 @pytest.fixture
 def two_runs(tmp_path):
     path, config = fake_dataset(tmp_path, n_nodes=200)
-    finish(path, config, "m1_own", CV_A)
-    finish(path, config, "m2_own_nbr", CV_B)
+    finish_fake_run(path, config, "m1_own", CV_A)
+    finish_fake_run(path, config, "m2_own_nbr", CV_B)
     return path, config
 
 
@@ -136,7 +126,7 @@ def test_embedding_view_when_a_side_uses_gnnssl(two_runs):
     path, config = two_runs
     p = get_paths({**config, "feature_set": "m5_own_gnnssl"})
     fake_gnnssl_outputs(p, ("aaa", "bbb"), n_nodes=200)
-    finish(path, config, "m5_own_gnnssl", CV_B)
+    finish_fake_run(path, config, "m5_own_gnnssl", CV_B)
     html = compare.build(config, "m1_own", "m5_own_gnnssl", n_resamples=50,
                          n_random_cards=5).html  # fmt: skip
     assert "A-A-A DGI embedding (2-D PCA)" in html and "Own features (2-D PCA)" in html

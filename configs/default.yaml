@@ -169,14 +169,6 @@ feature_sets:
   # without the neighbour means.
   pilot_m8_own_nbr_gnnsup: [own, nbr, gnnsup]
   pilot_m8s_own_gnnsup: [own, gnnsup]
-  # 2026-11-02 (RESEARCH_PLAN §11), YelpChi: B, E1, E2, E7 and E8 with the
-  # pilot's classifiers but up to 100 trials (--set df_analyze.htune_trials=100),
-  # in their own folders, so the pilot's outputs stay as they are.
-  t100_m1_own: [own]
-  t100_m2_own_nbr: [own, nbr]
-  t100_m5_own_gnnssl: [own, gnnssl]
-  t100_m7_own_nbr_gnnssl: [own, nbr, gnnssl]
-  t100_m8_own_nbr_gnnsup: [own, nbr, gnnsup]
 
 # GNN classifier rungs (Models 3-4; 2026-10-31, docs/GNN_MODELS_PLAN.md §2):
 # feature sets the gnn_classify stage trains and scores instead of

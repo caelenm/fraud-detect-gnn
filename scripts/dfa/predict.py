@@ -40,7 +40,8 @@ import pandas as pd
 from model_io import (
     REPO_ROOT,
     decode_results,
-    load_native,
+    load_model_a,
+    read_model_meta,
     read_table,
     setup_paths,
     without_checkpoint_files,
@@ -124,8 +125,8 @@ def main() -> int:
         raise SystemExit("--model and --selection go together")
 
     model_dir = model_dir_for(args)
-    meta = mx.read_metadata(model_dir / mx.MODEL_A_META)
-    for warning in mx.version_warnings(meta["package_versions"], mx.package_versions()):
+    meta, warnings = read_model_meta(model_dir)
+    for warning in warnings:
         print(f"WARNING: {warning}", file=sys.stderr)
     if args.model:
         model, columns, threshold, label = other_combination(
@@ -133,7 +134,7 @@ def main() -> int:
         )
         predict = model.predict_proba
     else:
-        estimator = load_native(meta["model_format"], model_dir / meta["model_file"])
+        estimator = load_model_a(model_dir, meta)
         columns, threshold = list(meta["input_columns"]), float(meta["threshold"])
         label = f"Model A: {meta['model']} ({meta['selection_label']})"
         predict = estimator.predict_proba

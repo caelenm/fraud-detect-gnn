@@ -15,10 +15,14 @@ automatically.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 
 from fraud_detect import columns as C
+from fraud_detect import results_db
+from fraud_detect.models import contrasts
 
 # (config name, df-analyze estimator class) for fake df-analyze results.
 FAKE_DFA_MODELS = [("dummy", "DummyClassifier"), ("lgbm", "LightGBMClassifier"),
@@ -362,3 +366,179 @@ def fake_model_a_summary(dataset: str = "amazon", feature_set: str = "m1_own") -
         ],
         "sanity_warning": None,
     }
+
+
+# --------------------------------------------------------------------------
+# Results-database entries for the dashboard tests. Aggregate numbers, all
+# invented; each helper writes one entry under `db_dir` (a tmp_path folder).
+# --------------------------------------------------------------------------
+_FAKE_DEVICE = {"os": "Fake", "platform": "fake", "wsl": False, "python": "3.13",
+                "cpu": "fake", "gpus": []}  # fmt: skip
+
+
+def fake_entry(db_dir: Path, run_id: str, table: pd.DataFrame, **meta) -> str:
+    """One database entry, through the same check as a real one."""
+    fields = {
+        "schema_version": results_db.SCHEMA_VERSION,
+        "run_id": run_id,
+        "recorded_utc": "2026-01-01T00:00:00Z",
+        "started_utc": "2026-01-01T00:00:00Z",
+        "device": "fake-laptop",
+        "device_details": _FAKE_DEVICE,
+        "description": "Invented entry for a test",
+        "kind": "pipeline",
+        "status": "ok",
+        **meta,
+    }
+    results_db.add_entry(db_dir, fields, table)
+    return run_id
+
+
+def fake_model_table(model: str, selection: str, cv: float, test: float) -> pd.DataFrame:
+    """Invented results.csv of a pipeline run: the named Model A, and a dummy
+    with a lower shared-CV score."""
+    return pd.DataFrame(
+        {
+            "model": [model, "dummy"],
+            "selection": [selection, "none"],
+            "cv_pr_auc": [cv, cv / 4],
+            "pr_auc": [test, test / 4],
+        }
+    )
+
+
+def fake_run_entry(
+    db_dir: Path,
+    dataset: str,
+    feature_set: str,
+    split: int = 0,
+    test: float = 0.8,
+    cv: float = 0.8,
+    no_skill: float = 0.1,
+    model: str = "lgbm",
+    selection: str = "none",
+    n_test: int = 100,
+    n_train: int = 150,
+    table: pd.DataFrame | None = None,
+    **meta,
+) -> str:
+    """A pipeline entry with invented numbers, at settings that match its name."""
+    pilot = feature_set.startswith("pilot_")
+    settings = {
+        "df_analyze.htune_trials": 10 if pilot else 100,
+        "df_analyze.classifiers": ["a", "b", "c"] if pilot else list("abcdef"),
+    }
+    suffix = f"{dataset}_{feature_set}_{split}_{meta.pop('tag_id', '')}"
+    return fake_entry(
+        db_dir,
+        f"20260101T000000Z_{suffix}",
+        fake_model_table(model, selection, cv, test) if table is None else table,
+        dataset=dataset,
+        feature_set=feature_set,
+        split_repeat=split,
+        seed=555,
+        settings=meta.pop("settings", settings),
+        headline={
+            "model_a": f"{model} ({selection})",
+            "test_pr_auc": test,
+            "test_pr_auc_low": test - 0.02,
+            "test_pr_auc_high": test + 0.02,
+            "test_auroc": min(test + 0.05, 1.0),
+            "no_skill_pr_auc": no_skill,
+            "cv_pr_auc": cv,
+            "cv_pr_auc_std": 0.01,
+            "threshold": 0.4,
+            "n_train": n_train,
+            "n_test": n_test,
+        },
+        **meta,
+    )
+
+
+def fake_contrast_row(
+    a: str, b: str, deltas: list[float], p: float = 0.01, pr_a: float = 0.8, **overrides
+) -> dict:
+    """One invented repeat_summary.py row, consistent unless overridden."""
+    d = np.asarray(deltas, dtype=float)
+    row = {
+        "variant": "-",
+        "contrast": f"{b} - {a}",
+        "a": a,
+        "b": b,
+        **{f"test_delta_split{k}": v for k, v in enumerate(deltas)},
+        "test_delta_mean": float(d.mean()),
+        "test_delta_sd": float(d.std(ddof=1)) if len(d) > 1 else float("nan"),
+        "test_pr_auc_a_mean": pr_a,
+        "test_pr_auc_a_sd": 0.01,
+        "test_pr_auc_b_mean": pr_a + float(d.mean()),
+        "test_pr_auc_b_sd": 0.01,
+        "cv_folds": 5 * len(d),
+        "cv_delta_mean": float(d.mean()),
+        "corrected_t": 3.0,
+        "p": p,
+        "verdict": contrasts.verdict(list(d), p),
+    }
+    row.update(overrides)
+    return row
+
+
+def fake_compare_entry(
+    db_dir: Path,
+    dataset: str,
+    rows: list[dict],
+    name: str,
+    description: str = "Invented verdicts",
+    started: str = "2026-01-02T00:00:00Z",
+    **meta,
+) -> str:
+    return fake_entry(
+        db_dir,
+        f"{started.replace('-', '').replace(':', '')}_{dataset}_{name}",
+        pd.DataFrame(rows),
+        kind="compare",
+        dataset=dataset,
+        description=description,
+        started_utc=started,
+        **meta,
+    )
+
+
+def fake_ladder_db(db_dir: Path) -> None:
+    """A small invented database covering both datasets, every family and both
+    budgets, with contrasts that agree with its runs."""
+    amazon = {"pilot_m1_own": (0.80, 0.81), "pilot_m2_own_nbr": (0.82, 0.86),
+              "pilot_m5_own_gnnssl": (0.83, 0.84), "pilot_g5_sage": (0.75, 0.74),
+              "pilot_g6_mlp": (0.72, 0.71), "pilot_m1_own_no19": (0.50, 0.52),
+              "pilot_m2_own_nbr_no19": (0.65, 0.66)}  # fmt: skip
+    yelp = {"pilot_m1_own": (0.70, 0.71), "pilot_m2_own_nbr": (0.76, 0.75),
+            "pilot_m5_own_gnnssl": (0.72, 0.78), "pilot_g5_sage": (0.65, 0.64),
+            "pilot_g6_mlp": (0.55, 0.54)}  # fmt: skip
+    for k, shift in enumerate((-0.01, 0.0, 0.01)):
+        for fs, (test, cv) in amazon.items():
+            fake_run_entry(
+                db_dir, "amazon", fs, k, test + shift, cv + shift, no_skill=0.1
+            )
+        for fs, (test, cv) in yelp.items():
+            fake_run_entry(db_dir, "yelpchi", fs, k, test + shift, cv + shift,
+                           no_skill=0.15, n_test=200, n_train=300)  # fmt: skip
+    fake_run_entry(db_dir, "amazon", "m1_own", 0, 0.805, 0.815, no_skill=0.1,
+                   tags=["backfill", "full"])  # fmt: skip
+    a, b = "pilot_m1_own", "pilot_m2_own_nbr"
+    fake_compare_entry(
+        db_dir, "amazon",
+        [fake_contrast_row(a, b, [0.02, 0.02, 0.02], p=0.01, pr_a=0.80),
+         fake_contrast_row("pilot_g6_mlp", "pilot_g5_sage", [0.03, 0.03, 0.03], p=0.2,
+                           pr_a=0.72),
+         fake_contrast_row("pilot_m1_own_no19", "pilot_m2_own_nbr_no19",
+                           [0.15, 0.15, 0.15], p=0.001, pr_a=0.50)],
+        "amazon_primary",
+        description="Invented primary family of contrasts",
+    )  # fmt: skip
+    fake_compare_entry(
+        db_dir, "yelpchi",
+        [fake_contrast_row(a, b, [0.06, 0.06, 0.06], p=0.001, pr_a=0.70),
+         fake_contrast_row("pilot_g6_mlp", "pilot_g5_sage", [0.10, 0.10, 0.10], p=0.001,
+                           pr_a=0.55)],
+        "yelp_primary",
+        description="Invented primary family of contrasts",
+    )  # fmt: skip

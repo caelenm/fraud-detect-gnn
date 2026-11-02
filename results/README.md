@@ -68,6 +68,7 @@ Add `--dry-run` to see the entry without writing it. Times must carry a time zon
 - **Append-only.** Never edit or delete someone else's entry. To correct one, add a new entry with `--supersedes <run_id>` and say why in `--notes`.
 - **Record every run whose numbers anyone might quote**, including pilots and failed runs, right after it finishes.
 - Pilot and full-budget runs are different runs: tag pilots `--tag pilot` and never compare a pilot rung with a full one.
+- A run recorded long after it ran is tagged `--tag backfill`, with a note saying so. Its `started_utc` and `finished_utc` are the run's; `recorded_utc` is the day it was recorded.
 
 ## Reading it
 
@@ -77,5 +78,7 @@ uv run scripts/results_db.py list --dataset amazon --tag pilot
 uv run scripts/results_db.py show 20261021T1405         # one entry (a unique prefix is enough)
 uv run scripts/results_db.py export                     # outputs/results_db/index.csv and all_results.csv
 ```
+
+The [dashboard](../docs/DASHBOARD.md) reads this database too, and rechecks it every time it starts: `uv run scripts/dashboard.py --check`.
 
 `export` writes `index.csv` (one row per entry with the headline numbers flattened) and `all_results.csv` (every results table stacked, with the run ID, device, dataset and feature set in front). Both go under `outputs/`, so they are never committed.

@@ -32,38 +32,18 @@ from fraud_detect.config import (
     load_config,
     with_dataset,
 )
+from fraud_detect.dashboard import registry as reg
+from fraud_detect.dashboard.data import holm
 from fraud_detect.runstate import atomic_write_text
 
 DATASETS = {"amazon": 5, "yelpchi": 3}
 DATASET_LABELS = {"amazon": "Amazon (main; all 25 features)",
                   "yelpchi": "YelpChi (validation; all 32 features)"}  # fmt: skip
-# Feature set (without the pilot_ prefix) -> setup ID and description.
+# Feature set (without the pilot_ prefix) -> setup ID and description, for this
+# round's setups. They are defined in fraud_detect.dashboard.registry.
 SETUPS = {
-    "m1_own": ("B", "df-analyze on own features"),
-    "m2_own_nbr": ("E1", "+ neighbour means"),
-    "m5_own_gnnssl": ("E2", "+ DGI embeddings"),
-    "m5r_own_gnnrand": ("E3", "+ untrained GNN embeddings"),
-    "m7_own_nbr_gnnssl": ("E7", "+ neighbour means + DGI embeddings"),
-    "m7r_own_nbr_gnnrand": ("E7r", "+ neighbour means + untrained GNN embeddings"),
-    "m8_own_nbr_gnnsup": ("E8", "+ neighbour means + best GNN's out-of-fold score"),
-    "m8s_own_gnnsup": ("E8s", "+ best GNN's out-of-fold score"),
-    "g5_sage": ("E5", "GNN: heterogeneous GraphSAGE"),
-    "g5g_rgcn": ("E5g", "GNN: R-GCN-style normalisation"),
-    "g6_mlp": ("E6", "GNN without edges (MLP)"),
-    "g5n3_sage_rw": ("N3", "GNN: GraphSAGE on the rewired graph"),
+    s.base: (s.setup_id, s.label) for s in reg.SETUPS if s.setup_id not in ("N1", "N2")
 }
-
-
-def holm(p: list[float]) -> list[float]:
-    """Holm step-down adjusted p values, in the input order."""
-    order = np.argsort(p)
-    m = len(p)
-    adjusted = np.empty(m)
-    running = 0.0
-    for rank, i in enumerate(order):
-        running = max(running, min(1.0, (m - rank) * p[i]))
-        adjusted[i] = running
-    return adjusted.tolist()
 
 
 def split_config(config: dict, dataset: str, k: int, n: int) -> dict:

@@ -40,7 +40,9 @@ Not run: E1/N1/N2 on splits 3–4.
 - Amazon: no primary contrast was supported.
 - YelpChi: E1 − B, E2 − B and E5 − E6 were supported; E7 − E1 was not (lower mean, p 0.24); E8 − E1 was significantly worse (p 0.0015).
 - A default-settings check on YelpChi ties E7's and E8's shortfall to the pilot's tuning. The gain from graph features holds at both settings; the order of the setups does not.
-- Started 2026-11-02: YelpChi's five df-analyze setups at up to 100 trials (`t100_*`, queue in the WSL clone's `outputs/yelpchi/t100_logs/`), pre-registered in §11.
+- A pre-registered check at up to 100 trials on YelpChi was stopped on 2026-11-02 with 0 of 18 jobs finished: no results, so the trial count stays untested.
+
+**New on 2026-11-02 (results dashboard, [`docs/DASHBOARD.md`](docs/DASHBOARD.md)):** `uv run scripts/dashboard.py` shows every method, per dataset and across them, with live classification of a random test node. 20 earlier Amazon runs were backfilled into the results database (tag `backfill`), so every recorded setup now has its splits there.
 
 The details are in [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md) §11 (decision log and every result) and §12 (next steps); a short summary is in the README ("Results").
 
@@ -72,7 +74,7 @@ The details are in [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md) §11 (decisi
 
 **Where things are:**
 - **Code:** on `main`; the phase 3 plan and work (branches `claude/awesome-wozniak-wm548a` and `exp/phase3-feedback`) were merged with PR #39 (`f4175e3`). The work since 2026-10-26 (RQ1–RQ3 and the GNN round) reached `main` on 2026-11-02 by fast-forward from `exp/rq-plan`, the branch the WSL clone stays on.
-- **Results database:** `results/runs/` (committed; see [Results database](#results-database)). It holds the phase 3 runs of 2026-10-23 and the RQ runs from 2026-10-26 on (tag `rq-plan`); the earlier runs above have not been recorded in it (D5).
+- **Results database:** `results/runs/` (committed; see [Results database](#results-database)). It holds every recorded run; the earlier ones were backfilled on 2026-11-02 (tag `backfill`).
 - **Overnight queue (2026-10-23):** the job runner and its logs live in the WSL clone's `outputs/amazon/phase3_logs/` (never committed): `bin/runner.sh` runs each line of `queue.txt` not yet in `done.txt`, `bin/pilot.sh` runs one pilot rung and records it, and `bin/summary.sh` builds the comparison pages and a verdict table. The RQ queue (2026-10-27 and 2026-10-29) works the same way in `outputs/amazon/rq_logs/`, with `bin/pilot5.sh` (5 split repeats), `bin/summaryN.sh`, `bin/full.sh` and `bin/fullsum.sh`.
 - **Results:** in the WSL clone's `outputs/amazon*` and `data/processed/amazon*`. Split repeats 1–2 live in `outputs/amazon_repeat1/2`, which `pack_artifacts.py` does not pack (it packs repeat 0 only).
 - **Group bundle:** `fraud_artifacts_amazon_20261019T220559Z.tgz` (148 MB, split 0), on OneDrive.
@@ -206,6 +208,8 @@ Stages (plan §7):
 
 A clone that only unpacked a bundle has no raw data; the `download` stage counts as done when the `load` stage's outputs exist, so such a clone skips every stage.
 
+**Results dashboard (not a stage; it spans feature sets and datasets).** `uv run scripts/dashboard.py` (`src/fraud_detect/dashboard/`, [`docs/DASHBOARD.md`](docs/DASHBOARD.md)). It adds no stage outputs and writes only the worker's log under `outputs/`. The aggregate sections read `results/runs/` only. The classify panel reads row-level outputs, so the server binds `127.0.0.1` with no option to change it, and its model worker (`scripts/dfa/serve_model.py`) is the only part in df-analyze's environment. Setups are defined once, in `dashboard/registry.py`; add a new setup or variant there. Anything the page says about results must come from the database or be covered by a check in `dashboard/checks.py`. `uv run scripts/dashboard.py --check` runs the checks. Never host, bundle or commit the page's row-level answers.
+
 **Comparison page (not a stage; it spans two feature sets).** `uv run scripts/compare_report.py --dataset <name> --a <feature_set> --b <feature_set>` (`src/fraud_detect/report/compare.py`) writes `outputs/<dataset>/compare/<a>__vs__<b>/compare.html` and `compare_metrics.json` from what the pipeline already saved: each side's Model A, its out-of-fold threshold and its test probabilities. It adds no outputs to any stage (that would make existing bundles rerun) and stops if the two sides were not scored on the same test nodes. **Exception to the `web_report` rule:** this page may contain inline JavaScript (clicking a point shows that node's card), but it must still make **no external requests** (no CDN, fonts, images or other linked resources; charts are inline SVG drawn in Python, no Plotly). Every inserted value is HTML-escaped. It contains row-level test data, shows a group-only banner, and is never committed.
 
 Still to do (later branches; tracked as GitHub issues):
@@ -278,6 +282,11 @@ Also ask before changing the metrics, the split proportions or grouping rule, th
 - **2026-11-02 (user decisions):**
   - **`exp/rq-plan` to GitHub `main`:** the user asked for the work so far on `main`; it went by fast-forward. That was one request: ask again before pushing later commits.
   - **YelpChi at up to 100 trials:** B, E1, E2, E7 and E8 on 3 splits (`t100_*`, RESEARCH_PLAN §11). A sensitivity check; the pilot verdicts stand.
+- **2026-11-02 (results dashboard; [`docs/DASHBOARD_PLAN.md`](docs/DASHBOARD_PLAN.md) §9):**
+  - **Best model:** the highest mean shared-CV PR-AUC over a setup's splits, at the largest budget that has every setup; never the test score. The page says when it is not a clear winner.
+  - **Amazon's default view:** all 25 features with a permanent f19 warning; without f19 one click away.
+  - **Backfill:** done once, on request; the rule against backfilling without asking still stands.
+  - **The 100-trial check was stopped** with no results. Its pre-registration stays in RESEARCH_PLAN §11; its unused code was removed.
 - **Kept from earlier work:** Model A uses df-analyze classifiers **`lgbm`, `lr`, `catboost`, `gandalf`, `rf`, `knn`** (plus the automatic dummy; `mlp` is left out because it is CPU-only in df-analyze and adds about 4 h per run), 100 tuning trials, tuned on **balanced accuracy** for every model (`htune_cls_metric: bal-acc`; not `acc`, which suits imbalanced classes poorly; not `auroc`, which df-analyze applies inconsistently across models), with `--filter-pred-classify auroc` for the prediction-based feature filter; Model A is **chosen by shared 5-fold CV PR-AUC on the training set** (`select_model`), not by df-analyze's tuning score; CatBoost and GANDALF run on the GPU; `--df-tests-method` is never passed (it hits an enum bug in df-analyze 4.1.0).
 
 ## Code conventions
@@ -302,6 +311,10 @@ Tests use small synthetic data only. **All synthetic rows live in `tests/synthet
 - The decision threshold is chosen without test data, and the bootstrap resamples whole groups.
 - No node feature correlates perfectly with the label on synthetic data (a leakage smoke test).
 - Every committed results-database entry passes `scripts/results_db.py check` (no row-level columns, at most 1,000 rows, valid UTC times).
+- The dashboard's numbers reproduce `docs/GNN_RESULTS.md`, `docs/RQ_RESULTS.md` and the README's table; pilot and full runs never share a row; the best setup is chosen by CV, not test.
+- Each dashboard sanity check fails on the fault it exists to catch (`tests/test_dashboard_checks.py`).
+- The classify panel never returns a training node, stratified draws return only the asked class, and a model that disagrees with the saved predictions is never shown as live.
+- The dashboard server binds the loopback address only, and its page makes no external requests and builds no markup from values.
 
 ## Checks (recommended before committing)
 

@@ -4,7 +4,7 @@
 
 Course project for CS555: Data Mining and Machine Learning, St. Francis Xavier University (StFX).
 
-> **Status:** Model 1 (df-analyze on each node's own features) is implemented end to end for both datasets, and **phase 1 (Amazon) is done** ([Results](#results-phase-1-amazon)). **Phase 2** ([`docs/PHASE2_GNN_PLAN.md`](docs/PHASE2_GNN_PLAN.md) is the plan; branch `feat/gnn-embeddings`) adds two graph rungs as feature blocks for df-analyze: **Model 2** (`nbr`, label-free neighbour means) and **Model 5** (`gnnssl`, self-supervised GNN embeddings), each also without the four features of issue [#36](https://github.com/caelenm/fraud-detect-gnn/issues/36), and a [comparison page](#comparing-two-feature-sets) that shows two rungs' Model A test node by test node. Amazon pilot results are in [Results (phase 2 pilot)](#results-phase-2-pilot-amazon). GraphSAGE (Models 3–4) and Model 6 came later, in the GNN round of 2026-10-31 ([plan](docs/GNN_MODELS_PLAN.md), [results](docs/GNN_RESULTS.md)). **Phase 3** ([`docs/PHASE3_FEEDBACK_PLAN.md`](docs/PHASE3_FEEDBACK_PLAN.md)) answers the professor's feedback of 2026-10-21: the size of the GNN embeddings and how to reduce them, whether training the GNN helps, the four important features alone, and more datasets. **Since 2026-10-26** the project is framed around three research questions, on Amazon (main) and YelpChi (validation): **RQ1**, how much of Amazon's results, and of the graph's apparent benefit, comes from `f19`, a column built from the same helpfulness votes as the label ([Limitations](#limitations)); **RQ2**, how much of the remaining graph gain is real structure rather than degree and extra columns (null-graph controls: degree only, and a degree-preserving rewired graph); **RQ3**, whether training the GNN encoder matters and how small its embeddings can be. Every run is recorded in the [results database](#results-database). The working plan is [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md). An earlier version of this project used CFPB complaint narratives; that state is preserved at commit `3336d87` on `main`.
+> **Status:** Model 1 (df-analyze on each node's own features) is implemented end to end for both datasets, and **phase 1 (Amazon) is done** ([Results](#results-phase-1-amazon)). **Phase 2** ([`docs/PHASE2_GNN_PLAN.md`](docs/PHASE2_GNN_PLAN.md) is the plan; branch `feat/gnn-embeddings`) adds two graph rungs as feature blocks for df-analyze: **Model 2** (`nbr`, label-free neighbour means) and **Model 5** (`gnnssl`, self-supervised GNN embeddings), each also without the four features of issue [#36](https://github.com/caelenm/fraud-detect-gnn/issues/36), and a [comparison page](#comparing-two-feature-sets) that shows two rungs' Model A test node by test node. Amazon pilot results are in [Results (phase 2 pilot)](#results-phase-2-pilot-amazon). GraphSAGE (Models 3–4) and Model 6 came later, in the GNN round of 2026-10-31 ([plan](docs/GNN_MODELS_PLAN.md), [results](docs/GNN_RESULTS.md)). **Phase 3** ([`docs/PHASE3_FEEDBACK_PLAN.md`](docs/PHASE3_FEEDBACK_PLAN.md)) answers the professor's feedback of 2026-10-21: the size of the GNN embeddings and how to reduce them, whether training the GNN helps, the four important features alone, and more datasets. **Since 2026-10-26** the project is framed around three research questions, on Amazon (main) and YelpChi (validation): **RQ1**, how much of Amazon's results, and of the graph's apparent benefit, comes from `f19`, a column built from the same helpfulness votes as the label ([Limitations](#limitations)); **RQ2**, how much of the remaining graph gain is real structure rather than degree and extra columns (null-graph controls: degree only, and a degree-preserving rewired graph); **RQ3**, whether training the GNN encoder matters and how small its embeddings can be. **The GNN round of 2026-10-31** added GraphSAGE, its edge-free control, the m2 + m5 combination and Model 6, on both datasets ([Results](#results-gnn-round-2026-10-31-to-2026-11-02)). **To see every result, start the [dashboard](#the-results-dashboard).** Every run is recorded in the [results database](#results-database). The working plan is [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md). An earlier version of this project used CFPB complaint narratives; that state is preserved at commit `3336d87` on `main`.
 
 ---
 
@@ -205,6 +205,29 @@ For comparison, B with all 25 features (`f19` included) scores 0.918. At the ful
 
 Caveats: pilot budget, one seed per run, 3 splits (5 where stated). The full-budget runs (B, E1 and E2) cover only split 0. Not run yet: E1/N1/N2 on splits 3–4, and GraphSAGE.
 
+## Results (GNN round, 2026-10-31 to 2026-11-02)
+
+Every feature, as published work does: all 25 on Amazon, all 32 on YelpChi. Pilot budget (LightGBM, logistic regression, CatBoost; 10 trials; GNN rungs: an 8-setting grid and 5 seeds). Test PR-AUC, mean ± SD over splits. Full tables: [`docs/GNN_RESULTS.md`](docs/GNN_RESULTS.md).
+
+| Setup | What it adds | Amazon (5 splits, no skill 0.095) | YelpChi (3 splits, no skill 0.145) |
+|---|---|---|---|
+| B | df-analyze on own features | 0.922 ± 0.007 | 0.838 ± 0.007 |
+| E1 | + neighbour means | 0.933 ± 0.008 | 0.871 ± 0.013 |
+| E2 | + DGI embeddings | 0.934 ± 0.007 | 0.884 ± 0.004 |
+| E7 | + neighbour means + DGI embeddings | 0.938 ± 0.007 | 0.855 ± 0.021 |
+| E8 | + neighbour means + best GNN's out-of-fold score | 0.930 ± 0.007 | 0.817 ± 0.016 |
+| E5 | GNN: heterogeneous GraphSAGE | 0.900 ± 0.014 | 0.767 ± 0.007 |
+| E6 | GNN without edges (MLP) | 0.898 ± 0.013 | 0.630 ± 0.020 |
+
+What these do and do not show:
+
+- **Graph features help a little on Amazon with all 25 features, and more on YelpChi.** E1 − B and E2 − B are supported on both: +0.011 and +0.011 on Amazon, +0.033 and +0.046 on YelpChi. Amazon's scores include `f19`, which likely leaks the label: without it B falls to 0.544, and E1 − B is +0.163 ([Limitations](#limitations)).
+- **A GNN beats its edge-free twin on YelpChi only.** E5 − E6 is +0.136 (supported) on YelpChi and +0.002 (not distinguishable) on Amazon. On both, the GNN alone scores below B, significantly on YelpChi.
+- **Combining the methods did not beat neighbour means alone.** E7 − E1 and E8 − E1 are not supported on either dataset. On YelpChi E8 − E1 is significantly worse.
+- **YelpChi's ranking of setups depends on the pilot's tuning.** At default settings the order changes from E2 > E1 > E7 > B > E8 to E8 > E1 > E7 > E2 > B, while E1 − B and E2 − B stay supported. Which part of the tuning does this is not known: a check at up to 100 trials was stopped with no results.
+
+One machine, one base seed, mostly the pilot budget. Differences smaller than the spread across splits should be treated as noise.
+
 ## Graph feature blocks (Models 2 and 5)
 
 The graph reaches df-analyze as extra columns per node, joined next to the own features; df-analyze then treats each node as a table row exactly as in Model 1. Every rung uses the same split, folds, tuning and test scoring; only the input columns differ.
@@ -336,6 +359,18 @@ This writes `outputs/<dataset>/compare/<a>__vs__<b>/compare.html` and `compare_m
 
 The page is a single offline file: inline CSS, inline SVG and a little inline JavaScript, with no external requests. It contains row-level test data, so share it within the group only.
 
+### The results dashboard
+
+One local page with every method, per dataset and across them, the verdicts and their caveats, and a button that classifies a random test node with the best model:
+
+```bash
+uv run scripts/dashboard.py              # then open http://localhost:8555
+uv run scripts/dashboard.py --no-model   # no model worker; enough for a fresh clone
+uv run scripts/dashboard.py --check      # just the sanity checks
+```
+
+The results sections read `results/runs/`, so they work on a fresh clone with no outputs. The classify panel needs the runs' outputs and df-analyze's clone. It is not a stage: it adds no outputs and never makes a bundle rerun. **Setup on another machine, including Windows with WSL, and what the page shows: [`docs/DASHBOARD.md`](docs/DASHBOARD.md).** The server binds `127.0.0.1` only, because the classify panel shows row-level test data; never host it.
+
 ### What to expect (literature)
 
 - **GADBench** ([Tang et al., NeurIPS 2023](https://arxiv.org/abs/2306.12251), tuned models, random splits), Amazon AUPRC:
@@ -439,6 +474,8 @@ fraud-detect-gnn/
 ├── docs/PHASE1_AMAZON_PLAN.md  # phase 1: Amazon Model A end to end, shareable bundle
 ├── docs/PHASE2_GNN_PLAN.md     # phase 2: Models 2 and 5 as df-analyze blocks, comparison page
 ├── docs/PHASE3_FEEDBACK_PLAN.md # phase 3: the professor's feedback (2026-10-21)
+├── docs/GNN_RESULTS.md, RQ_RESULTS.md # results pages (generated)
+├── docs/DASHBOARD.md    # the results dashboard: running it anywhere, what it shows
 ├── results/             # results database: one committed folder per run (results/README.md)
 ├── download_dataset.sh  # runs the download stage for both datasets
 ├── run.py               # runs the pipeline stages in order
@@ -455,13 +492,14 @@ fraud-detect-gnn/
 │   ├── graph/           # self-supervised GNN embeddings (ssl.py; needs the gnn extra)
 │   ├── models/          # df-analyze (Model A), model choice, evaluation, repeats, export, probe
 │   ├── report/          # HTML report (web.py, report.css), comparison page (compare.py)
+│   ├── dashboard/       # results dashboard: setup registry, data layer, sanity checks, server, page
 │   ├── external.py      # runs df-analyze scripts in their own environment
 │   ├── artifacts.py     # packing and unpacking output bundles
 │   ├── runstate.py      # stop/resume, atomic writes
 │   ├── results_db.py    # the results database (scripts/results_db.py is its command line)
 │   └── runlog.py        # seeds and run metadata
-├── scripts/             # NN_<stage>.py: run one stage; compare_report.py, probe_blocks.py, results_db.py
-│   └── dfa/             # run in df-analyze's env: cv_select, export_model, predict
+├── scripts/             # NN_<stage>.py: run one stage; dashboard.py, compare_report.py, probe_blocks.py, results_db.py
+│   └── dfa/             # run in df-analyze's env: cv_select, export_model, predict, serve_model
 ├── tests/
 ├── data/                # local only, git-ignored
 └── outputs/             # local only, git-ignored

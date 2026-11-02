@@ -29,8 +29,10 @@ from synthetic import (
 )
 
 from fraud_detect import columns as C
-from fraud_detect.config import DEFAULT_CONFIG, load_config, with_dataset
-from fraud_detect.models import model_export
+from fraud_detect.cli import main
+from fraud_detect.config import DEFAULT_CONFIG, get_paths, load_config, with_dataset
+from fraud_detect.dashboard.worker import WorkerError
+from fraud_detect.models import model_export, model_serving
 
 
 def sha256(path: Path) -> str:
@@ -202,3 +204,98 @@ def fake_export_outputs(paths) -> None:
         encoding="utf-8",
     )
     (paths.model_dir / meta["model_file"]).write_bytes(b"placeholder model")
+
+
+def finish_fake_run(path: Path, config: dict, feature_set: str, cv: dict) -> None:
+    """Pipeline through df_analyze_input, a faked df-analyze run, then the report
+    stage, for one feature set."""
+    args = ["--config", str(path), "--set", f"feature_set={feature_set}"]
+    assert main([*args, "--to", "df_analyze_input"]) == 0
+    fake_df_analyze_run(get_paths({**config, "feature_set": feature_set}), cv)
+    assert main([*args, "--only", "df_analyze_report"]) == 0
+
+
+def fake_live_inputs(
+    paths, threshold: float | None = None, model: str | None = None
+) -> None:
+    """Write what the dashboard's live model needs for a faked run: an invented
+    prepared test table (a `row` column an invented model reads, see TableModel),
+    df-analyze's label export and model_a.json describing the run's Model A."""
+    summary = json.loads((paths.model_reports_dir / "model_a.json").read_text("utf-8"))
+    a = summary["model_a"]
+    export = (
+        paths.df_analyze_output_dir / FAKE_RUN / "train" / "hash" / "results" / "test00"
+    )
+    test_ids = pd.read_csv(paths.test_ids)
+    n = len(test_ids)
+    frame = pd.DataFrame({"row": np.arange(n, dtype=float), "x": 0.5})
+    frame.to_csv(export / "X_test_00.csv", index=False)
+    pd.Series(test_ids[C.LABEL].to_numpy(), name="target").to_csv(
+        export / "y_test_00.csv"
+    )
+    meta = fake_model_a_metadata()
+    meta.update(
+        feature_set=summary["feature_set"],
+        run=summary["run"],
+        model=model or a["model"],
+        selection=a["selection"],
+        threshold=a["threshold"] if threshold is None else threshold,
+        input_columns=["row", "x"],
+        prepared_columns=["row", "x"],
+    )
+    paths.model_dir.mkdir(parents=True, exist_ok=True)
+    model_export.write_metadata(paths.model_dir / model_export.MODEL_A_META, meta)
+    (paths.model_dir / meta["model_file"]).write_bytes(b"placeholder model")
+
+
+class TableModel:
+    """An invented model: its P(fraud) for a row is `probs[row]`, read from the
+    prepared table's `row` column, plus `offset`."""
+
+    def __init__(self, probs: np.ndarray, offset: float = 0.0) -> None:
+        self.probs = np.asarray(probs, dtype=float)
+        self.offset = offset
+
+    def predict_proba(self, table: pd.DataFrame) -> np.ndarray:
+        rows = table["row"].to_numpy(dtype=int)
+        p = np.clip(self.probs[rows] + self.offset, 0, 1)
+        return np.column_stack([1 - p, p])
+
+
+class FakeWorker:
+    """The ModelWorker interface, in this process, through the real protocol code."""
+
+    def __init__(self, models: dict[str, Any], fail_start: str | None = None) -> None:
+        self.models = models
+        self.fail_start = fail_start
+        self.calls = 0
+        self.closed = False
+
+    def start(self) -> dict[str, Any]:
+        if self.fail_start:
+            raise WorkerError(self.fail_start)
+        return self.request({"op": "info"})
+
+    def request(self, request: dict[str, Any]) -> dict[str, Any]:
+        answer = model_serving.handle_request(request, self.models)
+        if not answer["ok"]:
+            raise WorkerError(answer["error"])
+        return answer
+
+    def predict(
+        self, key: str, columns: list[str], rows: list[list[float]]
+    ) -> list[float]:
+        self.calls += 1
+        return self.request(
+            {"op": "predict", "model": key, "columns": columns, "rows": rows}
+        )["prob"]
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def table_worker(key: str, paths, probs: np.ndarray, offset: float = 0.0) -> FakeWorker:
+    """A FakeWorker holding one TableModel under `key`."""
+    meta = model_export.read_metadata(paths.model_dir / model_export.MODEL_A_META)
+    loaded = model_serving.LoadedModel(key, meta, TableModel(probs, offset))
+    return FakeWorker({key: loaded})

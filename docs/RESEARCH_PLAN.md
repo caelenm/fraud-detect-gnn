@@ -1244,10 +1244,29 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
     - **Partly:** one passes and the other fails. It is reported per contrast.
     - **The combination helps:** E7 − E1 or E8 − E1 gets the verdict "supported". Even then it is a sensitivity result and needs a pre-registered run to count.
   - **Not answered, whatever the outcome:** whether the balanced-accuracy objective or the random internal CV matters on its own. If the trial count does not explain the shortfall, those two remain candidates; they are not shown to be the cause.
+- **2026-11-02 (up to 100 trials on YelpChi: stopped, no results).** The queue started at 19:57:56 UTC at `cf069e7` and was stopped about 18 minutes later, at the user's request: there was no time for the runs. 0 of 18 jobs finished, and the first run was still inside df-analyze, so no score exists.
+  - **What this leaves open:** the reading rule above was never applied. Whether the trial count explains E7's and E8's shortfall on YelpChi is unanswered.
+  - **Clean-up:** the partial folder and the run state moved to `outputs/yelpchi/t100_logs/abandoned/` (local, never committed). The unused `t100_*` feature sets and `scripts/trials_check.py` were removed; they stay in the history at `cf069e7`.
+  - **Results DB:** `20261102T195756Z_yelpchi_726252` (status `failed`).
+- **2026-11-02 (results database: backfill).** At the user's request, 20 earlier Amazon runs (the two phase 1 and #36 full runs, and phase 2's 18 pilots on splits 0–2) and phase 2's verdict table were recorded from their saved outputs and run logs, tagged `backfill`. Nothing was rerun. Before this, Amazon's all-feature B, E1 and E2 had entries on splits 3–4 only, so anything reading the database would have shown B at 0.928 from two splits; over all five it is 0.922. Each backfilled entry was checked against its run's own `model_a.json` and its logged budget. Commit `4a30d11`.
+- **2026-11-02 (results dashboard).** Built from the plan in [`DASHBOARD_PLAN.md`](DASHBOARD_PLAN.md); how to run it is in [`DASHBOARD.md`](DASHBOARD.md). The user's decisions:
+  - **Best model (D1):** the highest mean shared-CV PR-AUC over a setup's splits, at the largest budget that has every setup; never the test score. This gives E7r on Amazon with all 25 features (CV 0.939), which is not a clear winner: five setups are within one SD of it. It gives E1 on Amazon without f19 and E2 on YelpChi.
+  - **Amazon's default view (D2):** all 25 features with a permanent f19 warning, following the 2026-10-31 decision. Without f19 is one click away.
+  - **Sharing (D5):** local only, row-level data never leaves the machine.
+  - **Checks at start-up:** twelve sanity checks recompute results from the database, including every stored verdict from its deltas and p, every per-split delta against the two runs' own scores (356 deltas), and that each run's Model A has the highest shared-CV score in its own results table. All pass.
+  - **Live model:** each served model reproduced df-analyze's saved test probabilities on every test row (3,456, 3,456 and 18,383 rows; largest difference 0). The server repeats this at every start and for every click.
 
 ---
 
 ## 12. Status and next steps
+
+**State (2026-11-02).** The GNN round finished on both datasets (§11, fifth amendment, and [`GNN_RESULTS.md`](GNN_RESULTS.md)), and a default-settings check showed that YelpChi's ranking of setups depends on the pilot's tuning. A check at up to 100 trials was stopped with no results. Results are shown in the [dashboard](DASHBOARD.md). Questions the results leave for the group:
+
+- **Which Amazon variant is the headline:** all 25 features or without f19. The dashboard opens on all 25 with a warning; RQ1 treats f19 as a likely leak.
+- **Which part of the pilot's tuning moves YelpChi's ranking:** the trial count, the balanced-accuracy objective or the random internal CV. None has been separated.
+- **Full-budget runs:** only B has one with all features on Amazon, and YelpChi has none.
+
+The rest of this section is the state as of 2026-10-20, kept for the record.
 
 **State (2026-10-20).** Phase 2 is merged into `main` (PR #37). Models 2 (`nbr`) and 5 (`gnnssl`) are implemented as feature blocks, each also without the four #36 features (`_no36`), with the comparison page, a CV probe and the training-only checks. Results in §11:
 - the full Model A both ways (0.919 vs 0.518);

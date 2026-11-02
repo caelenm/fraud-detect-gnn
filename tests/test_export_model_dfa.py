@@ -26,7 +26,12 @@ from helpers import FAKE_RUN, fake_dataset, fake_df_analyze_run
 from fraud_detect.cli import main
 from fraud_detect.config import REPO_ROOT, get_paths
 from fraud_detect.config import df_analyze_dir as find_df_analyze
-from fraud_detect.external import df_analyze_commit, run_df_analyze_script
+from fraud_detect.dashboard.worker import ModelWorker, WorkerError
+from fraud_detect.external import (
+    df_analyze_command,
+    df_analyze_commit,
+    run_df_analyze_script,
+)
 from fraud_detect.models import model_export as mx
 
 CV = {("dummy", "none"): 0.2, ("lr", "none"): 0.6}  # shared CV makes lr Model A
@@ -134,3 +139,46 @@ def test_model_a_is_exported_verified_and_predicts_without_retraining(exported, 
     done = predict(config, p.model_dir, shuffled, tmp_path / "never.csv")
     assert done.returncode != 0 and "do not match" in done.stderr
     assert not (tmp_path / "never.csv").exists()
+
+
+def test_the_dashboard_worker_reproduces_the_saved_probabilities(exported, tmp_path):
+    """serve_model.py for real, in df-analyze's environment, through the client."""
+    config, p, results_dir = exported
+    dfa = find_df_analyze(config)
+    command, env = df_analyze_command(
+        dfa,
+        str(REPO_ROOT / "scripts" / "dfa" / "serve_model.py"),
+        ["--model", f"fake-all={p.model_dir.resolve()}"],
+        config["df_analyze"]["python"],
+    )
+    env["DF_ANALYZE_DIR"] = str(dfa)
+    worker = ModelWorker(command, env=env, log_path=tmp_path / "worker.log")
+    try:
+        info = worker.start()
+        assert info["models"]["fake-all"]["model"] == "lr"
+        table = pd.read_csv(results_dir / "X_test_00.csv", float_precision="round_trip")
+        prob = worker.predict(
+            "fake-all", list(table.columns), table.to_numpy(dtype=float).tolist()
+        )
+        np.testing.assert_allclose(
+            prob, saved_probs(results_dir, "LRClassifier"), rtol=0, atol=mx.CPU_TOLERANCE
+        )
+        # One row at a time gives the same number: that is what a click does.
+        one = worker.predict(
+            "fake-all",
+            list(table.columns),
+            [table.iloc[0].to_numpy(dtype=float).tolist()],
+        )
+        assert one == [prob[0]]
+        # Library output on stdout must not corrupt the protocol; columns in
+        # another order are refused and the worker keeps running.
+        with pytest.raises(WorkerError, match="do not match"):
+            worker.predict(
+                "fake-all",
+                list(table.columns[::-1]),
+                table[table.columns[::-1]].to_numpy(dtype=float)[:1].tolist(),
+            )
+        assert worker.alive()
+    finally:
+        worker.close()
+    assert not worker.alive()
