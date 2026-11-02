@@ -82,4 +82,15 @@ Best GNN for E8 (pre-registered one-SE rule, training folds of each split):
 | E7 − E1 | -0.040 | -0.014 | +0.007 | -0.016 ± 0.023 | -12% | 0.24 | 0.24 | worse |
 | E8 − E1 | -0.052 | -0.084 | -0.026 | -0.054 ± 0.029 | -42% | 0.0015 | 0.0044 | worse |
 
-_Secondary contrasts: not summarised yet._
+### Secondary contrasts (B − A as written)
+
+| Contrast | Δ 0 | Δ 1 | Δ 2 | Mean ± SD | Headroom | CV p | Verdict |
+|---|---|---|---|---|---|---|---|
+| E5 − B | -0.069 | -0.071 | -0.073 | -0.071 ± 0.002 | -44% | 3.7e-05 | worse |
+| E6 − B | -0.201 | -0.223 | -0.198 | -0.207 ± 0.013 | -128% | 2.4e-13 | worse |
+| E5 − E1 | -0.100 | -0.125 | -0.087 | -0.104 ± 0.019 | -81% | 9.6e-08 | worse |
+| E5g − E5 | -0.002 | +0.002 | +0.001 | +0.000 ± 0.002 | +0% | 0.93 | not distinguishable from zero |
+| E2 − E1 | +0.018 | -0.002 | +0.024 | +0.013 ± 0.014 | +10% | 0.35 | not distinguishable from zero |
+| E7 − E2 | -0.058 | -0.012 | -0.017 | -0.029 ± 0.025 | -25% | 0.011 | worse |
+| E8 − E7 | -0.012 | -0.069 | -0.033 | -0.038 ± 0.029 | -26% | 0.0091 | worse |
+| E8 − E5 | +0.049 | +0.041 | +0.061 | +0.050 ± 0.010 | +22% | 1e-05 | supported |

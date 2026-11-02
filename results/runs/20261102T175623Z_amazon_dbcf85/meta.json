@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "run_id": "20261102T175623Z_amazon_dbcf85",
+  "recorded_utc": "2026-11-02T17:56:25Z",
+  "started_utc": "2026-11-02T17:56:23Z",
+  "finished_utc": "2026-11-02T17:56:24Z",
+  "duration_min": 0.0,
+  "device": "rtx4060-laptop",
+  "device_details": {
+    "os": "Linux",
+    "platform": "Linux-5.10.16.3-microsoft-standard-WSL2-x86_64-with-glibc2.41",
+    "wsl": true,
+    "python": "3.13.15",
+    "cpu": "Intel(R) Core(TM) Ultra 9 185H",
+    "gpus": [
+      {
+        "name": "NVIDIA GeForce RTX 4060 Laptop GPU",
+        "driver": "571.96",
+        "memory": "8188 MiB"
+      }
+    ]
+  },
+  "description": "GNN plan: best shared-CV PR-AUC with tuned and with default settings, per df-analyze setup and split (training folds only; pilot)",
+  "kind": "check",
+  "status": "ok",
+  "dataset": "amazon",
+  "feature_set": null,
+  "split_repeat": null,
+  "seed": null,
+  "git_commit": "a63d6f6dfc1fead8398f97dfb95a5ea7dccb61de",
+  "git_dirty": true,
+  "command": "scripts/tuned_vs_default.py",
+  "tags": [
+    "pilot",
+    "gnn-plan"
+  ],
+  "source": "outputs/amazon/compare/gnn_amazon_tuned_vs_default.csv",
+  "results_rows": 80,
+  "results_columns": [
+    "setup",
+    "feature_set",
+    "split_repeat",
+    "settings",
+    "model",
+    "selection",
+    "n_features",
+    "cv_pr_auc"
+  ]
+}
