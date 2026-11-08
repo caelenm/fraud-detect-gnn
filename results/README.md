@@ -54,7 +54,7 @@ Add `--dry-run` to see the entry without writing it. Times must carry a time zon
 | `started_utc`, `finished_utc`, `duration_min` | wall-clock run time, UTC |
 | `recorded_utc` | when the entry was made |
 | `description` | one line, at most 200 characters |
-| `kind` | `pipeline`, `probe`, `compare`, `check` or `other` |
+| `kind` | `pipeline`, `probe`, `compare`, `check`, `explain` or `other` |
 | `status` | `ok`, `failed` or `partial` (record failed runs too: their time and device are useful) |
 | `dataset`, `feature_set`, `split_repeat`, `seed` | what was run |
 | `settings` | from the run log: classifiers, trials, tuning metric, df-analyze commit, blocks, GNN and neighbour settings |

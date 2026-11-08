@@ -39,7 +39,7 @@ SCHEMA_VERSION = 1
 META = "meta.json"
 RESULTS = "results.csv"
 
-KINDS = ("pipeline", "probe", "compare", "check", "other")
+KINDS = ("pipeline", "probe", "compare", "check", "explain", "other")
 STATUSES = ("ok", "failed", "partial")
 
 # A results table is a summary, not data: no row-level columns and few rows.

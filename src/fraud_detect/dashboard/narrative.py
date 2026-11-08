@@ -143,7 +143,8 @@ def demo_notes() -> list[str]:
         "representative.",
         "“Most unusual features” are the node's highest values against the training "
         "nodes. They describe the node, not the model's reasoning: this is not a SHAP "
-        "or causal explanation.",
+        "or causal explanation. SHAP explanations of the best models are on a separate "
+        "page (scripts/explain_report.py; docs/EXPLAINABILITY_PLAN.md).",
         "Neighbour colours use training labels for this picture only. No model input "
         "uses any neighbour's label.",
     ]

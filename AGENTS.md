@@ -42,6 +42,8 @@ Not run: E1/N1/N2 on splits 3–4.
 - A default-settings check on YelpChi ties E7's and E8's shortfall to the pilot's tuning. The gain from graph features holds at both settings; the order of the setups does not.
 - A pre-registered check at up to 100 trials on YelpChi was stopped on 2026-11-02 with 0 of 18 jobs finished: no results, so the trial count stays untested.
 
+**New on 2026-11-08 (explanations, branch `exp/explain`, [`docs/EXPLAINABILITY_PLAN.md`](docs/EXPLAINABILITY_PLAN.md); tag `explain`):** SHAP on each dataset's best model, its quality tests and neighbour influence (`scripts/dfa/shap_explain.py`, `scripts/explain_report.py`; results in the README). They run outside `STAGES`, so finished runs and bundles do not rerun. SHAP runs in df-analyze's environment with `--with shap`, so df-analyze's lock file is unchanged. Say "exact Shapley values of a stated game" and "necessity-style neighbour influence", never "faithful by construction" or "the important nodes".
+
 **New on 2026-11-02 (results dashboard, [`docs/DASHBOARD.md`](docs/DASHBOARD.md)):** `uv run scripts/dashboard.py` shows every method, per dataset and across them, with live classification of a random test node. 20 earlier Amazon runs were backfilled into the results database (tag `backfill`), so every recorded setup now has its splits there.
 
 **Also recorded on 2026-11-02 (full-budget ladders from a second machine, `rtx4060-desktop`; tags `full`, `backfill`):** B, E1 and E2 at 6 classifiers and 100 trials on splits 0–2, run 2026-10-20 to 2026-10-22: Amazon with all 25 features and without #36 (18 runs) and YelpChi (9 runs), plus both verdict tables. README ("Results (full-budget ladders)") and RESEARCH_PLAN §11.
@@ -223,7 +225,7 @@ Still to do (later branches; tracked as GitHub issues):
 - **Phase 3 (ask before starting; [`docs/PHASE3_FEEDBACK_PLAN.md`](docs/PHASE3_FEEDBACK_PLAN.md)):** the professor's feedback first (embedding size and reduction, untrained-GNN control and GraphSAGE, the 4-feature variant, new datasets); then embedding settings chosen on training CV only; full-budget runs; `split.n_repeats: 3` for every compared rung; YelpChi; ablations.
 - **Models 3 and 4:** GraphSAGE with all edges removed and heterogeneous GraphSAGE over all relations, the same code path, at least 5 seeds, one unit per (model, seed), early stopping on the saved CV folds.
 - **Model 6:** supervised out-of-fold GNN features, only if the group amends invariant 1.
-- **Explain:** SHAP on the tabular models, GNN explanations and relation ablations.
+- **Explain, still open:** SHAP on the best tabular models and neighbour influence are done ([`docs/EXPLAINABILITY_PLAN.md`](docs/EXPLAINABILITY_PLAN.md)). Not done: influence through DGI embeddings, the GNNExplainer cross-check, and full-budget explanations of Amazon's all-features E1 and YelpChi's E2.
 
 ## Open decisions: do not decide these unilaterally
 
