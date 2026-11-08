@@ -7,8 +7,8 @@ This is the plan and method for the explanation work (branch `exp/explain`). Res
 Each dataset's best model, chosen on training CV, never on test (invariant 8). Its exported Model A is explained only if it is a LightGBM or CatBoost model; otherwise the script stops.
 
 - **Amazon, substantive explanation:** E1 without f19 (`m2_own_nbr_no19`, full budget). f19 is a probable label leak (issue #36), so this is the run to read for what the model does.
-- **Amazon, leakage audit:** E1 with every feature. An explanation saying "f19 matters" mostly confirms the leak and says little about fraud behaviour. The full-budget export of this model is on the group's desktop, so the audit here uses `pilot_m2_own_nbr` and says so.
-- **YelpChi:** E2 (`pilot_m5_own_gnnssl`), the best shared CV at the pilot budget, the largest budget with every setup. At the full budget E1 and E2 are not distinguishable (E2 − E1 +0.003 ± 0.030), and the full-budget exports are also on the desktop.
+- **Amazon, leakage audit:** E1 with every feature. An explanation saying "f19 matters" mostly confirms the leak and says little about fraud behaviour. The full-budget export of this model is on a group member's machine, so the audit here uses `pilot_m2_own_nbr` and says so. E7r (`pilot_m7r_own_nbr_gnnrand`) has the highest 5-split mean CV of the all-features setups on this laptop (0.9388 against 0.9371, not a clear winner), so it gets the same methods, apart from neighbour influence.
+- **YelpChi:** E2 (`pilot_m5_own_gnnssl`), the best shared CV at the pilot budget, the largest budget with every setup. At the full budget E1 and E2 are not distinguishable (E2 − E1 +0.003 ± 0.030), and the full-budget exports are also on that machine.
 
 ## What each result means, and does not
 
@@ -21,6 +21,7 @@ Each dataset's best model, chosen on training CV, never on test (invariant 8). I
 | Path-dependent TreeSHAP (`sensitivity`, `interactions`) | A different game, using tree cover statistics. It is what LightGBM's `pred_contrib` gives. Always labelled, never mixed with the main run | "The same Tree SHAP". Disagreement between modes is information. shap provides interaction values only in this mode |
 | Permutation importance | A diagnostic next to SHAP: it tracks loss where mean \|SHAP\| tracks output movement | A validation of SHAP. Explanation methods often disagree (Krishna et al. 2024) |
 | Neighbour influence (`neighbours`) | **Necessity-style influence under mean aggregation**: how a target's score moves when one neighbour leaves one relation, split into a mean part and a degree part | "The important nodes". It misses neighbours that are redundant with each other, its inputs can leave the training data, and totals favour hubs (about 1/degree per target), so it is reported with a normalised view, a redundancy check, a range guard and a structural baseline |
+| Influence through the encoder (`neighbours_encoder`) | **Necessity-style influence, approximate**, for embedding columns: one edge is removed and the target's embedding recomputed exactly, with the encoder and PCA held fixed, on at most 30 sampled neighbours per target | What retraining without that edge would give, or a full ranking of a target's neighbours. No redundancy check, and no split into mean and degree parts |
 
 ## Quality tests
 
@@ -70,11 +71,23 @@ uv run scripts/explain_report.py --dataset amazon --feature-set m2_own_nbr_no19 
   --audit pilot_m2_own_nbr --split-set pilot_m2_own_nbr_no19
 ```
 
+Influence through a DGI encoder needs its weights first. They are not saved by `gnn_embed`, so this retrains them and stops unless they reproduce the saved embeddings and PCA columns:
+
+```bash
+uv run --extra gnn scripts/gnn_encoder_export.py --dataset yelpchi --feature-set pilot_m5_own_gnnssl
+```
+
+```bash
+uv run --directory "$DF_ANALYZE_DIR" --python '>=3.13.11,<3.14' --with shap \
+  python "$PWD/scripts/dfa/shap_explain.py" --dataset yelpchi --feature-set pilot_m5_own_gnnssl \
+  --max-targets 2000 --sections neighbours_encoder cards --force
+```
+
 ## Not done
 
-- **Node-level influence for YelpChi E2.** Its graph columns are DGI embeddings, so influence passes through a 2-layer encoder and a PCA. The encoder weights are not saved. The seeded CPU run should be reproducible, so the planned route is to retrain, assert it reproduces the saved embeddings, and score candidates chosen by a stated proxy, labelled approximate. Node-level influence on YelpChi here uses E1 (`pilot_m2_own_nbr`) instead, whose neighbour columns can be recomputed exactly.
-- **The GNNExplainer cross-check** on the GraphSAGE rung (optional). The trained GNN weights are not saved, so it would need a retrain.
-- **Full-budget explanations** of Amazon's all-features E1 and YelpChi's E2, whose exports are on the group's desktop.
+- **The GNNExplainer cross-check** on the GraphSAGE rung (optional). The trained GNN weights are not saved, so it would need a retrain, and it would explain that rung rather than the models here.
+- **Neighbour influence for E7r.** It has neighbour-mean and random-encoder columns together, and the code recomputes one kind at a time.
+- **Full-budget explanations** of Amazon's all-features E1 and YelpChi's E2, whose exports are on a group member's machine.
 
 ## References
 

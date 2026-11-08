@@ -25,6 +25,8 @@ Sections (--sections picks some):
 - randomisation: refit on permuted labels, inside the training folds.
 - seeds: refit Model A with other seeds; SHAP on a sample of test nodes.
 - neighbours: influence of each neighbour, for models with `nbr` columns.
+- neighbours_encoder: the same through the DGI encoder, for models with `gnnssl`
+  columns. Only when named, after scripts/gnn_encoder_export.py.
 - cards: a few worked test nodes for the group-only page.
 
 Nothing here tunes or selects anything from the test set. Test nodes are only
@@ -737,6 +739,7 @@ def all_node_matrix(
     where = {f.removeprefix(f"{C.OWN_BLOCK}{C.BLOCK_SEPARATOR}"): i
              for i, f in enumerate(own_names)}  # fmt: skip
     out = np.zeros((len(own), len(ctx.infos)))
+    embeddings = None
     for i, c in enumerate(ctx.infos):
         if c.kind == C.OWN_BLOCK:
             values = own[:, where[c.base_feature]]
@@ -754,6 +757,10 @@ def all_node_matrix(
                 out[:, i] = np.divide(
                     sums, degree, out=np.zeros(len(own)), where=degree > 0
                 )
+        elif c.kind == C.GNNSSL_BLOCK:
+            if embeddings is None:
+                embeddings = pd.read_parquet(ctx.paths.block_file(C.GNNSSL_BLOCK))
+            out[:, i] = embeddings[c.block_column].to_numpy(dtype=float)
         else:
             raise X.ExplainError(f"Cannot rebuild column {c.prepared} for every node")
     ids = ctx.test_ids[C.NODE_ID].to_numpy()
@@ -832,6 +839,68 @@ def section_neighbours(ctx: Context) -> dict[str, Any]:
         "n_rows": len(table),
         "n_redundancy_targets": len(rows),
         "n_redundancy_permutations": N_REDUNDANCY_PERMUTATIONS,
+    }
+
+
+def section_neighbours_encoder(ctx: Context) -> dict[str, Any]:
+    """Neighbour influence through the DGI encoder, for models with gnnssl columns.
+    Needs scripts/gnn_encoder_export.py's weights, checked there against the saved
+    embeddings and here against the model's input columns."""
+    path = ctx.out / "encoder_weights.npz"
+    if not path.is_file():
+        raise X.ExplainError(
+            f"{path} is missing: run scripts/gnn_encoder_export.py first."
+        )
+    relations = sorted({c.relation for c in ctx.infos if c.kind == C.GNNSSL_BLOCK})
+    picked = (
+        X.stratified_sample(ctx.y_test, ctx.args.max_targets, ctx.args.seed)
+        if ctx.args.max_targets
+        else np.arange(len(ctx.y_test))
+    )
+    ids = ctx.test_ids[C.NODE_ID].to_numpy()[picked]
+    x = ctx.x_test.to_numpy(dtype=float)[picked]
+    ranges = X.training_ranges(ctx.x_train.to_numpy(dtype=float))
+    margin = margin_function(ctx.model)
+    own, own_names = _own_matrix(ctx)
+    all_relations = [
+        c.relation for c in ctx.infos if c.kind == C.NBR_BLOCK and c.relation
+    ]
+    every = all_node_matrix(
+        ctx, own, own_names, _load_adjacency(ctx, all_relations, len(own))
+    )
+    atomic_write_parquet(
+        ctx.out / "node_scores.parquet",
+        pd.DataFrame(
+            {C.NODE_ID: np.arange(len(own)), "prob": 1 / (1 + np.exp(-margin(every)))}
+        ),
+    )
+    adj = _load_adjacency(ctx, relations, len(own))
+    tables, gaps = [], {}
+    with np.load(path) as saved:
+        own_scaled = saved["own_scaled"].astype(float)
+        for relation in relations:
+            enc = X.EncoderWeights(
+                **{
+                    field: saved[f"{relation}/{field}"].astype(float)
+                    for field in X.EncoderWeights.__dataclass_fields__
+                }
+            )
+            table, gaps[relation] = X.encoder_influence(
+                margin, x, ids, own_scaled, adj[relation], enc, ctx.infos, relation,
+                ranges, ctx.args.max_neighbours, ctx.args.seed,
+            )  # fmt: skip
+            tables.append(table)
+            print(f"  {relation}: {len(table):,} removals", flush=True)
+    atomic_write_parquet(
+        ctx.out / "neighbour_influence.parquet", pd.concat(tables, ignore_index=True)
+    )
+    return {
+        "relations": relations,
+        "n_targets": len(ids),
+        "n_targets_available": len(ctx.y_test),
+        "max_neighbours_per_target": ctx.args.max_neighbours,
+        "pca_column_gap": gaps,
+        "weights": "encoder and PCA held fixed; nothing retrained",
     }
 
 
@@ -958,6 +1027,7 @@ SECTIONS = {
     "randomisation": (section_randomisation, "randomisation.csv"),
     "seeds": (section_seeds, "seed_stability.csv"),
     "neighbours": (section_neighbours, "neighbour_influence.parquet"),
+    "neighbours_encoder": (section_neighbours_encoder, "neighbour_influence.parquet"),
     "cards": (section_cards, "case_cards.json"),
 }
 
@@ -1013,6 +1083,12 @@ def main() -> int:
     parser.add_argument(
         "--max-targets", type=int, default=0, help="neighbours: a sample of test nodes"
     )
+    parser.add_argument(
+        "--max-neighbours",
+        type=int,
+        default=30,
+        help="neighbours_encoder: a seeded sample of each target's neighbours",
+    )
     args = parser.parse_args()
     ctx = load_context(args)
     meta = read_meta(ctx)
@@ -1021,7 +1097,9 @@ def main() -> int:
         f"({ctx.meta['selection']}), {len(ctx.columns)} columns, "
         f"players {list(ctx.players)}"
     )
-    for name in args.sections or SECTIONS:
+    # The encoder section has its own prerequisite, so it runs only when asked for.
+    default = [s for s in SECTIONS if s != "neighbours_encoder"]
+    for name in args.sections or default:
         run, output = SECTIONS[name]
         if (ctx.out / output).is_file() and not args.force:
             print(f"{name}: done earlier, kept")

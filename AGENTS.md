@@ -225,7 +225,7 @@ Still to do (later branches; tracked as GitHub issues):
 - **Phase 3 (ask before starting; [`docs/PHASE3_FEEDBACK_PLAN.md`](docs/PHASE3_FEEDBACK_PLAN.md)):** the professor's feedback first (embedding size and reduction, untrained-GNN control and GraphSAGE, the 4-feature variant, new datasets); then embedding settings chosen on training CV only; full-budget runs; `split.n_repeats: 3` for every compared rung; YelpChi; ablations.
 - **Models 3 and 4:** GraphSAGE with all edges removed and heterogeneous GraphSAGE over all relations, the same code path, at least 5 seeds, one unit per (model, seed), early stopping on the saved CV folds.
 - **Model 6:** supervised out-of-fold GNN features, only if the group amends invariant 1.
-- **Explain, still open:** SHAP on the best tabular models and neighbour influence are done ([`docs/EXPLAINABILITY_PLAN.md`](docs/EXPLAINABILITY_PLAN.md)). Not done: influence through DGI embeddings, the GNNExplainer cross-check, and full-budget explanations of Amazon's all-features E1 and YelpChi's E2.
+- **Explain, still open:** SHAP on the best tabular models and neighbour influence, including through YelpChi E2's DGI encoder, are done ([`docs/EXPLAINABILITY_PLAN.md`](docs/EXPLAINABILITY_PLAN.md)). Not done: the GNNExplainer cross-check, neighbour influence for E7r, and full-budget explanations of Amazon's all-features E1 and YelpChi's E2, which need bundles from the group member's machine (`rtx4060-desktop`).
 
 ## Open decisions: do not decide these unilaterally
 

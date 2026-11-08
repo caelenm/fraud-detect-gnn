@@ -1062,31 +1062,45 @@ def _neighbours(summary: Summary) -> str:
     if "neighbour_relations" not in t:
         return ""
     relations = t["neighbour_relations"]
-    parts = [
-        f"""
-<h2>Which neighbours move a node's score?</h2>
-<p class="prose"><strong>Necessity-style neighbour influence under mean aggregation</strong>: how far one
+    encoder = summary.meta.get("sections", {}).get("neighbours_encoder")
+    if encoder:
+        intro = f"""<strong>Necessity-style neighbour influence through the DGI encoder, approximate</strong>: how far
+one target's score falls when one neighbour is removed from one relation and that relation's embedding columns
+are recomputed, with the encoder and PCA held fixed. Nothing is retrained, so this describes these weights on a
+smaller graph, not a model that never saw the edge. It is not "the important nodes". Each target scores at most
+{int(encoder["max_neighbours_per_target"])} of its neighbours, a seeded random sample, so a node's total counts
+only the removals that were sampled, and a target's most influential neighbour may not be among them."""
+        columns = {
+            "relation": "Relation",
+            "n_targets": "Targets",
+            "n_influences": "Influences",
+            "median_target_degree": "Median degree",
+            "mean_abs_delta_prob": "Mean |Δ prob|",
+            "mean_abs_x_degree": "|Δ prob| × degree",
+            "share_out_of_range": "Outside training range",
+        }
+    else:
+        intro = """<strong>Necessity-style neighbour influence under mean aggregation</strong>: how far one
 target's score falls when one neighbour is removed from one relation and its neighbour columns are recomputed
 as in training. It is not "the important nodes". Two neighbours that carry the same signal each look harmless
 alone, and under a mean a neighbour's weight is about 1/degree, so totals favour hubs. The mean part is who
-the neighbour is; the degree part is how many neighbours there are.</p>
-<div class="panel">{
-            _table(
-                relations,
-                {
-                    "relation": "Relation",
-                    "n_targets": "Targets",
-                    "n_influences": "Influences",
-                    "median_target_degree": "Median degree",
-                    "mean_abs_delta_prob": "Mean |Δ prob|",
-                    "mean_abs_mean_part": "Mean part",
-                    "mean_abs_degree_part": "Degree part",
-                    "mean_abs_x_degree": "|Δ prob| × degree",
-                    "share_out_of_range": "Outside training range",
-                },
-                digits=5,
-            )
-        }</div>
+the neighbour is; the degree part is how many neighbours there are."""
+        columns = {
+            "relation": "Relation",
+            "n_targets": "Targets",
+            "n_influences": "Influences",
+            "median_target_degree": "Median degree",
+            "mean_abs_delta_prob": "Mean |Δ prob|",
+            "mean_abs_mean_part": "Mean part",
+            "mean_abs_degree_part": "Degree part",
+            "mean_abs_x_degree": "|Δ prob| × degree",
+            "share_out_of_range": "Outside training range",
+        }
+    parts = [
+        f"""
+<h2>Which neighbours move a node's score?</h2>
+<p class="prose">{intro}</p>
+<div class="panel">{_table(relations, columns, digits=5)}</div>
 <p class="prose small">"Outside training range" is the share of removals with a recomputed column outside that
 column's training minimum and maximum. A row can pass this and still be an unusual combination.</p>"""
     ]

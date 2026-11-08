@@ -80,6 +80,17 @@ def test_neighbour_tables_split_the_mean_and_degree_parts(tmp_path) -> None:
     assert "neighbour_redundancy_summary" in summary.tables
 
 
+def test_encoder_influence_page_says_what_it_held_fixed(tmp_path) -> None:
+    _, summary = _summary(tmp_path)
+    summary.meta.setdefault("sections", {})["neighbours_encoder"] = {
+        "max_neighbours_per_target": 30
+    }
+    html = report.render_page(summary)
+    assert "through the DGI encoder, approximate" in html
+    assert "encoder and PCA held fixed" in html
+    assert "Mean part" not in html and "under mean aggregation</strong>" not in html
+
+
 def test_missing_outputs_are_reported(tmp_path) -> None:
     try:
         report.read_meta(tmp_path)

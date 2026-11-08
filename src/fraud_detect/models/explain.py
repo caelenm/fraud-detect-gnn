@@ -17,6 +17,9 @@ What is computed here, and what it is not (docs/EXPLAINABILITY_PLAN.md):
   says nothing about neighbours that are redundant with each other (the
   sampled-Shapley check measures that), and removals can give inputs outside
   the training data (the out-of-range flag measures one version of that).
+- Influence through a GNN encoder is the same question for embedding columns: the
+  encoder and PCA stay fixed while one edge is removed, so it describes these
+  weights on a smaller graph, not what retraining without that edge would give.
 
 Nothing here takes a label for a graph computation (AGENTS.md invariant 1):
 labels enter only the summaries, which split test nodes by outcome for reporting.
@@ -589,3 +592,197 @@ def aggregate_influence(
         )
         out["sum_abs_flagged"] = out["sum_abs_flagged"].fillna(0.0)
     return out.sort_values("sum_abs", ascending=False).reset_index(drop=True)
+
+
+# --------------------------------------------------------------------------
+# Neighbour influence through a GNN encoder
+# --------------------------------------------------------------------------
+@dataclass(frozen=True)
+class EncoderWeights:
+    """One relation's 2-layer GCN encoder (graph/ssl.py) and PCA, as arrays. w1 and
+    w2 are torch Linear weights, (out, in); s1 and s2 are the PReLU slopes."""
+
+    w1: np.ndarray
+    b1: np.ndarray
+    s1: np.ndarray
+    w2: np.ndarray
+    b2: np.ndarray
+    s2: np.ndarray
+    pca_components: np.ndarray  # (k, embedding size)
+    pca_mean: np.ndarray
+
+
+def _prelu(h: np.ndarray, slope: np.ndarray) -> np.ndarray:
+    return np.where(h >= 0, h, slope * h)
+
+
+def _gcn_degree(a: sp.csr_matrix) -> np.ndarray:
+    """The degree in A + I, which GCN normalisation uses."""
+    return np.asarray(a.sum(axis=1), dtype=float).ravel() + 1.0
+
+
+def _first_layer(
+    enc: EncoderWeights, x: np.ndarray, a: sp.csr_matrix
+) -> tuple[np.ndarray, np.ndarray]:
+    """W1 x per node, and the first layer's value before its activation."""
+    root = np.sqrt(_gcn_degree(a))
+    a_hat = (
+        sp.diags(1 / root)
+        @ (a + sp.identity(a.shape[0], format="csr"))
+        @ sp.diags(1 / root)
+    )
+    x1 = x @ enc.w1.T
+    return x1, a_hat @ x1 + enc.b1
+
+
+def encoder_forward(enc: EncoderWeights, x: np.ndarray, a: sp.csr_matrix) -> np.ndarray:
+    """Every node's embedding: graph/ssl.py's GCNEncoder in numpy."""
+    root = np.sqrt(_gcn_degree(a))
+    a_hat = (
+        sp.diags(1 / root)
+        @ (a + sp.identity(a.shape[0], format="csr"))
+        @ sp.diags(1 / root)
+    )
+    h = _prelu(a_hat @ (x @ enc.w1.T) + enc.b1, enc.s1)
+    return _prelu(a_hat @ (h @ enc.w2.T) + enc.b2, enc.s2)
+
+
+def embeddings_without_each_neighbour(
+    enc: EncoderWeights,
+    x1: np.ndarray,
+    pre1: np.ndarray,
+    a: sp.csr_matrix,
+    degree: np.ndarray,
+    target: int,
+    candidates: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """The target's embedding, then once per candidate with that edge removed and
+    the encoder's weights held fixed.
+
+    Removing edge (i, j) lowers the GCN degree of i and j, so it also changes the
+    first layer of every neighbour of i (their weights on i, and on j if adjacent),
+    which is why this is not a small update to i alone. Equal to encoder_forward on
+    the reduced graph, at the cost of one neighbourhood rather than the whole graph."""
+    neighbours = a.indices[a.indptr[target] : a.indptr[target + 1]]
+    d_i = degree[target]
+    d_k = degree[neighbours]
+
+    def embed(
+        k: np.ndarray, pre_k: np.ndarray, pre_i: np.ndarray, d: float
+    ) -> np.ndarray:
+        weight = (1 / np.sqrt(d * degree[k]))[:, None]
+        total = ((_prelu(pre_k, enc.s1) @ enc.w2.T) * weight).sum(axis=0)
+        return _prelu(total + (_prelu(pre_i, enc.s1) @ enc.w2.T) / d + enc.b2, enc.s2)
+
+    base = embed(neighbours, pre1[neighbours], pre1[target], d_i)
+    near = a[neighbours][:, candidates].toarray().astype(float)
+    out = np.empty((len(candidates), len(base)))
+    for c, j in enumerate(candidates):
+        keep = neighbours != j
+        k = neighbours[keep]
+        d_new, d_j, d_j_new = d_i - 1, degree[j], degree[j] - 1
+        roots = d_k[keep]
+        change_i = 1 / np.sqrt(roots * d_new) - 1 / np.sqrt(roots * d_i)
+        change_j = near[keep, c] * (
+            1 / np.sqrt(roots * d_j_new) - 1 / np.sqrt(roots * d_j)
+        )
+        pre_k = pre1[k] + change_i[:, None] * x1[target] + change_j[:, None] * x1[j]
+        pre_i = (
+            (x1[k] / np.sqrt(d_new * roots)[:, None]).sum(axis=0)
+            + x1[target] / d_new
+            + enc.b1
+        )
+        out[c] = embed(k, pre_k, pre_i, d_new)
+    return base, out
+
+
+def encoder_layout(
+    infos: Sequence[ColumnInfo], relation: str
+) -> tuple[np.ndarray, np.ndarray]:
+    """Where one relation's kept PCA columns sit in the model's input, and which
+    component each one is. Feature selection may have dropped some."""
+    positions, components = [], []
+    for i, c in enumerate(infos):
+        if c.kind == C.GNNSSL_BLOCK and c.relation == relation:
+            positions.append(i)
+            components.append(int(c.block_column.rsplit("_pc", 1)[1]) - 1)
+    return np.array(positions, dtype=int), np.array(components, dtype=int)
+
+
+def encoder_influence(
+    margin_fn: Margin,
+    x: np.ndarray,
+    target_ids: np.ndarray,
+    own_scaled: np.ndarray,
+    a: sp.csr_matrix,
+    enc: EncoderWeights,
+    infos: Sequence[ColumnInfo],
+    relation: str,
+    ranges: tuple[np.ndarray, np.ndarray],
+    max_neighbours: int,
+    seed: int,
+    tolerance: float = 1e-3,
+) -> tuple[pd.DataFrame, float]:
+    """For each target, how far its score falls when one neighbour is removed from
+    one relation and its PCA columns for that relation are recomputed, with the
+    encoder and PCA held fixed (nothing is retrained). Targets with more than
+    `max_neighbours` neighbours get a seeded random sample of them, so a neighbour's
+    total counts only the removals that were scored. Returns the table and the
+    largest gap between the recomputed PCA columns and the model's own, which stops
+    the run above `tolerance`, so a removal changes nothing but that one neighbour."""
+    positions, components = encoder_layout(infos, relation)
+    if len(positions) == 0:
+        raise ExplainError(f"{relation}: the model has no embedding columns")
+    degree = _gcn_degree(a)
+    x1, pre1 = _first_layer(enc, own_scaled, a)
+    z = encoder_forward(enc, own_scaled, a)[target_ids]
+    pcs = (z - enc.pca_mean) @ enc.pca_components.T
+    gap = float(np.abs(pcs[:, components] - x[:, positions]).max())
+    if gap > tolerance:
+        raise ExplainError(
+            f"{relation}: PCA columns rebuilt from the encoder differ from the model's "
+            f"input by {gap:.3g}, so its rows are not lined up"
+        )
+    rng = np.random.default_rng(seed)
+    rows, targets, neighbours_out, degrees, n_scored = [], [], [], [], []
+    for row, node in enumerate(target_ids):
+        neighbours = a.indices[a.indptr[node] : a.indptr[node + 1]]
+        if len(neighbours) == 0:
+            continue
+        chosen = (
+            np.sort(rng.choice(neighbours, max_neighbours, replace=False))
+            if len(neighbours) > max_neighbours
+            else neighbours
+        )
+        base, without = embeddings_without_each_neighbour(
+            enc, x1, pre1, a, degree, int(node), chosen
+        )
+        changed = np.tile(x[row], (len(chosen), 1))
+        # A difference from the same calculation, so rounding in the saved columns
+        # cannot look like influence.
+        moved = (without - base) @ enc.pca_components.T
+        changed[:, positions] = x[row, positions] + moved[:, components]
+        rows.append(changed)
+        targets.append(np.full(len(chosen), row))
+        neighbours_out.append(chosen)
+        degrees.append(np.full(len(chosen), len(neighbours)))
+        n_scored.append(np.full(len(chosen), len(chosen)))
+    changed = np.vstack(rows)
+    which = np.concatenate(targets)
+    before = margin_fn(x)[which]
+    after = margin_fn(changed)
+    table = pd.DataFrame(
+        {
+            "target": target_ids[which].astype(np.int32),
+            "neighbour": np.concatenate(neighbours_out).astype(np.int32),
+            "relation": relation,
+            "degree": np.concatenate(degrees).astype(np.int32),
+            "n_scored": np.concatenate(n_scored).astype(np.int32),
+            "delta_margin": (before - after).astype(np.float32),
+            "delta_prob": (_sigmoid(before) - _sigmoid(after)).astype(np.float32),
+            # An encoder has no mean and degree parts to separate.
+            "delta_prob_mean": np.full(len(changed), np.nan, dtype=np.float32),
+            "out_of_range": out_of_range(changed, positions, *ranges),
+        }
+    )
+    return table, gap

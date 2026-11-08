@@ -182,6 +182,115 @@ def test_a_removal_matches_the_block_built_on_the_reduced_graph() -> None:
         assert whole[i, deg] == pytest.approx(np.log1p(len(neighbours) - 1))
 
 
+def _toy_encoder(
+    n_in: int = 2, hidden: int = 5, out: int = 4, k: int = 3
+) -> X.EncoderWeights:
+    """Invented weights for the encoder-influence tests."""
+    rng = np.random.default_rng(3)
+    return X.EncoderWeights(
+        w1=rng.normal(size=(hidden, n_in)),
+        b1=rng.normal(size=hidden),
+        s1=rng.uniform(0.1, 0.5, size=hidden),
+        w2=rng.normal(size=(out, hidden)),
+        b2=rng.normal(size=out),
+        s2=rng.uniform(0.1, 0.5, size=out),
+        pca_components=rng.normal(size=(k, out)),
+        pca_mean=rng.normal(size=out),
+    )
+
+
+def _drop_edge(a, i: int, j: int):
+    b = a.tolil(copy=True)
+    b[i, j] = 0
+    b[j, i] = 0
+    out = b.tocsr()
+    out.eliminate_zeros()
+    return out
+
+
+def test_encoder_removal_matches_a_forward_pass_on_the_reduced_graph() -> None:
+    own_table, edges, n, *_ = _model_table()
+    x = own_table.drop(columns=C.NODE_ID).to_numpy(dtype=float)
+    a = adjacency(edges["upu"], n)
+    enc = _toy_encoder()
+    x1, pre1 = X._first_layer(enc, x, a)
+    degree = X._gcn_degree(a)
+    # Includes node 29, whose only neighbour leaves it with no neighbours at all.
+    for target in (0, 1, 2, 29):
+        neighbours = a.indices[a.indptr[target] : a.indptr[target + 1]]
+        base, without = X.embeddings_without_each_neighbour(
+            enc, x1, pre1, a, degree, target, neighbours
+        )
+        np.testing.assert_allclose(base, X.encoder_forward(enc, x, a)[target])
+        for c, j in enumerate(neighbours):
+            expected = X.encoder_forward(enc, x, _drop_edge(a, target, int(j)))[target]
+            np.testing.assert_allclose(without[c], expected)
+
+
+def test_numpy_encoder_matches_the_torch_one() -> None:
+    torch = pytest.importorskip("torch")
+    pytest.importorskip("torch_geometric")
+    from fraud_detect.graph import ssl  # noqa: PLC0415
+
+    own_table, edges, n, *_ = _model_table()
+    x = own_table.drop(columns=C.NODE_ID).to_numpy(dtype=float)
+    torch.manual_seed(0)
+    encoder = ssl.GCNEncoder(x.shape[1], 5, 4, 2).double()
+    state = {k: v.detach().numpy() for k, v in encoder.state_dict().items()}
+    enc = X.EncoderWeights(
+        w1=state["weights.0.weight"],
+        b1=state["biases.0"],
+        s1=state["activations.0.weight"],
+        w2=state["weights.1.weight"],
+        b2=state["biases.1"],
+        s2=state["activations.1.weight"],
+        pca_components=np.eye(4),
+        pca_mean=np.zeros(4),
+    )
+    a_hat = ssl.normalized_adjacency(edges["upu"], n, "cpu").to(torch.float64)
+    with torch.no_grad():
+        want = encoder(torch.as_tensor(x), a_hat).numpy()
+    got = X.encoder_forward(enc, x, adjacency(edges["upu"], n))
+    np.testing.assert_allclose(got, want, atol=1e-6)
+
+
+def _encoder_setting():
+    own_table, edges, n, *_ = _model_table()
+    x = own_table.drop(columns=C.NODE_ID).to_numpy(dtype=float)
+    a = adjacency(edges["upu"], n)
+    enc = _toy_encoder()
+    pcs = (X.encoder_forward(enc, x, a) - enc.pca_mean) @ enc.pca_components.T
+    infos = X.parse_columns(
+        ["g1", "g2", "g3"], {f"g{i + 1}": f"gnnssl__upu_pc0{i + 1}" for i in range(3)}
+    )
+    return x, a, enc, pcs, infos, (pcs.min(axis=0) - 1, pcs.max(axis=0) + 1)
+
+
+def test_encoder_influence_samples_neighbours_and_finds_the_score_change() -> None:
+    x, a, enc, pcs, infos, ranges = _encoder_setting()
+    ids = np.arange(len(x))
+    table, gap = X.encoder_influence(
+        lambda r: r.sum(axis=1), pcs, ids, x, a, enc, infos, "upu", ranges, 2, 0
+    )
+    assert gap < 1e-9
+    assert table.groupby("target").size().max() <= 2
+    row = table.iloc[0]
+    target, j = int(row["target"]), int(row["neighbour"])
+    reduced = X.encoder_forward(enc, x, _drop_edge(a, target, j))[target]
+    after = ((reduced - enc.pca_mean) @ enc.pca_components.T).sum()
+    assert row["delta_margin"] == pytest.approx(pcs[target].sum() - after, rel=1e-5)
+    assert table["delta_prob_mean"].isna().all()
+
+
+def test_encoder_influence_stops_when_the_columns_do_not_line_up() -> None:
+    x, a, enc, pcs, infos, ranges = _encoder_setting()
+    with pytest.raises(X.ExplainError, match="not lined up"):
+        X.encoder_influence(
+            lambda r: r.sum(axis=1), pcs + 1.0, np.arange(len(x)), x, a, enc, infos,
+            "upu", ranges, 2, 0,
+        )  # fmt: skip
+
+
 def test_a_lone_neighbour_leaves_zero_means_as_the_block_does() -> None:
     own_table, edges, n, own, x, _, _, layouts = _model_table()
     a = adjacency(edges["upu"], n)

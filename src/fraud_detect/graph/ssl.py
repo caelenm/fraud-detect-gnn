@@ -201,6 +201,8 @@ class GCNEncoder(torch.nn.Module):
 class RelationResult:
     embedding: np.ndarray  # (n_nodes, out_dim) float32, from the best epoch
     log: dict[str, Any]  # loss curve, best epoch, device, timing, edges used
+    # The best epoch's encoder parameters, for explanations. Not saved by the stage.
+    encoder_state: dict[str, np.ndarray] | None = None
 
 
 def dgi_model(
@@ -281,6 +283,11 @@ def train_dgi(
             "stopped_early": len(losses) < cfg.max_epochs,
             "n_edges_used": int(edges.shape[1]),
             "seconds": round(time.perf_counter() - start, 2),
+        },
+        encoder_state={
+            k.removeprefix("encoder."): v.detach().cpu().numpy()
+            for k, v in best_state.items()
+            if k.startswith("encoder.")
         },
     )
 
