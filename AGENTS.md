@@ -82,7 +82,7 @@ The details are in [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md) §11 (decisi
 - Tuned-embedding results for the graph methods, and full-budget graph results beyond split 0 without `f19`.
 - Which part of the pilot's tuning causes E7's and E8's shortfall on YelpChi (the trial count, the balanced-accuracy objective or the random internal CV).
 
-**Not run yet:** #36 checks (c)–(e) in RESEARCH_PLAN §12, step 0; a variant without only the vote-derived columns; full-budget E7, E8 and GNN-round setups; full-budget no19 runs beyond split 0.
+**Not run yet:** #36 check (e) (V1, the raw reviews; ask first); full-budget E7, E8 and GNN-round setups; full-budget no19 runs beyond split 0. Checks (c) and (d) ran on 2026-10-26 (RESEARCH_PLAN §11): `f19` is the only vote column left, so `no19` is the variant without vote-derived columns.
 
 **Where things are:**
 - **Code:** on `main`; the phase 3 plan and work (branches `claude/awesome-wozniak-wm548a` and `exp/phase3-feedback`) were merged with PR #39 (`f4175e3`). The work since 2026-10-26 (RQ1–RQ3 and the GNN round) reached `main` on 2026-11-02 by fast-forward from `exp/rq-plan`, the branch the WSL clone stays on.
