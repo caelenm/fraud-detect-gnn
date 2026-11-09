@@ -1265,6 +1265,38 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
   - **Two runs of one split:** Amazon B on split 0 (all 25 and without #36) already had full-budget entries from the laptop (0.919 and 0.518). The desktop reran both (0.916 and 0.523; df-analyze's feature selection is not seeded), and the verdict table above used the reruns. With the user's agreement, both are kept: the dashboard now counts the earliest separate df-analyze run of a (dataset, feature set, split) and keeps later ones as replications (in the database and the duplicate check's summary, not in its numbers); the same run recorded twice still fails its duplicate check. Its contrast check accepts a delta that matches any recorded run of each side. The dashboard's best setups are unchanged (all chosen at the pilot budget, which is the only one with every setup).
   - **Results DB:** 27 pipeline entries and two compare entries, tags `full` and `backfill` (and `splits3` for the verdict tables).
 
+- **2026-11-09 (sixth amendment: bigger GNNs, SIGN and GAT; written ~04:30 UTC, before any run of this round).** The user's decisions (2026-11-08/09): add a GAT rung ([`GAT_DEEP_PLAN.md`](GAT_DEEP_PLAN.md)); run the larger rungs of [`BIGGER_GNN_PLAN.md`](BIGGER_GNN_PLAN.md) (a teammate's draft on `exp/bigger-gnn`, which this branch builds on); 3 splits per dataset; on the CPU; in the order below. This answers the professor's feedback of 2026-11-03 ("try adding GAT", "bigger GNN").
+  - **Feature variant:** every feature (Amazon all 25, YelpChi all 32), as in the fifth amendment.
+  - **Splits:** 0–2 on both datasets (`split.n_repeats: 3`, `split.repeat: k`), the same splits and test nodes as E5, E6, E1 and B on those splits (checked: same test sizes). Amazon's E5 round had 5 splits; these contrasts use splits 0–2 only.
+  - **Setups** (`configs/default.yaml`; every rung is scored by `gnn_classify` with the fifth amendment's GNN protocol: out-of-fold predictions on the saved folds, early stopping on a grouped fifth of each fit's nodes, 5 seeds, grid chosen per rung and split by mean fold PR-AUC with seed 0, threshold max F1 on the out-of-fold predictions):
+
+    | ID | Feature set | What | Grid |
+    |---|---|---|---|
+    | E5w | `pilot_g5w_sage_big` | E5's layer, 3 layers, residual, LayerNorm, jumping knowledge | hidden {256, 512} × dropout {0.3, 0.5} × lr {1e-3, 5e-3} |
+    | E10 | `pilot_g10_gat` | GAT: E5 with each relation's mean replaced by 4-head attention (2 layers) | E5's: hidden {64, 128} × dropout {0, 0.3} × lr {1e-3, 5e-3} |
+    | N10 | `pilot_g10n3_gat_rw` | E10 on N2's rewired graph, with E10's setting | – |
+    | E6w | `pilot_g6w_mlp_big` | E5w without edges | as E5w |
+    | E9 | `pilot_g9_sign` | SIGN: x and 1–3-hop means per relation, a branch per input, 3 layers, LayerNorm | as E5w |
+    | N9 | `pilot_g9n3_sign_rw` | E9 on N2's rewired graph, with E9's setting | – |
+
+    BIGGER_GNN_PLAN §3 proposed dropping hidden 512 if one Amazon fit took over 5 minutes. That rule is not applied: the user approved the grid as configured, with the timing in GAT_DEEP_PLAN §4.
+  - **Order (one job at a time, CPU, `rtx4060-desktop`):** Amazon E5w splits 0–2, Amazon E10 0–2, YelpChi E5w 0–2, YelpChi E10 0–2; then Amazon N10, E6w, E9, N9 (0–2 each), then the same on YelpChi. Estimated 75–140 h for the first four blocks (GAT_DEEP_PLAN §4), so the later rungs will not finish before the 2026-11-11 presentation; whatever has finished then is reported descriptively.
+  - **Primary contrasts and expectations** (B − A as written; verdict rule of 2026-10-19 over 3 splits; Holm within each dataset's family):
+
+    | Family | Contrast | Question | Expected |
+    |---|---|---|---|
+    | Amazon, YelpChi (3 splits each) | E5w − E5 | does a bigger GraphSAGE help? | not supported |
+    | | E10 − E5 | does attention beat mean aggregation? | not supported |
+    | | E10 − N10 | does GAT use real structure? | Amazon not supported (E5 − N3 +0.013 there); YelpChi supported |
+    | | best of {E5w, E10} − E1 | does a better GNN reach df-analyze with neighbour means? Best chosen per split by mean CV PR-AUC, never test | not supported (E5 trails E1 by 0.033 on Amazon and 0.104 on YelpChi) |
+
+  - **Secondary** (verdicts reported, no family): E9 − E5, E9 − N9, E5w − E6w, E10 − E5w, E9 − E1, and each new rung − B.
+  - **Scoring:** `scripts/repeat_summary.py` from both sides' saved outputs (the same procedure as the fifth amendment). E5, E6, E1 and B on splits 0–2 ran on `rtx4060-laptop`, so their outputs must be copied here before the contrasts are computed. CPU fits are bit-identical for a seed on one machine; across machines, floating-point results may differ slightly, so a contrast between a laptop rung and a desktop rung mixes two machines (noted with the results).
+  - **What was known when this was written** (GNN_RESULTS.md, pilot, test PR-AUC):
+    - Amazon (5 splits): E5 0.900, E6 0.898, N3 0.887, E1 0.933, B 0.922.
+    - YelpChi (3 splits): E5 0.767, E6 0.630, E1 0.871, B 0.838.
+    - No result of E5w, E6w, E9, N9, E10 or N10 existed. The only fits run were timing fits on split 0 (one outer fold each, to early stopping), whose scores were not looked at.
+
 ---
 
 ## 12. Status and next steps
