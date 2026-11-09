@@ -294,7 +294,10 @@ def test_attention_script_refits_the_rungs_own_fold_model(tmp_path):
         / "attention"
     )
     meta = json.loads((out / "attention_meta.json").read_text("utf-8"))
-    assert meta["check"]["matches"] is True  # the rung's own fold-0 model
+    assert meta["check"]["matches"] is True  # an equivalent fold-0 model
+    assert abs(
+        meta["check"]["refit_fold_pr_auc"] - meta["check"]["saved_fold_pr_auc"]
+    ) <= (script.REFIT_TOLERANCE)
     table = pd.read_csv(out / "attention_summary.csv")
     assert len(table) <= 1000 and {"node_id", "label"}.isdisjoint(table.columns)
     heads = table[table["target_group"].isna()]

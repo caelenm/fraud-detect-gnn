@@ -1,10 +1,12 @@
 """Where a trained GAT (E10) puts its attention: aggregate statistics.
 
-Refits one of E10's own models (the fold model of the first seed, with the
-rung's chosen setting; on the CPU a fit is bit-identical for a seed) and
-reads its attention weights per layer, relation and head. The refit is
-checked against the rung's saved grid: its held-out fold's PR-AUC must equal
-that fold's score in gnn_grid.csv.
+Refits one of E10's models (the fold model of the first seed, with the
+rung's chosen setting and fit seed) and reads its attention weights per
+layer, relation and head. GAT fits are not bit-identical between processes
+(the backward pass of the per-edge score gather uses a parallel scatter-add,
+and CUDA runs differ anyway), so the refit is an equivalent model, not the
+same one: its held-out fold's PR-AUC must be within REFIT_TOLERANCE of that
+fold's score in gnn_grid.csv, and both are reported.
 
     uv run scripts/gat_attention.py --dataset amazon --split 0
 
@@ -70,6 +72,9 @@ from fraud_detect.runstate import (
     atomic_write_text,
 )
 
+# How far the refit's held-out fold PR-AUC may be from the rung's saved one.
+REFIT_TOLERANCE = 0.005
+
 
 def per_target(values: torch.Tensor, dst: torch.Tensor, n: int) -> torch.Tensor:
     """Sum of edge values (E, ...) per target node."""
@@ -131,13 +136,15 @@ def main(argv: list[str] | None = None) -> int:
     if grid_path.is_file():
         grid = pd.read_csv(grid_path).set_index("setting")
         saved = float(grid.loc[setting.key, f"fold{args.fold}_pr_auc"])
-        check.update(saved_fold_pr_auc=saved, matches=bool(abs(saved - fold_ap) < 1e-9))
+        check.update(saved_fold_pr_auc=saved, identical=bool(abs(saved - fold_ap) < 1e-9),
+                     matches=bool(abs(saved - fold_ap) <= REFIT_TOLERANCE))  # fmt: skip
     else:
         check.update(saved_fold_pr_auc=None, matches=None,
                      note="no gnn_grid.csv (setting_from rung); not checked")  # fmt: skip
     if check["matches"] is False:
-        print(f"error: refit fold PR-AUC {fold_ap:.6f} differs from the saved "
-              f"{check['saved_fold_pr_auc']:.6f}", file=sys.stderr)  # fmt: skip
+        saved = check["saved_fold_pr_auc"]
+        msg = f"refit fold PR-AUC {fold_ap:.6f} is more than {REFIT_TOLERANCE} from"
+        print(f"error: {msg} the saved {saved:.6f}", file=sys.stderr)
         return 1
 
     # Training labels only (describing the model, never an input).
