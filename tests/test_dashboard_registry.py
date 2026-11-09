@@ -45,6 +45,10 @@ def test_every_committed_pipeline_entry_maps_to_a_setup():
         ("pilot_m8s_own_gnnsup", "E8s", reg.ALL, None, reg.PILOT, "E8s"),
         ("pilot_g5g_rgcn", "E5g", reg.ALL, None, reg.PILOT, "E5g"),
         ("pilot_g5n3_sage_rw", "N3", reg.ALL, None, reg.PILOT, "N3"),
+        ("pilot_g5w_sage_big", "E5w", reg.ALL, None, reg.PILOT, "E5w"),
+        ("pilot_g6w_mlp_big", "E6w", reg.ALL, None, reg.PILOT, "E6w"),
+        ("pilot_g9_sign", "E9", reg.ALL, None, reg.PILOT, "E9"),
+        ("pilot_g9n3_sign_rw", "N9", reg.ALL, None, reg.PILOT, "N9"),
         ("pilot_n1_own_deg_no19", "N1", reg.NO19, None, reg.PILOT, "N1"),
         ("pilot_m1_own_top4no19", "B", reg.TOP4NO19, None, reg.PILOT, "B"),
         ("pilot_m1_own_only36", "B", reg.ONLY36, None, reg.PILOT, "B"),
@@ -88,8 +92,8 @@ def test_only_the_model_6_setups_carry_a_label_derived_column():
     assert marked == {"E8", "E8s"}
 
 
-def test_only_b_and_the_edge_free_network_use_no_graph():
-    assert {s.setup_id for s in reg.SETUPS if not s.uses_graph} == {"B", "E6"}
+def test_only_b_and_the_edge_free_networks_use_no_graph():
+    assert {s.setup_id for s in reg.SETUPS if not s.uses_graph} == {"B", "E6", "E6w"}
 
 
 def test_variant_labels_name_the_feature_count():

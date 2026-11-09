@@ -94,6 +94,14 @@ SETUPS = (
           gnn_rung=True),
     Setup("g5n3_sage_rw", "N3", NULL_GRAPH, "GNN: GraphSAGE on the rewired graph",
           gnn_rung=True),
+    # Larger GNN rungs (docs/BIGGER_GNN_PLAN.md; a draft, not run yet).
+    Setup("g5w_sage_big", "E5w", GNN, "GNN: larger heterogeneous GraphSAGE",
+          gnn_rung=True),
+    Setup("g6w_mlp_big", "E6w", GNN, "Larger GNN without edges (MLP)",
+          uses_graph=False, gnn_rung=True),
+    Setup("g9_sign", "E9", GNN, "GNN: SIGN (1-3 hops + a large MLP)", gnn_rung=True),
+    Setup("g9n3_sign_rw", "N9", NULL_GRAPH, "GNN: SIGN on the rewired graph",
+          gnn_rung=True),
     Setup("n1_own_deg", "N1", NULL_GRAPH, "+ degree only"),
     Setup("n2_own_nbrrw", "N2", NULL_GRAPH, "+ neighbour means on a rewired graph"),
 )  # fmt: skip

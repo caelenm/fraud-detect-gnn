@@ -95,6 +95,13 @@ def with_dataset(config: dict[str, Any], dataset: str | None) -> dict[str, Any]:
 KEEP_BY_REPEAT = "keep_by_repeat"
 # gnn_models graphs: every relation, N2's rewired graph, or no edges (an MLP).
 GNN_GRAPHS = ("real", "rewired", "none")
+GNN_RUNG_KEYS = {"graph", "norm", "setting_from", "train"}
+# What a rung's own `train:` block may set on top of gnn_classify (the larger
+# rungs, docs/BIGGER_GNN_PLAN.md); graph/supervised.TrainConfig checks values.
+GNN_TRAIN_KEYS = {
+    "layers", "hidden", "dropout", "lr", "weight_decay", "max_epochs", "patience",
+    "model", "residual", "layer_norm", "jk", "hops",
+}  # fmt: skip
 # gnn_embed_sizes value for a GNN block that keeps its raw embedding (no PCA).
 RAW_SIZE = "raw"
 
@@ -158,9 +165,27 @@ def check_feature_sets(config: dict[str, Any]) -> None:
                 f"gnn_models.{name}: graph must be one of {GNN_GRAPHS} and norm "
                 "mean or sym"
             )
+        unknown = sorted(set(spec) - GNN_RUNG_KEYS)
+        if unknown:
+            raise ConfigError(f"gnn_models.{name}: unknown keys {unknown}")
+        train = spec.get("train")
+        if train is not None and (
+            not isinstance(train, dict) or not set(train) <= GNN_TRAIN_KEYS
+        ):
+            raise ConfigError(
+                f"gnn_models.{name}.train: a mapping of gnn_classify settings, from "
+                f"{sorted(GNN_TRAIN_KEYS)}"
+            )
         source = spec.get("setting_from")
         if source is not None and source not in config["gnn_models"]:
             raise ConfigError(f"gnn_models.{name}: setting_from {source!r} is not a rung")
+        if source is not None and (spec.get("train") or {}) != (
+            config["gnn_models"][source].get("train") or {}
+        ):
+            raise ConfigError(
+                f"gnn_models.{name}: setting_from {source!r} needs the same train: "
+                "block (a setting is only meaningful for the same network)"
+            )
     for name, block_names in config["feature_sets"].items():
         for block in block_names:
             kind, _, variant = block.partition("_")

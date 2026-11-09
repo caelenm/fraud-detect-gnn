@@ -17,6 +17,15 @@ messages: U-S-U alone has about 7.1M directed edges); its backward pass uses
 the stored transpose. Layer 1's propagation of the fixed input is computed
 once per graph. The full graph is processed at once (full batch).
 
+Larger rungs (docs/BIGGER_GNN_PLAN.md, a draft): a rung may override these
+settings with its own `train:` block (rung_config). For the GraphSAGE network
+that adds depth, width, residual connections, LayerNorm and a jumping-
+knowledge head (the head reads every layer's output). `model: sign` is SIGN
+(Frasca et al., 2020): x and A_hat_r^k x for k = 1..hops are computed once,
+without labels, and an MLP with one linear branch per input is trained on
+them. The defaults are the 2026-10-31 network exactly, so the rungs already
+run (E5, E5g, E6, N3) are unchanged.
+
 Training, per fit: binary cross-entropy on the fit nodes' labels, weighted by
 negatives/positives; Adam with weight decay; early stopping on the PR-AUC of
 a grouped, stratified fifth of the fit's own nodes (the inner validation),
@@ -47,7 +56,7 @@ from __future__ import annotations
 import time
 import warnings
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from itertools import product
 from typing import Any
 
@@ -62,6 +71,7 @@ from fraud_detect.features.graph import adjacency
 
 NORMS = ("mean", "sym")
 DEVICES = ("cpu", "cuda")
+MODELS = ("sage", "sign")
 
 
 # --------------------------------------------------------------------------
@@ -94,6 +104,13 @@ class TrainConfig:
     inner_folds: int = 5
     seeds: int = 5
     device: str = "cpu"
+    # The architecture (larger rungs, docs/BIGGER_GNN_PLAN.md). The defaults
+    # are the 2026-10-31 network.
+    model: str = "sage"  # sage: RelSAGE layers; sign: SIGN
+    residual: bool = False  # sage: h + layer(h) from the second layer on
+    layer_norm: bool = False  # LayerNorm on each layer's output, before ReLU
+    jk: bool = False  # sage: the head reads every layer's output, concatenated
+    hops: int = 3  # sign: A_hat_r^k x for k = 1..hops, per relation
 
     @classmethod
     def from_config(cls, section: Mapping[str, Any]) -> TrainConfig:
@@ -120,6 +137,15 @@ class TrainConfig:
             raise ValueError(
                 "gnn_classify needs at least one hidden, dropout and lr value"
             )
+        if cfg.model not in MODELS:
+            raise ValueError(f"gnn_classify.model must be one of {MODELS}")
+        flags = (cfg.residual, cfg.layer_norm, cfg.jk)
+        if not all(isinstance(f, bool) for f in flags):
+            raise ValueError("gnn_classify.residual, layer_norm and jk are true or false")
+        if cfg.model == "sign" and (cfg.residual or cfg.jk):
+            raise ValueError("residual and jk apply to the sage model, not sign")
+        if not isinstance(cfg.hops, int) or isinstance(cfg.hops, bool) or cfg.hops < 1:
+            raise ValueError("gnn_classify.hops must be a whole number >= 1")
         return cfg
 
     def grid(self) -> list[Setting]:
@@ -128,6 +154,13 @@ class TrainConfig:
             Setting(int(h), float(d), float(r))
             for h, d, r in product(self.hidden, self.dropout, self.lr)
         ]
+
+
+def rung_config(section: Mapping[str, Any], spec: Mapping[str, Any]) -> TrainConfig:
+    """The TrainConfig of one rung: the gnn_classify section, with the rung's
+    own `train:` block (gnn_models.<rung>.train) on top. A rung without one
+    gets the section as it is."""
+    return TrainConfig.from_config({**section, **(spec.get("train") or {})})
 
 
 def fit_seed(seed: int, outer: int, inner: int | None = None) -> int:
@@ -198,6 +231,23 @@ class GraphInput:
     relations: list[str]
     norm: str
     n_edges: dict[str, int]
+    # SIGN's inputs per number of hops, computed once (hop_features).
+    hop_cache: dict[int, list[torch.Tensor]] = field(default_factory=dict)
+
+
+def hop_features(g: GraphInput, hops: int) -> list[torch.Tensor]:
+    """SIGN's fixed inputs: x, then A_hat_r^k x for k = 1..hops, relation by
+    relation. Label-free (features and edges only, invariant 5); computed
+    once per graph and kept on it. Without relations it is [x]."""
+    if hops not in g.hop_cache:
+        inputs = [g.x]
+        for (a, _), h in zip(g.adjs, g.x_prop, strict=True):
+            inputs.append(h)
+            for _ in range(hops - 1):
+                h = a @ h
+                inputs.append(h)
+        g.hop_cache[hops] = inputs
+    return g.hop_cache[hops]
 
 
 def graph_input(
@@ -254,25 +304,129 @@ class RelSAGE(torch.nn.Module):
 
 class GNNClassifier(torch.nn.Module):
     """`layers` RelSAGE layers, each followed by ReLU and dropout, then a
-    linear head giving one logit per node."""
+    linear head giving one logit per node.
+
+    Options for the larger rungs, all off by default (then this is the
+    2026-10-31 network, parameter for parameter):
+    - layer_norm: LayerNorm on each layer's output, before the ReLU;
+    - residual: from the second layer on, the layer's input is added to its
+      output (the first layer changes the width, so it has none);
+    - jk: the head reads every layer's output, concatenated (jumping
+      knowledge), not only the last one's."""
 
     def __init__(
-        self, in_dim: int, hidden: int, n_relations: int, layers: int, dropout: float
+        self,
+        in_dim: int,
+        hidden: int,
+        n_relations: int,
+        layers: int,
+        dropout: float,
+        residual: bool = False,
+        layer_norm: bool = False,
+        jk: bool = False,
     ) -> None:
         super().__init__()
         dims = [in_dim] + [hidden] * layers
         self.convs = torch.nn.ModuleList(
             RelSAGE(a, b, n_relations) for a, b in zip(dims, dims[1:], strict=False)
         )
-        self.head = torch.nn.Linear(hidden, 1)
+        self.norms = (
+            torch.nn.ModuleList(torch.nn.LayerNorm(hidden) for _ in range(layers))
+            if layer_norm
+            else None
+        )
+        self.head = torch.nn.Linear(hidden * layers if jk else hidden, 1)
         self.dropout = dropout
+        self.residual = residual
+        self.jk = jk
 
     def forward(self, g: GraphInput) -> torch.Tensor:
         h = g.x
+        outputs = []
         for i, conv in enumerate(self.convs):
-            h = conv(h, g.adjs, g.x_prop if i == 0 else None)
-            h = F.dropout(F.relu(h), p=self.dropout, training=self.training)
+            z = conv(h, g.adjs, g.x_prop if i == 0 else None)
+            if self.norms is not None:
+                z = self.norms[i](z)
+            z = F.relu(z)
+            if self.residual and i > 0:
+                z = z + h
+            h = F.dropout(z, p=self.dropout, training=self.training)
+            outputs.append(h)
+        return self.head(torch.cat(outputs, dim=1) if self.jk else h).squeeze(-1)
+
+
+class SIGNClassifier(torch.nn.Module):
+    """SIGN (Frasca et al., 2020, "SIGN: Scalable Inception Graph Neural
+    Networks"): one linear branch (width `hidden`) per precomputed input of
+    hop_features, concatenated, then `layers - 1` hidden layers and a linear
+    head. Each branch and hidden layer: optional LayerNorm, ReLU, dropout.
+    The graph enters only through the fixed, label-free hop features."""
+
+    def __init__(
+        self,
+        in_dim: int,
+        hidden: int,
+        n_relations: int,
+        hops: int,
+        layers: int,
+        dropout: float,
+        layer_norm: bool = False,
+    ) -> None:
+        super().__init__()
+        n_inputs = 1 + n_relations * hops
+        self.hops = hops
+        self.branches = torch.nn.ModuleList(
+            torch.nn.Linear(in_dim, hidden) for _ in range(n_inputs)
+        )
+        dims = [hidden * n_inputs] + [hidden] * (layers - 1)
+        self.mlp = torch.nn.ModuleList(
+            torch.nn.Linear(a, b) for a, b in zip(dims, dims[1:], strict=False)
+        )
+        if layer_norm:
+            self.branch_norms = torch.nn.ModuleList(
+                torch.nn.LayerNorm(hidden) for _ in range(n_inputs)
+            )
+            self.mlp_norms = torch.nn.ModuleList(
+                torch.nn.LayerNorm(hidden) for _ in range(layers - 1)
+            )
+        else:
+            self.branch_norms = self.mlp_norms = None
+        self.head = torch.nn.Linear(dims[-1], 1)
+        self.dropout = dropout
+
+    def _block(self, z: torch.Tensor, norm: torch.nn.Module | None) -> torch.Tensor:
+        if norm is not None:
+            z = norm(z)
+        return F.dropout(F.relu(z), p=self.dropout, training=self.training)
+
+    def forward(self, g: GraphInput) -> torch.Tensor:
+        inputs = hop_features(g, self.hops)
+        h = torch.cat(
+            [
+                self._block(lin(x), None if self.branch_norms is None
+                            else self.branch_norms[i])
+                for i, (lin, x) in enumerate(zip(self.branches, inputs, strict=True))
+            ],
+            dim=1,
+        )  # fmt: skip
+        for i, lin in enumerate(self.mlp):
+            h = self._block(lin(h), None if self.mlp_norms is None else self.mlp_norms[i])
         return self.head(h).squeeze(-1)
+
+
+def build_model(g: GraphInput, setting: Setting, cfg: TrainConfig) -> torch.nn.Module:
+    """The network of one fit, before training (draws its initial weights from
+    torch's global generator: seed it first)."""
+    if cfg.model == "sign":
+        return SIGNClassifier(g.x.shape[1], setting.hidden, len(g.adjs), cfg.hops,
+                              cfg.layers, setting.dropout, cfg.layer_norm)  # fmt: skip
+    return GNNClassifier(g.x.shape[1], setting.hidden, len(g.adjs), cfg.layers,
+                         setting.dropout, residual=cfg.residual,
+                         layer_norm=cfg.layer_norm, jk=cfg.jk)  # fmt: skip
+
+
+def n_parameters(model: torch.nn.Module) -> int:
+    return sum(p.numel() for p in model.parameters())
 
 
 # --------------------------------------------------------------------------
@@ -299,10 +453,10 @@ def fit_predict(
     epoch. No other label is passed in."""
     start = time.perf_counter()
     device = g.x.device
+    if cfg.model == "sign":
+        hop_features(g, cfg.hops)  # computed once per graph, before the seed
     torch.manual_seed(seed)
-    model = GNNClassifier(
-        g.x.shape[1], setting.hidden, len(g.adjs), cfg.layers, setting.dropout
-    ).to(device)
+    model = build_model(g, setting, cfg).to(device)
     optimizer = torch.optim.Adam(
         model.parameters(), lr=setting.lr, weight_decay=cfg.weight_decay
     )
@@ -349,6 +503,7 @@ def fit_predict(
             "diverged": diverged,
             "n_fit": len(fit_nodes),
             "n_val": len(val_nodes),
+            "n_parameters": n_parameters(model),
             "seconds": round(time.perf_counter() - start, 2),
         },
     )

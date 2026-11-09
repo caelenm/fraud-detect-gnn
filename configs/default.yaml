@@ -165,6 +165,11 @@ feature_sets:
   pilot_g5g_rgcn: [own]        # E5g: R-GCN-style (symmetric) normalisation
   pilot_g6_mlp: [own]          # E6: the same network without edges
   pilot_g5n3_sage_rw: [own]    # N3: E5 on N2's rewired graph
+  # Larger GNN rungs (docs/BIGGER_GNN_PLAN.md; a draft, not approved or run).
+  pilot_g5w_sage_big: [own]    # E5w: E5, deeper and wider
+  pilot_g6w_mlp_big: [own]     # E6w: E5w without edges
+  pilot_g9_sign: [own]         # E9: SIGN, 1-3 hops per relation + a large MLP
+  pilot_g9n3_sign_rw: [own]    # N9: E9 on N2's rewired graph
   # E8 (Model 6): + the best GNN's out-of-fold score (gnn_oof stage); E8s
   # without the neighbour means.
   pilot_m8_own_nbr_gnnsup: [own, nbr, gnnsup]
@@ -182,6 +187,37 @@ gnn_models:
   pilot_g5g_rgcn: {graph: real, norm: sym}
   pilot_g6_mlp: {graph: none, norm: mean}
   pilot_g5n3_sage_rw: {graph: rewired, norm: mean, setting_from: pilot_g5_sage}
+  # Larger rungs (the professor's request, 2026-11; docs/BIGGER_GNN_PLAN.md).
+  # A DRAFT: not approved by the group, not pre-registered, not run. `train:`
+  # overrides gnn_classify for that rung only; the rungs above are unchanged.
+  # E5w/E6w: 3 layers, hidden 256-512, residual, LayerNorm, jumping knowledge
+  # (0.55M-3.2M parameters on Amazon, against E5's 23k-79k).
+  pilot_g5w_sage_big:
+    graph: real
+    norm: mean
+    train: &larger_sage
+      layers: 3
+      hidden: [256, 512]
+      dropout: [0.3, 0.5]
+      residual: true
+      layer_norm: true
+      jk: true
+  pilot_g6w_mlp_big: {graph: none, norm: mean, train: *larger_sage}
+  # E9: SIGN. x and A_hat_r^k x (k = 1..3, mean-normalised) are fixed inputs;
+  # 10 branches of width 256-512, then 2 hidden layers (about 3M parameters
+  # at 512). N9: the same on N2's rewired graph, with E9's setting.
+  pilot_g9_sign:
+    graph: real
+    norm: mean
+    train: &sign
+      model: sign
+      hops: 3
+      layers: 3
+      hidden: [256, 512]
+      dropout: [0.3, 0.5]
+      layer_norm: true
+  pilot_g9n3_sign_rw: {graph: rewired, norm: mean, setting_from: pilot_g9_sign,
+                       train: *sign}
 
 gnn_classify:
   # Each layer: root weight + one weight per relation on A_hat h, summed;

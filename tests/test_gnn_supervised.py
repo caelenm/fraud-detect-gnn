@@ -410,3 +410,154 @@ def test_best_gnn_rule(tmp_path, monkeypatch):
     assert pipeline.best_gnn(ctx)["feature_set"] == "pilot_g5g_rgcn"
     folds["pilot_g5g_rgcn"] = [0.6, 0.5, 0.55, 0.52, 0.6]  # +0.004 mean, SE ~0.03
     assert pipeline.best_gnn(ctx)["feature_set"] == "pilot_g5_sage"
+
+
+# --------------------------------------------------------------------------
+# Larger rungs (docs/BIGGER_GNN_PLAN.md): options 1 (a larger GraphSAGE) and
+# 2 (SIGN)
+# --------------------------------------------------------------------------
+def _sage_size(d: int, h: int, r: int, layers: int, norm: bool, jk: bool) -> int:
+    """Parameters of GNNClassifier: per layer a root weight + bias and one
+    weight per relation; LayerNorm 2h per layer; the head."""
+    dims = [d] + [h] * layers
+    convs = sum((r + 1) * a * b + b for a, b in zip(dims, dims[1:], strict=False))
+    return convs + (2 * h * layers if norm else 0) + (h * layers if jk else h) + 1
+
+
+def test_default_network_is_the_2026_10_31_network():
+    x, edges, *_ = toy_problem(n=40)
+    g = sup.graph_input(x, edges, "mean")
+    torch.manual_seed(0)
+    old = sup.GNNClassifier(4, 8, 2, 2, 0.0)
+    torch.manual_seed(0)
+    new = sup.build_model(g, SETTING, CFG)
+    assert old.state_dict().keys() == new.state_dict().keys()
+    assert all(torch.equal(v, new.state_dict()[k]) for k, v in old.state_dict().items())
+    assert not any("norm" in k for k in new.state_dict())
+    assert torch.equal(old.eval()(g), new.eval()(g))
+    assert sup.n_parameters(new) == _sage_size(4, 8, 2, 2, norm=False, jk=False)
+
+
+@pytest.mark.parametrize("residual", [False, True])
+@pytest.mark.parametrize("layer_norm", [False, True])
+@pytest.mark.parametrize("jk", [False, True])
+def test_larger_sage_options_change_only_what_they_say(residual, layer_norm, jk):
+    x, edges, *_ = toy_problem(n=40)
+    g = sup.graph_input(x, edges, "mean")
+    torch.manual_seed(0)
+    model = sup.GNNClassifier(4, 16, 2, 3, 0.0, residual=residual,
+                              layer_norm=layer_norm, jk=jk).eval()  # fmt: skip
+    out = model(g)
+    assert out.shape == (40,) and torch.isfinite(out).all()
+    assert sup.n_parameters(model) == _sage_size(4, 16, 2, 3, layer_norm, jk)
+    # Residual: the same weights without it give another output.
+    if residual:
+        model.residual = False
+        assert not torch.allclose(model(g), out)
+
+
+def test_amazon_sized_parameter_counts_in_the_plan():
+    # docs/BIGGER_GNN_PLAN.md quotes these for 25 features and 3 relations.
+    assert _sage_size(25, 128, 3, 2, norm=False, jk=False) == 78_721  # E5 today
+    assert _sage_size(25, 512, 3, 3, norm=True, jk=True) == 2_154_497  # E5w at 512
+
+
+@pytest.mark.parametrize("norm", sup.NORMS)
+def test_sign_inputs_are_powers_of_each_normalised_adjacency(norm):
+    x, edges, *_ = toy_problem(n=40)
+    g = sup.graph_input(x, edges, norm)
+    inputs = sup.hop_features(g, 3)
+    assert len(inputs) == 1 + 2 * 3
+    expected = [x]
+    for e in edges.values():
+        a = sup.normalised_adjacency(e, 40, norm).toarray()
+        expected += [np.linalg.matrix_power(a, k) @ x for k in (1, 2, 3)]
+    for got, want in zip(inputs, expected, strict=True):
+        assert np.allclose(got.numpy(), want, atol=1e-5)
+    assert sup.hop_features(g, 3) is inputs  # computed once per graph
+    assert len(sup.hop_features(sup.graph_input(x, {}, norm), 3)) == 1  # no edges: [x]
+
+
+def test_sign_size_cross_fit_and_determinism():
+    x, edges, train_nodes, y, folds, groups = toy_problem()
+    cfg = sup.TrainConfig(**{**CFG.__dict__, "model": "sign", "hops": 2, "layers": 3,
+                             "layer_norm": True})  # fmt: skip
+    g = sup.graph_input(x, edges, "mean")
+    model = sup.build_model(g, SETTING, cfg)
+    n_inputs, h = 1 + 2 * 2, 8
+    branches = n_inputs * (4 * h + h) + n_inputs * 2 * h  # linear + LayerNorm
+    mlp = (n_inputs * h * h + h) + (h * h + h) + 2 * 2 * h  # 2 layers + LayerNorm
+    expected = branches + mlp + h + 1  # + the head
+    assert isinstance(model, sup.SIGNClassifier) and sup.n_parameters(model) == expected
+    first = sup.cross_fit(g, train_nodes, y, folds, groups, SETTING, cfg, seed=3)
+    again = sup.cross_fit(g, train_nodes, y, folds, groups, SETTING, cfg, seed=3)
+    assert np.array_equal(first.oof, again.oof) and not np.isnan(first.oof).any()
+    assert all(log["n_parameters"] == expected for log in first.logs)
+    edge_free = sup.cross_fit(sup.graph_input(x, {}, "mean"), train_nodes, y, folds,
+                              groups, SETTING, cfg, seed=3)  # fmt: skip
+    assert not np.allclose(first.oof, edge_free.oof)
+
+
+def test_sign_fold_labels_never_reach_their_own_out_of_fold_scores():
+    x, edges, train_nodes, y, folds, groups = toy_problem()
+    cfg = sup.TrainConfig(**{**CFG.__dict__, "model": "sign", "hops": 2})
+    g = sup.graph_input(x, edges, "mean")
+    first = sup.cross_fit(g, train_nodes, y, folds, groups, SETTING, cfg, seed=2)
+    changed = y.copy()
+    held = folds == 1
+    changed[held] = 1 - changed[held]
+    second = sup.cross_fit(g, train_nodes, changed, folds, groups, SETTING, cfg, seed=2)
+    assert np.array_equal(first.oof[held], second.oof[held])
+
+
+def test_rung_config_puts_the_rung_on_top_and_checks_it():
+    section = {"hidden": [64, 128], "dropout": [0.0, 0.3], "lr": [1e-3], "seeds": 5}
+    plain = sup.rung_config(section, {"graph": "real"})
+    assert plain == sup.TrainConfig.from_config(section)
+    big = sup.rung_config(section, {"train": {"layers": 3, "hidden": [256, 512],
+                                              "residual": True, "jk": True}})  # fmt: skip
+    assert (big.layers, big.hidden, big.seeds) == (3, (256, 512), 5)
+    assert big.dropout == (0.0, 0.3)  # from the section: the rung did not set it
+    assert big.residual and big.jk and not big.layer_norm and big.model == "sage"
+    for bad, match in [
+        ({"model": "gat"}, "model"),
+        ({"model": "sign", "jk": True}, "sage model"),
+        ({"model": "sign", "hops": 0}, "hops"),
+        ({"residual": "yes"}, "true or false"),
+    ]:
+        with pytest.raises(ValueError, match=match):
+            sup.rung_config(section, {"train": bad})
+
+
+LARGER = ("pilot_g5w_sage_big", "pilot_g6w_mlp_big", "pilot_g9_sign",
+          "pilot_g9n3_sign_rw")  # fmt: skip
+# Shrink the larger rungs for a quick test. Through the YAML anchors this also
+# shrinks their twin (E6w) and control (N9): the same network by construction.
+SHRINK = [
+    "--set", "gnn_models.pilot_g5w_sage_big.train.hidden=[8]",
+    "--set", "gnn_models.pilot_g5w_sage_big.train.dropout=[0.0]",
+    "--set", "gnn_models.pilot_g9_sign.train.hidden=[8]",
+    "--set", "gnn_models.pilot_g9_sign.train.dropout=[0.0]",
+]  # fmt: skip
+
+
+def test_larger_rungs_run_end_to_end_and_their_controls_share_the_network(tmp_path):
+    path, config = fake_dataset(tmp_path, n_nodes=300)
+    for fs in LARGER:
+        assert run_rung(path, fs, *SHRINK) == 0, fs
+    read = {}
+    for fs in LARGER:
+        reports = get_paths({**config, "feature_set": fs}).model_reports_dir
+        read[fs] = json.loads((reports / "model_a.json").read_text("utf-8"))
+    big, twin, sign, sign_rw = (read[fs] for fs in LARGER)
+    assert big["model_a"]["model"] == "GraphSAGE, larger"
+    assert twin["model_a"]["model"] == "MLP (GNN without edges), larger"
+    assert sign["model_a"]["model"] == "SIGN"
+    assert sign_rw["model_a"]["model"] == "SIGN (rewired graph)"
+    for key in ("layers", "residual", "layer_norm", "jk", "hidden"):
+        assert big["gnn"]["config"][key] == twin["gnn"]["config"][key]
+    assert big["gnn"]["config"]["layers"] == 3 and big["gnn"]["config"]["jk"] is True
+    assert twin["gnn"]["relations"] == []
+    assert sign["gnn"]["config"]["model"] == "sign" and sign["gnn"]["config"]["hops"] == 3
+    assert sign_rw["gnn"]["setting"] == sign["gnn"]["setting"]
+    assert sign_rw["gnn"]["rewired_graph"].endswith("seed555")

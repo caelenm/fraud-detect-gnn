@@ -775,8 +775,21 @@ GNN_MODEL_LABELS = {
 }
 
 
+SIGN_LABELS = {
+    "real": "SIGN",
+    "rewired": "SIGN (rewired graph)",
+    "none": "MLP (SIGN without edges)",
+}
+
+
 def gnn_model_label(spec: dict[str, Any]) -> str:
-    return GNN_MODEL_LABELS[(spec["graph"], spec.get("norm", "mean"))]
+    """The model's name in reports. A rung with its own `train:` block
+    (docs/BIGGER_GNN_PLAN.md) is marked "larger", or named SIGN."""
+    train = spec.get("train") or {}
+    if train.get("model", "sage") == "sign":
+        return SIGN_LABELS[spec["graph"]]
+    label = GNN_MODEL_LABELS[(spec["graph"], spec.get("norm", "mean"))]
+    return f"{label}, larger" if train else label
 
 
 def _import_supervised() -> Any:
@@ -790,9 +803,10 @@ def _import_supervised() -> Any:
     return supervised
 
 
-def _train_config(ctx: Context, sup: Any) -> Any:
+def _train_config(ctx: Context, sup: Any, spec: dict[str, Any]) -> Any:
+    """gnn_classify's settings, with the rung's own `train:` block on top."""
     try:
-        return sup.TrainConfig.from_config(ctx.config["gnn_classify"])
+        return sup.rung_config(ctx.config["gnn_classify"], spec)
     except (TypeError, ValueError) as e:
         raise StageError(f"gnn_classify settings: {e}") from e
 
@@ -927,11 +941,11 @@ def run_gnn_oof(ctx: Context) -> None:
     if names != [C.GNNSUP_BLOCK]:
         raise StageError(f"Only the plain {C.GNNSUP_BLOCK} block is defined, not {names}")
     sup = _import_supervised()
-    p, cfg = ctx.paths, _train_config(ctx, sup)
     choice = best_gnn(ctx)
+    spec = choice["spec"]
+    p, cfg = ctx.paths, _train_config(ctx, sup, spec)
     setting = sup.Setting(**choice["setting"])
     data = gnn_data(ctx, choice["own_block"])
-    spec = choice["spec"]
     g = sup.graph_input(data.x, gnn_edges(ctx, spec["graph"], len(data.x)),
                         spec.get("norm", "mean"), cfg.device)  # fmt: skip
     print(
@@ -1783,13 +1797,15 @@ def run_gnn_classify(ctx: Context) -> None:
               "is nothing to do here.")  # fmt: skip
         return
     sup = _import_supervised()
-    cfg = _train_config(ctx, sup)
+    cfg = _train_config(ctx, sup, spec)
     data = gnn_data(ctx, feature_set_blocks(ctx)[0])
     g = sup.graph_input(data.x, gnn_edges(ctx, spec["graph"], len(data.x)),
                         spec.get("norm", "mean"), cfg.device)  # fmt: skip
     label = gnn_model_label(spec)
+    shape = f"{cfg.hops} hops, " if cfg.model == "sign" else ""
     print(
-        f"{fs}: {label}, {cfg.layers} layers, relations {g.relations or 'none'} "
+        f"{fs}: {label}, {shape}{cfg.layers} layers, hidden {list(cfg.hidden)}, "
+        f"relations {g.relations or 'none'} "
         f"({spec['graph']} graph, {spec.get('norm', 'mean')} normalisation), "
         f"{len(data.own_columns)} own features, {len(data.x):,} nodes; cross-fit on "
         f"{len(np.unique(data.folds))} saved folds on {cfg.device}",
