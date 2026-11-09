@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 
 import numpy as np
+import pandas as pd
 import pytest
 from helpers import fake_dataset
 from synthetic import fake_edges
@@ -234,3 +235,73 @@ def test_gat_and_rewired_gat_rungs_run_end_to_end(tmp_path):
     assert rw["model_a"]["model"] == "GAT (rewired graph)"
     assert rw["gnn"]["setting"] == gat["gnn"]["setting"]
     assert rw["gnn"]["rewired_graph"].endswith("seed555")
+
+
+# --------------------------------------------------------------------------
+# Attention read-out (scripts/gat_attention.py)
+# --------------------------------------------------------------------------
+def test_keep_model_changes_nothing_and_returns_the_best_epoch_network():
+    x, edges, train_nodes, y, folds, groups = toy_problem()
+    g = sup.graph_input(x, edges, "mean", model="gat")
+    plain = sup._fit_rows(g, train_nodes, y, groups, SETTING, GAT_CFG, seed=5)
+    kept = sup._fit_rows(g, train_nodes, y, groups, SETTING, GAT_CFG, seed=5,
+                         keep_model=True)  # fmt: skip
+    assert plain.model is None and np.array_equal(plain.logits, kept.logits)
+    with torch.no_grad():
+        again = kept.model(g).numpy()
+    assert np.allclose(again, kept.logits, atol=1e-6)
+
+
+def test_gat_attention_reproduces_the_model_and_weights_sum_to_one():
+    x, edges, train_nodes, y, folds, groups = toy_problem()
+    g = sup.graph_input(x, edges, "mean", model="gat")
+    cfg = sup.TrainConfig(hidden=(8,), layers=3, model="gat", heads=2, residual=True,
+                          layer_norm=True, jk=True, max_epochs=5, patience=3,
+                          inner_folds=3)  # fmt: skip
+    res = sup._fit_rows(g, train_nodes, y, groups, SETTING, cfg, seed=1, keep_model=True)
+    layers, logits = sup.gat_attention(res.model, g)
+    assert len(layers) == 3 and np.allclose(logits.numpy(), res.logits, atol=1e-5)
+    for layer in layers:
+        for rel_edges, alpha in zip(g.edge_index, layer.alpha, strict=True):
+            sums = torch.zeros(len(x), 2).index_add(0, rel_edges.dst, alpha)
+            has = torch.diff(rel_edges.indptr) > 0
+            assert torch.allclose(sums[has], torch.ones(int(has.sum()), 2), atol=1e-5)
+        assert all(nrm.shape == (len(x),) for nrm in layer.relation_norm)
+    sage = sup.graph_input(x, edges, "mean")
+    model = sup.build_model(sage, SETTING, sup.TrainConfig(hidden=(8,)))
+    with pytest.raises(ValueError, match="GAT network"):
+        sup.gat_attention(model, sage)
+
+
+def test_attention_script_refits_the_rungs_own_fold_model(tmp_path):
+    import importlib.util  # noqa: PLC0415
+
+    from fraud_detect.config import REPO_ROOT  # noqa: PLC0415
+
+    path, config = fake_dataset(tmp_path, n_nodes=300)
+    assert run_rung(path, "pilot_g10_gat") == 0
+    spec = importlib.util.spec_from_file_location(
+        "gat_attention", REPO_ROOT / "scripts" / "gat_attention.py"
+    )
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    overrides = [a for pair in zip(SMALL[::2], SMALL[1::2], strict=True)
+                 for a in ("--set", pair[1])]  # fmt: skip
+    assert script.main(["--dataset", "fake", "--config", str(path), "--n-repeats", "1",
+                        *overrides]) == 0  # fmt: skip
+    out = (
+        get_paths({**config, "feature_set": "pilot_g10_gat"}).feature_set_dir
+        / "attention"
+    )
+    meta = json.loads((out / "attention_meta.json").read_text("utf-8"))
+    assert meta["check"]["matches"] is True  # the rung's own fold-0 model
+    table = pd.read_csv(out / "attention_summary.csv")
+    assert len(table) <= 1000 and {"node_id", "label"}.isdisjoint(table.columns)
+    heads = table[table["target_group"].isna()]
+    # A relation without a node of degree >= 2 has no focus rows (the fake
+    # graph's aaa); every relation has its relation-weight rows.
+    assert set(heads["relation"]) <= {"aaa", "bbb"} and set(heads["layer"]) == {1, 2}
+    weights = table[table["target_group"].notna()]
+    assert set(weights["relation"]) == {"aaa", "bbb"}
+    assert (weights["relation_to_root"] >= 0).all()
+    assert ((heads["entropy_ratio"] > 0) & (heads["entropy_ratio"] <= 1 + 1e-9)).all()

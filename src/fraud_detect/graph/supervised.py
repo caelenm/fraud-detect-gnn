@@ -630,6 +630,56 @@ class SIGNClassifier(torch.nn.Module):
         return self.head(h).squeeze(-1)
 
 
+@dataclass
+class LayerAttention:
+    """One GAT layer's attention, read from a trained network (eval mode)."""
+
+    alpha: list[torch.Tensor]  # per relation: (E, heads), in RelationEdges order
+    root_norm: torch.Tensor  # (N,) ||W_root h + b|| per node
+    relation_norm: list[torch.Tensor]  # per relation: (N,) ||GAT_r(h)|| per node
+
+
+@torch.no_grad()
+def gat_attention(
+    model: GNNClassifier, g: GraphInput
+) -> tuple[list[LayerAttention], torch.Tensor]:
+    """Every layer's attention weights and the size of each relation's term
+    against the root term, from the same computation as model(g) in eval
+    mode; also returns the logits, which equal model(g)."""
+    if model.conv != "gat":
+        raise ValueError("gat_attention needs a GAT network")
+    from torch_geometric.utils import softmax  # noqa: PLC0415
+
+    was_training = model.training
+    model.eval()
+    layers, outputs, h = [], [], g.x
+    for i, conv in enumerate(model.convs):
+        n = h.shape[0]
+        root = conv.root(h)
+        z, alphas, norms = root, [], []
+        for j, edges in enumerate(g.edge_index):
+            v = conv.rel[j](h).view(n, conv.heads, conv.channels)
+            score_src = (v * conv.att_src[j]).sum(-1)
+            score_dst = (v * conv.att_dst[j]).sum(-1)
+            e = F.leaky_relu(score_src[edges.src] + score_dst[edges.dst], 0.2)
+            alpha = softmax(e, edges.dst, num_nodes=n)
+            term = attention_aggregate(alpha, v, edges).reshape(n, -1)
+            alphas.append(alpha)
+            norms.append(term.norm(dim=1))
+            z = z + term
+        layers.append(LayerAttention(alphas, root.norm(dim=1), norms))
+        if model.norms is not None:
+            z = model.norms[i](z)
+        z = F.relu(z)
+        if model.residual and i > 0:
+            z = z + h
+        h = z
+        outputs.append(h)
+    logits = model.head(torch.cat(outputs, dim=1) if model.jk else h).squeeze(-1)
+    model.train(was_training)
+    return layers, logits
+
+
 def build_model(g: GraphInput, setting: Setting, cfg: TrainConfig) -> torch.nn.Module:
     """The network of one fit, before training (draws its initial weights from
     torch's global generator: seed it first)."""
@@ -659,6 +709,9 @@ def n_parameters(model: torch.nn.Module) -> int:
 class FitResult:
     logits: np.ndarray  # every node, from the epoch with the best validation PR-AUC
     log: dict[str, Any]
+    # The trained network at its best epoch, only with keep_model (for
+    # analysis such as GAT attention; the stages never keep it).
+    model: torch.nn.Module | None = None
 
 
 def fit_predict(
@@ -670,10 +723,12 @@ def fit_predict(
     setting: Setting,
     cfg: TrainConfig,
     seed: int,
+    keep_model: bool = False,
 ) -> FitResult:
     """Train on `fit_nodes` (labels `fit_y`), stop early on the PR-AUC of
     `val_nodes` (labels `val_y`), and return every node's logit from the best
-    epoch. No other label is passed in."""
+    epoch. No other label is passed in. With keep_model, also the network
+    with its best epoch's weights (this changes nothing else)."""
     start = time.perf_counter()
     device = g.x.device
     if cfg.model == "sign":
@@ -711,13 +766,21 @@ def fit_predict(
         if ap > best_ap:
             best_ap, best_epoch, waited = ap, epoch, 0
             best_logits = out.cpu().numpy().astype(np.float64)
+            if keep_model:
+                best_state = {
+                    k: v.detach().clone() for k, v in model.state_dict().items()
+                }
         else:
             waited += 1
             if waited >= cfg.patience:
                 break
     if best_logits is None:
         raise RuntimeError(f"GNN fit diverged in its first epoch ({setting.key})")
+    if keep_model:
+        model.load_state_dict(best_state)
+        model.eval()
     return FitResult(
+        model=model if keep_model else None,
         logits=best_logits,
         log={
             "epochs_run": epochs,
@@ -744,12 +807,14 @@ def _fit_rows(
     setting: Setting,
     cfg: TrainConfig,
     seed: int,
+    keep_model: bool = False,
 ) -> FitResult:
     """One fit on the labelled `nodes`: a grouped, stratified 1/inner_folds of
     them is the inner validation, the rest the fit nodes."""
     val = grouped_folds(np.asarray(y, dtype=int), np.asarray(groups), cfg.inner_folds,
                         seed) == 0  # fmt: skip
-    return fit_predict(g, nodes[~val], y[~val], nodes[val], y[val], setting, cfg, seed)
+    return fit_predict(g, nodes[~val], y[~val], nodes[val], y[val], setting, cfg, seed,
+                       keep_model=keep_model)  # fmt: skip
 
 
 # --------------------------------------------------------------------------
