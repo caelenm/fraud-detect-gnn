@@ -44,6 +44,11 @@ Not run: E1/N1/N2 on splits 3–4.
 
 **New on 2026-11-08 (explanations, branch `exp/explain`, [`docs/EXPLAINABILITY_PLAN.md`](docs/EXPLAINABILITY_PLAN.md); tag `explain`):** SHAP on each dataset's best model, its quality tests and neighbour influence (`scripts/dfa/shap_explain.py`, `scripts/explain_report.py`; results in the README). They run outside `STAGES`, so finished runs and bundles do not rerun. SHAP runs in df-analyze's environment with `--with shap`, so df-analyze's lock file is unchanged. Say "exact Shapley values of a stated game" and "necessity-style neighbour influence", never "faithful by construction" or "the important nodes".
 
+**Also on 2026-11-08 (full-budget explanations, tags `explain`, `full`):** Amazon's all-features E1 and YelpChi's E2 and E1, from `rtx4060-desktop`'s bundles (README and [`docs/EXPLAINABILITY_PLAN.md`](docs/EXPLAINABILITY_PLAN.md)).
+- Those bundles were extracted selectively: never run `unpack_artifacts --force` here, because this clone's pilot models depend on its own `gnnssl` block. That machine's YelpChi embedding files are in `outputs/yelpchi/desktop_gnn_embed/`.
+- DGI embeddings differ between the two machines despite the same config, versions and CPU device (cause not established), so "bit-identical on the CPU" holds on one machine only.
+- `--path-dependent` also covers the randomisation section. Do not raise the implementation check's 1% limit.
+
 **New on 2026-11-02 (results dashboard, [`docs/DASHBOARD.md`](docs/DASHBOARD.md)):** `uv run scripts/dashboard.py` shows every method, per dataset and across them, with live classification of a random test node. 20 earlier Amazon runs were backfilled into the results database (tag `backfill`), so every recorded setup now has its splits there.
 
 **Also recorded on 2026-11-02 (full-budget ladders from a second machine, `rtx4060-desktop`; tags `full`, `backfill`):** B, E1 and E2 at 6 classifiers and 100 trials on splits 0–2, run 2026-10-20 to 2026-10-22: Amazon with all 25 features and without #36 (18 runs) and YelpChi (9 runs), plus both verdict tables. README ("Results (full-budget ladders)") and RESEARCH_PLAN §11.
@@ -225,7 +230,7 @@ Still to do (later branches; tracked as GitHub issues):
 - **Phase 3 (ask before starting; [`docs/PHASE3_FEEDBACK_PLAN.md`](docs/PHASE3_FEEDBACK_PLAN.md)):** the professor's feedback first (embedding size and reduction, untrained-GNN control and GraphSAGE, the 4-feature variant, new datasets); then embedding settings chosen on training CV only; full-budget runs; `split.n_repeats: 3` for every compared rung; YelpChi; ablations.
 - **Models 3 and 4:** GraphSAGE with all edges removed and heterogeneous GraphSAGE over all relations, the same code path, at least 5 seeds, one unit per (model, seed), early stopping on the saved CV folds.
 - **Model 6:** supervised out-of-fold GNN features, only if the group amends invariant 1.
-- **Explain, still open:** SHAP on the best tabular models and neighbour influence, including through YelpChi E2's DGI encoder, are done ([`docs/EXPLAINABILITY_PLAN.md`](docs/EXPLAINABILITY_PLAN.md)). Not done: the GNNExplainer cross-check, neighbour influence for E7r, and full-budget explanations of Amazon's all-features E1 and YelpChi's E2, which need bundles from the group member's machine (`rtx4060-desktop`).
+- **Explain, still open:** SHAP on the best tabular models and neighbour influence, including through YelpChi E2's DGI encoder, are done ([`docs/EXPLAINABILITY_PLAN.md`](docs/EXPLAINABILITY_PLAN.md)). So are the full-budget models from the group member's machine (`rtx4060-desktop`). Not done: the GNNExplainer cross-check, neighbour influence for E7r, and influence through the encoder for full-budget E2, which would have to run on that machine.
 
 ## Open decisions: do not decide these unilaterally
 

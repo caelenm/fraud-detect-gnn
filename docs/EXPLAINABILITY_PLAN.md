@@ -87,7 +87,15 @@ uv run --directory "$DF_ANALYZE_DIR" --python '>=3.13.11,<3.14' --with shap \
 
 - **The GNNExplainer cross-check** on the GraphSAGE rung (optional). The trained GNN weights are not saved, so it would need a retrain, and it would explain that rung rather than the models here.
 - **Neighbour influence for E7r.** It has neighbour-mean and random-encoder columns together, and the code recomputes one kind at a time.
-- **Full-budget explanations** of Amazon's all-features E1 and YelpChi's E2, whose exports are on a group member's machine.
+- **Influence through the encoder for full-budget YelpChi E2.** That model came from a group member's machine, and its DGI embeddings differ from this machine's, so `scripts/gnn_encoder_export.py` stops here. It would have to run on the machine that trained the model.
+
+## Full-budget models from a group member's bundles (2026-11-08)
+
+Amazon's all-features E1 and YelpChi's E2 (splits 0–2) and E1 were explained from `rtx4060-desktop`'s bundles. Results are in the README.
+
+- **Extraction.** Only the folders needed were brought in, with no overwrites, and never with `unpack_artifacts --force`, because this clone's pilot models depend on its own `gnnssl` block. That machine's YelpChi `gnn_embed` and `gnnssl` files are in `outputs/yelpchi/desktop_gnn_embed/`, which no pipeline path reads.
+- **Modes.** E2 is interventional, except that its randomisation section is path-dependent for all four models. E1 is path-dependent. All of this is recorded in `explain_meta.json` and stated on the pages. In both failures every failing row was near a split threshold, and the 1% limit was not changed.
+- **Stop-and-resume fix.** A section now counts as finished only if its file exists and the metadata records it, and kept SHAP values in the other mode stop the run. Before this, a failed check on the training sample left a test file that a path-dependent rerun kept. That file was replaced before anything used it.
 
 ## References
 

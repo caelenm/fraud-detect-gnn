@@ -1078,9 +1078,9 @@ def main() -> int:
     parser.add_argument(
         "--path-dependent",
         action="store_true",
-        help="shap and randomisation sections: path-dependent TreeSHAP, a different game, "
-        "where interventional TreeSHAP fails the implementation check. Recorded in the "
-        "outputs",
+        help="shap and randomisation sections: path-dependent TreeSHAP, a different "
+        "game, where interventional TreeSHAP fails the implementation check. Recorded "
+        "in the outputs",
     )
     parser.add_argument("--seed", type=int, default=555)
     parser.add_argument("--n-jobs", type=int, default=16, help="processes for SHAP")
@@ -1108,7 +1108,8 @@ def main() -> int:
     default = [s for s in SECTIONS if s != "neighbours_encoder"]
     for name in args.sections or default:
         run, output = SECTIONS[name]
-        if X.section_finished(ctx.out / output, name, meta["sections"]) and not args.force:
+        finished = X.section_finished(ctx.out / output, name, meta["sections"])
+        if finished and not args.force:
             if name == "shap":
                 X.check_kept_mode(
                     meta["sections"]["shap"]["feature_perturbation"],
