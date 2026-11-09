@@ -170,6 +170,9 @@ feature_sets:
   pilot_g6w_mlp_big: [own]     # E6w: E5w without edges
   pilot_g9_sign: [own]         # E9: SIGN, 1-3 hops per relation + a large MLP
   pilot_g9n3_sign_rw: [own]    # N9: E9 on N2's rewired graph
+  # GAT (docs/GAT_DEEP_PLAN.md; approved 2026-11-08, not run yet).
+  pilot_g10_gat: [own]         # E10: GAT, attention per relation
+  pilot_g10n3_gat_rw: [own]    # N10: E10 on N2's rewired graph
   # E8 (Model 6): + the best GNN's out-of-fold score (gnn_oof stage); E8s
   # without the neighbour means.
   pilot_m8_own_nbr_gnnsup: [own, nbr, gnnsup]
@@ -218,6 +221,18 @@ gnn_models:
       layer_norm: true
   pilot_g9n3_sign_rw: {graph: rewired, norm: mean, setting_from: pilot_g9_sign,
                        train: *sign}
+  # E10: GAT (docs/GAT_DEEP_PLAN.md; the user approved it on 2026-11-08; not
+  # run). E5's size, grid and depth; each relation's fixed mean A_hat is
+  # replaced by 4-head attention over its edges (norm unused). N10: the same
+  # on N2's rewired graph, with E10's setting. Not gnn_oof candidates.
+  pilot_g10_gat:
+    graph: real
+    norm: mean
+    train: &gat
+      model: gat
+      heads: 4
+  pilot_g10n3_gat_rw: {graph: rewired, norm: mean, setting_from: pilot_g10_gat,
+                       train: *gat}
 
 gnn_classify:
   # Each layer: root weight + one weight per relation on A_hat h, summed;

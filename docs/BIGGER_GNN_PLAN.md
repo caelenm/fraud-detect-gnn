@@ -19,7 +19,7 @@ A rung can now carry its own `train:` block in `gnn_models`. It overrides `gnn_c
 
 **Why these two.** Option 1 changes only the size of the model we already have, so E5w − E5 isolates size. Option 2 follows our own finding that the graph's benefit comes from propagating features along edges (untrained encoders and 1-hop means do as well as trained ones): SIGN propagates up to 3 hops without labels, as E1 does for 1 hop, and puts a large trained network on top. Its graph inputs are computed once, so a large model costs little more than an MLP.
 
-**Not built.** HGT (declined 2026-10-31: per-edge attention does not fit full-batch on U-S-U or R-S-R in 8 GB, and our graphs have one node type), attention models in general (the same memory limit), and a larger DGI encoder (the size sweep found 8 per relation enough and DGI training adds nothing measurable).
+**Not built.** HGT (declined 2026-10-31: per-edge attention does not fit full-batch on U-S-U or R-S-R in 8 GB, and our graphs have one node type), attention models here (GAT is a separate rung, E10, in [`GAT_DEEP_PLAN.md`](GAT_DEEP_PLAN.md): computed with sparse products, it fits in 3.4 GB of RAM), and a larger DGI encoder (the size sweep found 8 per relation enough and DGI training adds nothing measurable).
 
 ## 2. Sizes
 

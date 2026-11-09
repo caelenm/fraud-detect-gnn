@@ -100,7 +100,7 @@ GNN_RUNG_KEYS = {"graph", "norm", "setting_from", "train"}
 # rungs, docs/BIGGER_GNN_PLAN.md); graph/supervised.TrainConfig checks values.
 GNN_TRAIN_KEYS = {
     "layers", "hidden", "dropout", "lr", "weight_decay", "max_epochs", "patience",
-    "model", "residual", "layer_norm", "jk", "hops",
+    "model", "residual", "layer_norm", "jk", "hops", "heads",
 }  # fmt: skip
 # gnn_embed_sizes value for a GNN block that keeps its raw embedding (no PCA).
 RAW_SIZE = "raw"

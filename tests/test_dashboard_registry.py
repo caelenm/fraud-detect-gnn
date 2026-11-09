@@ -49,6 +49,8 @@ def test_every_committed_pipeline_entry_maps_to_a_setup():
         ("pilot_g6w_mlp_big", "E6w", reg.ALL, None, reg.PILOT, "E6w"),
         ("pilot_g9_sign", "E9", reg.ALL, None, reg.PILOT, "E9"),
         ("pilot_g9n3_sign_rw", "N9", reg.ALL, None, reg.PILOT, "N9"),
+        ("pilot_g10_gat", "E10", reg.ALL, None, reg.PILOT, "E10"),
+        ("pilot_g10n3_gat_rw", "N10", reg.ALL, None, reg.PILOT, "N10"),
         ("pilot_n1_own_deg_no19", "N1", reg.NO19, None, reg.PILOT, "N1"),
         ("pilot_m1_own_top4no19", "B", reg.TOP4NO19, None, reg.PILOT, "B"),
         ("pilot_m1_own_only36", "B", reg.ONLY36, None, reg.PILOT, "B"),

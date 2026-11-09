@@ -520,7 +520,7 @@ def test_rung_config_puts_the_rung_on_top_and_checks_it():
     assert big.dropout == (0.0, 0.3)  # from the section: the rung did not set it
     assert big.residual and big.jk and not big.layer_norm and big.model == "sage"
     for bad, match in [
-        ({"model": "gat"}, "model"),
+        ({"model": "gcn"}, "model"),
         ({"model": "sign", "jk": True}, "sage model"),
         ({"model": "sign", "hops": 0}, "hops"),
         ({"residual": "yes"}, "true or false"),

@@ -102,6 +102,10 @@ SETUPS = (
     Setup("g9_sign", "E9", GNN, "GNN: SIGN (1-3 hops + a large MLP)", gnn_rung=True),
     Setup("g9n3_sign_rw", "N9", NULL_GRAPH, "GNN: SIGN on the rewired graph",
           gnn_rung=True),
+    # GAT (docs/GAT_DEEP_PLAN.md; not run yet).
+    Setup("g10_gat", "E10", GNN, "GNN: GAT (attention per relation)", gnn_rung=True),
+    Setup("g10n3_gat_rw", "N10", NULL_GRAPH, "GNN: GAT on the rewired graph",
+          gnn_rung=True),
     Setup("n1_own_deg", "N1", NULL_GRAPH, "+ degree only"),
     Setup("n2_own_nbrrw", "N2", NULL_GRAPH, "+ neighbour means on a rewired graph"),
 )  # fmt: skip

@@ -775,6 +775,11 @@ GNN_MODEL_LABELS = {
 }
 
 
+GAT_LABELS = {
+    "real": "GAT",
+    "rewired": "GAT (rewired graph)",
+    "none": "MLP (GAT without edges)",
+}
 SIGN_LABELS = {
     "real": "SIGN",
     "rewired": "SIGN (rewired graph)",
@@ -788,6 +793,8 @@ def gnn_model_label(spec: dict[str, Any]) -> str:
     train = spec.get("train") or {}
     if train.get("model", "sage") == "sign":
         return SIGN_LABELS[spec["graph"]]
+    if train.get("model") == "gat":
+        return GAT_LABELS[spec["graph"]]
     label = GNN_MODEL_LABELS[(spec["graph"], spec.get("norm", "mean"))]
     return f"{label}, larger" if train else label
 
@@ -947,7 +954,7 @@ def run_gnn_oof(ctx: Context) -> None:
     setting = sup.Setting(**choice["setting"])
     data = gnn_data(ctx, choice["own_block"])
     g = sup.graph_input(data.x, gnn_edges(ctx, spec["graph"], len(data.x)),
-                        spec.get("norm", "mean"), cfg.device)  # fmt: skip
+                        spec.get("norm", "mean"), cfg.device, cfg.model)  # fmt: skip
     print(
         f"gnnsup: {gnn_model_label(spec)} ({choice['feature_set']}, chosen by the "
         f"pre-registered rule) with {setting.key}; nested cross-fitting on "
@@ -1800,13 +1807,18 @@ def run_gnn_classify(ctx: Context) -> None:
     cfg = _train_config(ctx, sup, spec)
     data = gnn_data(ctx, feature_set_blocks(ctx)[0])
     g = sup.graph_input(data.x, gnn_edges(ctx, spec["graph"], len(data.x)),
-                        spec.get("norm", "mean"), cfg.device)  # fmt: skip
+                        spec.get("norm", "mean"), cfg.device, cfg.model)  # fmt: skip
     label = gnn_model_label(spec)
-    shape = f"{cfg.hops} hops, " if cfg.model == "sign" else ""
+    shape = {"sign": f"{cfg.hops} hops, ", "gat": f"{cfg.heads} heads, "}.get(
+        cfg.model, ""
+    )
+    weights = (
+        "attention" if cfg.model == "gat" else f"{spec.get('norm', 'mean')} normalisation"
+    )
     print(
         f"{fs}: {label}, {shape}{cfg.layers} layers, hidden {list(cfg.hidden)}, "
         f"relations {g.relations or 'none'} "
-        f"({spec['graph']} graph, {spec.get('norm', 'mean')} normalisation), "
+        f"({spec['graph']} graph, {weights}), "
         f"{len(data.own_columns)} own features, {len(data.x):,} nodes; cross-fit on "
         f"{len(np.unique(data.folds))} saved folds on {cfg.device}",
         flush=True,
