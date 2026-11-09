@@ -22,6 +22,7 @@
 }
 
 [hidden] { display: none !important; }
+.eyebrow a { color: inherit; }
 .wrap { max-width: 1240px; }
 section { scroll-margin-top: 90px; }
 section > .panel { margin-top: 14px; }

@@ -31,7 +31,7 @@ def test_no_file_reaches_anything_external(text):
 
 def test_the_html_loads_only_its_own_files():
     sources = re.findall(r'(?:src|href)="([^"]+)"', HTML)
-    assert sorted(sources) == ["/app.js", "/dashboard.css", "/report.css"]
+    assert sorted(sources) == ["/app.js", "/dashboard.css", "/explain", "/report.css"]
     assert all(s in STATIC_FILES for s in sources)
 
 

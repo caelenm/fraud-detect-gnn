@@ -25,6 +25,7 @@ from fraud_detect.config import REPO_ROOT, df_analyze_dir
 from fraud_detect.dashboard import checks as checks_module
 from fraud_detect.dashboard import classify as cl
 from fraud_detect.dashboard import data, narrative
+from fraud_detect.dashboard import explain as ex
 from fraud_detect.dashboard import registry as reg
 from fraud_detect.dashboard.worker import ModelWorker, WorkerError
 from fraud_detect.external import (
@@ -41,6 +42,9 @@ REPORT_CSS = Path(__file__).parent.parent / "report" / "report.css"
 STATIC_FILES = {
     "/": (STATIC_DIR / "index.html", "text/html; charset=utf-8"),
     "/app.js": (STATIC_DIR / "app.js", "text/javascript; charset=utf-8"),
+    "/explain": (STATIC_DIR / "explain.html", "text/html; charset=utf-8"),
+    "/explain.js": (STATIC_DIR / "explain.js", "text/javascript; charset=utf-8"),
+    "/explain.css": (STATIC_DIR / "explain.css", "text/css; charset=utf-8"),
     "/dashboard.css": (STATIC_DIR / "dashboard.css", "text/css; charset=utf-8"),
     "/report.css": (REPORT_CSS, "text/css; charset=utf-8"),
 }
@@ -143,6 +147,11 @@ class App:
             for variant in variants:
                 key = cl.target_key(dataset, variant)
                 self.panels[key] = PanelState(key, dataset, variant)
+        self.explain_models: dict[str, ex.ExplainModel] = {}
+        self.explain_state: dict[str, tuple[str, str]] = {
+            ex.target_key(d, v): (LOADING, "Loading the saved explanation.")
+            for d, v, _ in ex.TARGETS
+        }
         self._lock = threading.Lock()
 
     # ---- Aggregate answers ------------------------------------------------
@@ -388,6 +397,62 @@ class App:
         except cl.ClassifyError as e:
             raise BadRequest(str(e)) from e
 
+    # ---- Explainability page ----------------------------------------------
+    def load_explain(self) -> None:
+        """Load each saved explanation in turn; runs in the background. One that
+        cannot be loaded says why; the others still work."""
+        for dataset, variant, candidates in ex.TARGETS:
+            key = ex.target_key(dataset, variant)
+            try:
+                model = ex.load_model(self.config, dataset, variant, candidates)
+            except ex.ExplainUnavailable as e:
+                state = (UNAVAILABLE, str(e))
+            except Exception as e:  # one broken model must not take the others down
+                state = (UNAVAILABLE, f"{type(e).__name__}: {e}"[:500])
+            else:
+                with self._lock:
+                    self.explain_models[key] = model
+                state = (READY, "")
+            with self._lock:
+                self.explain_state[key] = state
+
+    def api_explain_models(self) -> dict[str, Any]:
+        with self._lock:
+            states = dict(self.explain_state)
+            models = dict(self.explain_models)
+        out = []
+        for dataset, variant, _ in ex.TARGETS:
+            key = ex.target_key(dataset, variant)
+            state, message = states[key]
+            entry: dict[str, Any] = {
+                "key": key,
+                "dataset": dataset,
+                "dataset_label": DATASET_LABELS.get(dataset, dataset),
+                "state": state,
+                "message": message,
+            }
+            if key in models:
+                entry.update(models[key].summary())
+            out.append(entry)
+        return {"models": out, "commit": self.commit}
+
+    def api_explain_node(self, body: Any) -> dict[str, Any]:
+        if not isinstance(body, dict):
+            raise BadRequest("The request body must be a JSON object")
+        key = str(body.get("model"))
+        with self._lock:
+            known = key in self.explain_state
+            state, message = self.explain_state.get(key, (UNAVAILABLE, ""))
+            model = self.explain_models.get(key)
+        if not known:
+            raise BadRequest(f"Unknown model {body.get('model')!r}")
+        if state != READY or model is None:
+            raise BadRequest(message or f"{key} is not ready yet")
+        try:
+            return model.draw(str(body.get("draw", "any")), body.get("seed"))
+        except ex.ExplainRequestError as e:
+            raise BadRequest(str(e)) from e
+
     def close(self) -> None:
         if self.worker is not None:
             self.worker.close()
@@ -465,6 +530,7 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                 "/api/best": app.api_best,
                 "/api/checks": app.api_checks,
                 "/api/status": app.api_status,
+                "/api/explain/models": app.api_explain_models,
             }
             if url.path in routes:
                 self._answer(routes[url.path])
@@ -478,7 +544,12 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
             if not self._host_allowed() or not self._origin_allowed():
                 self._json(403, {"error": "This server only answers on localhost"})
                 return
-            if urlsplit(self.path).path != "/api/classify":
+            posts = {
+                "/api/classify": app.api_classify,
+                "/api/explain/node": app.api_explain_node,
+            }
+            endpoint = posts.get(urlsplit(self.path).path)
+            if endpoint is None:
                 self._json(404, {"error": "No such endpoint"})
                 return
             try:
@@ -499,7 +570,7 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
             except (json.JSONDecodeError, UnicodeDecodeError):
                 self._json(400, {"error": "The body is not JSON"})
                 return
-            self._answer(lambda: app.api_classify(body))
+            self._answer(lambda: endpoint(body))
 
     return Handler
 

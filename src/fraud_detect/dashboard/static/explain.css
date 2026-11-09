@@ -1,0 +1,32 @@
+/* The explanations page: only what dashboard.css does not already have.
+ * Towards fraud uses --series-2 and away from fraud --series-1, the dashboard's
+ * blue/orange pair (validated there for colour-vision deficiencies). */
+.wrap-buttons { flex-wrap: wrap; }
+.grid-2 > *, .card-grid > * { min-width: 0; }
+.eyebrow a { color: inherit; }
+.draw-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+.draw-actions .field input { width: 9em; }
+.card-grid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px; }
+@media (max-width: 900px) { .card-grid { grid-template-columns: minmax(0, 1fr); } }
+.card-head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; }
+.card-head .id { font-family: var(--mono); font-size: 1.05rem; }
+.waterfall .bar.up { fill: var(--series-2); }
+.waterfall .bar.down { fill: var(--series-1); }
+.waterfall .bar.total { fill: var(--muted); }
+.waterfall .link { stroke: var(--faint); stroke-width: 1; stroke-dasharray: 2 2; }
+.waterfall .thr { stroke: var(--text); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.imp .bar.up { fill: var(--series-2); }
+.imp .bar.down { fill: var(--series-1); }
+.imp .whisker { stroke: var(--text); stroke-width: 1.5; }
+.key-swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; margin-right: 4px; }
+.key-swatch.up { background: var(--series-2); }
+.key-swatch.down { background: var(--series-1); }
+.push-up { color: var(--text); }
+.push-up::before { content: "▲ "; color: var(--series-2); }
+.push-down::before { content: "▼ "; color: var(--series-1); }
+.spaced-top { margin-top: 18px; }
+.rel-block + .rel-block { margin-top: 14px; }
+.rel-block h4 { margin: 0 0 4px; font-size: .95rem; }
+.badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: .8rem; border: 1px solid var(--border); background: var(--surface); }
+.badge.warn { border-color: var(--warn); color: var(--warn); background: var(--warn-soft); }
+section .panel + .panel, section .panel + .grid-2, section .grid-2 + .panel { margin-top: 16px; }
