@@ -79,6 +79,20 @@ def test_near_threshold_finds_values_equal_in_single_precision() -> None:
     assert not X.near_threshold(rows, {1: np.array([2.0])}).any()
 
 
+def test_a_section_left_partway_does_not_count_as_finished(tmp_path) -> None:
+    output = tmp_path / "shap_test.parquet"
+    assert not X.section_finished(output, "shap", {"shap": {}})  # recorded, no file
+    output.write_bytes(b"")
+    assert not X.section_finished(output, "shap", {})  # file, not recorded
+    assert X.section_finished(output, "shap", {"shap": {}})
+
+
+def test_kept_shap_values_in_another_mode_stop_the_run() -> None:
+    X.check_kept_mode("interventional", "interventional")
+    with pytest.raises(X.ExplainError, match="--force"):
+        X.check_kept_mode("interventional", "tree_path_dependent")
+
+
 def test_implementation_check_excludes_a_few_rows_but_not_many() -> None:
     values = np.zeros((1000, 2))
     margin = np.zeros(1000)

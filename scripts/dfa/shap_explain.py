@@ -341,9 +341,12 @@ def make_fit(model_cls: str, params: dict[str, Any]) -> E.Fit:
     return fit
 
 
-def ranking_importance(n_jobs: int, seed: int) -> E.Importance:
-    """Mean |interventional SHAP| on a sample of the given rows, with a background
-    from the same rows, so a ranking only ever sees the rows it is handed."""
+def ranking_importance(
+    n_jobs: int, seed: int, path_dependent: bool = False
+) -> E.Importance:
+    """Mean |SHAP| on a sample of the given rows. Interventional with a background from
+    the same rows, so a ranking only ever sees the rows it is handed; path-dependent
+    (no background) when asked for, and then for every model the caller compares."""
 
     def importance(model: Any, rows: pd.DataFrame) -> pd.Series:
         rng = np.random.default_rng(seed)
@@ -352,7 +355,8 @@ def ranking_importance(n_jobs: int, seed: int) -> E.Importance:
         chosen = rng.choice(
             len(values), min(N_RANKING_BACKGROUND, len(values)), replace=False
         )
-        attributions, _, _ = checked_shap(model, values[picked], values[chosen], n_jobs)
+        background = None if path_dependent else values[chosen]
+        attributions, _, _ = checked_shap(model, values[picked], background, n_jobs)
         return mean_abs(attributions, list(rows.columns))
 
     return importance
@@ -378,7 +382,6 @@ def section_shap(ctx: Context) -> dict[str, Any]:
     frame.insert(0, C.LABEL, ctx.y_test)
     frame.insert(0, C.GROUP_ID, ctx.test_ids[C.GROUP_ID].to_numpy())
     frame.insert(0, C.NODE_ID, ctx.test_ids[C.NODE_ID].to_numpy())
-    atomic_write_parquet(ctx.out / "shap_test.parquet", frame)
     # Training rows for the nearest-node comparison on the case cards.
     picked = X.stratified_sample(ctx.y_train, N_TRAIN_SAMPLE, ctx.args.seed + 1)
     rows = ctx.x_train.to_numpy(dtype=float)[picked]
@@ -387,7 +390,9 @@ def section_shap(ctx: Context) -> dict[str, Any]:
     train.insert(0, "prob", prob_of(ctx.model, ctx.x_train.iloc[picked]))
     train.insert(0, C.LABEL, ctx.y_train[picked])
     train.insert(0, C.NODE_ID, ctx.train_ids[C.NODE_ID].to_numpy()[picked])
+    # Both checks passed, so both files can be written; the section's marker goes last.
     atomic_write_parquet(ctx.out / "shap_train_sample.parquet", train)
+    atomic_write_parquet(ctx.out / "shap_test.parquet", frame)
     return {
         "feature_perturbation": PATH_DEPENDENT if background is None else INTERVENTIONAL,
         "model_output": "raw (log-odds)",
@@ -669,13 +674,14 @@ def section_randomisation(ctx: Context) -> dict[str, Any]:
         ctx.fold,
         fit,
         prob_of,
-        ranking_importance(ctx.args.n_jobs, ctx.args.seed),
+        ranking_importance(ctx.args.n_jobs, ctx.args.seed, ctx.args.path_dependent),
         n_permutations=3,
         seed=ctx.args.seed,
         max_rows=N_RANKING_ROWS,
     )
     atomic_write_csv(ctx.out / "randomisation.csv", table)
-    return {"n_runs": len(table)}
+    mode = PATH_DEPENDENT if ctx.args.path_dependent else INTERVENTIONAL
+    return {"n_runs": len(table), "feature_perturbation": mode}
 
 
 def section_seeds(ctx: Context) -> dict[str, Any]:
@@ -1072,8 +1078,9 @@ def main() -> int:
     parser.add_argument(
         "--path-dependent",
         action="store_true",
-        help="shap section: path-dependent TreeSHAP, a different game, for a model where "
-        "interventional TreeSHAP fails the implementation check. Recorded in the outputs",
+        help="shap and randomisation sections: path-dependent TreeSHAP, a different game, "
+        "where interventional TreeSHAP fails the implementation check. Recorded in the "
+        "outputs",
     )
     parser.add_argument("--seed", type=int, default=555)
     parser.add_argument("--n-jobs", type=int, default=16, help="processes for SHAP")
@@ -1101,7 +1108,12 @@ def main() -> int:
     default = [s for s in SECTIONS if s != "neighbours_encoder"]
     for name in args.sections or default:
         run, output = SECTIONS[name]
-        if (ctx.out / output).is_file() and not args.force:
+        if X.section_finished(ctx.out / output, name, meta["sections"]) and not args.force:
+            if name == "shap":
+                X.check_kept_mode(
+                    meta["sections"]["shap"]["feature_perturbation"],
+                    PATH_DEPENDENT if args.path_dependent else INTERVENTIONAL,
+                )
             print(f"{name}: done earlier, kept")
             continue
         start = time.monotonic()

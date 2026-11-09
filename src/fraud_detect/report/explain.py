@@ -1010,11 +1010,19 @@ def _checks(summary: Summary) -> str:
             + "</div>"
         )
     if "randomisation" in t:
+        run = summary.meta["sections"].get("randomisation", {})
+        mode_note = (
+            " Attributions here are path-dependent TreeSHAP for all four models, because "
+            "interventional TreeSHAP missed the implementation check on too many rows of "
+            "a permuted-label model."
+            if run.get("feature_perturbation") == "tree_path_dependent"
+            else ""
+        )
         parts.append(
             "<h3>Sanity check: permuted training labels</h3>"
             '<p class="prose">Refit on permuted labels, with attributions on a held-out '
             "training fold. The ranking should lose its structure. A tree still splits on "
-            "noise, so total attribution falls without reaching zero.</p>"
+            f"noise, so total attribution falls without reaching zero.{mode_note}</p>"
             + '<div class="panel">'
             + _table(
                 t["randomisation"],

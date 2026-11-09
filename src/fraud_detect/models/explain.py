@@ -29,6 +29,8 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -231,6 +233,22 @@ def implementation_check(
                 "background, so the explainer did not use this background"
             )
     return bad, out
+
+
+def section_finished(output: Path, name: str, sections: dict[str, Any]) -> bool:
+    """A section counts as finished only if its file exists and the run recorded it.
+    A file alone can be left by a run that stopped partway through the section."""
+    return output.is_file() and name in sections
+
+
+def check_kept_mode(kept: str, asked: str) -> None:
+    """Finished SHAP values in one mode must never stand in for a run asking for the
+    other: they are different games, so stop instead of mixing them."""
+    if kept != asked:
+        raise ExplainError(
+            f"The saved SHAP values are {kept} but this run asked for {asked}. "
+            "Use --force to replace them."
+        )
 
 
 # --------------------------------------------------------------------------
