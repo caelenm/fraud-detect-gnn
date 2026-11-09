@@ -49,7 +49,7 @@ The changes are in `src/fraud_detect/graph/supervised.py`. The existing `gnn_cla
 - R-S-R has about 6.8M directed edges and U-S-U about 7.1M, so no edges × hidden tensor is built. The weighted sum is a custom autograd function made of per-head sparse products:
   - forward `A_α V` and `grad_V = A_αᵀ G`, as CSR × dense products;
   - `grad_α`, a sampled dense product at the edges (`torch.sparse.sampled_addmm`).
-- This replaces the chunked `index_add_` the brief proposed. That version was correct, but its single-threaded scatter made an epoch on YelpChi take 15.6 s. The sparse version takes 3.4 s, gives the same forward values (max difference 0.0 on a 6.8M-edge test), and is deterministic on the CPU.
+- This replaces the chunked `index_add_` the brief proposed. That version was correct, but its single-threaded scatter made an epoch on YelpChi take 15.6 s. The sparse version takes 3.4 s, gives the same forward values (max difference 0.0 on a 6.8M-edge test), and the aggregation itself is deterministic on the CPU. A GAT fit as a whole is not bit-identical between runs, even on the CPU: the backward pass of the per-edge score gather uses PyTorch's parallel scatter-add (found 2026-11-09, when the attention read-out's refit scored 0.9513 on its held-out fold against the run's 0.9506).
 - Gradients are checked with `gradcheck` and against the materialised messages.
 - For GAT the graph input holds directed edge lists, and the `Â` matrices are not built.
 
@@ -102,7 +102,7 @@ As a calibration, this method estimates E5 on YelpChi at 50 minutes per split. I
 
 That is **about 4 to 8 days on the CPU**, run one at a time: each fit already uses all 8 threads. On CUDA, at 3× (YelpChi) and 5× (Amazon) faster per epoch, it is about **25–45 hours**.
 
-**Device.** AGENTS.md's 2026-10-19 decision puts GNNs on the CPU, because CUDA's sparse products differ by about 1e-7 between runs. CUDA runs fit easily in 8 GB, but they would not be bit-reproducible, and the user would need to approve them as an exception.
+**Device.** AGENTS.md's 2026-10-19 decision put GNNs on the CPU, because CUDA's sparse products differ by about 1e-7 between runs. On 2026-11-09 the user, after checking with the group, moved this round to the GPU: the CPU rule dated from when there were far fewer runs, and GAT is not bit-identical on the CPU anyway. From 21:04 UTC every remaining job runs with `gnn_classify.device: cuda`. Amazon E5w (splits 0–2) and E10 split 0 ran on the CPU.
 
 **Ways to cut the cost, for the user to decide** (each changes the design or the tuning settings, so none is applied here):
 - **(a)** Run split 0 of each dataset first, as a pilot: about 17–34 h on the CPU, or 5–8 h on CUDA.

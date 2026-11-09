@@ -39,8 +39,12 @@ relation gets 0 from it. The weighted sum over edges is a custom autograd
 function (_AttentionAggregate) built from per-head sparse products: forward
 A_alpha V and grad_V = A_alpha^T G as CSR x dense products, grad_alpha as a
 sampled dense product (torch.sparse.sampled_addmm) at the edges. No
-edges x hidden tensor is made (R-S-R has about 6.8M directed edges), and on
-the CPU every step is deterministic. The residual, layer_norm and jk options
+edges x hidden tensor is made (R-S-R has about 6.8M directed edges). The
+aggregation is deterministic on the CPU, but a GAT fit as a whole is not:
+the backward pass of the per-edge score gather (score_src[src]) is PyTorch's
+parallel scatter-add, whose summation order varies (logits differ by ~3e-6
+after 4 epochs between two identical processes on Amazon). The residual,
+layer_norm and jk options
 apply to it as to the sage layers.
 
 Training, per fit: binary cross-entropy on the fit nodes' labels, weighted by
@@ -64,7 +68,9 @@ Leakage rules (AGENTS.md):
   caller); test and unlabelled nodes take part in message passing only
   (invariant 5).
 
-Reproducibility: on the CPU a fit is bit-identical for a given seed.
+Reproducibility: on the CPU a sage or SIGN fit is bit-identical for a given
+seed; a GAT fit is reproducible only to float noise (above), and CUDA fits
+of any model differ slightly between runs.
 Needs the optional `gnn` extra (torch).
 """
 
