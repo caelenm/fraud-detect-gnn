@@ -1308,6 +1308,19 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
     - E10 − N10 is waiting for N10.
   - **Attention** (`scripts/gat_attention.py`, E10's fold-0 model on split 0, refit within 0.005 of the run's held-out fold score): attention is close to uniform on both datasets. On Amazon, fraud neighbours get 1.6–1.9× their equal share (layer 1 U-S-U). On YelpChi it is within ±0.02 of equal, and layer-2 R-T-R and R-S-R attention is uniform.
 
+- **2026-11-10 (sixth amendment, results for the controls and SIGN; queue finished 10:41 UTC).** All 36 jobs are done and recorded (tag `gat-deep`), with 4 verdict tables (tag `splits3`). Full tables: [`GAT_DEEP_RESULTS.md`](GAT_DEEP_RESULTS.md).
+  - **New scores** (test PR-AUC, mean of splits 0–2):
+    - Amazon: E9 0.916, N10 0.894, N9 0.898, E6w 0.898.
+    - YelpChi: E9 0.763, N10 0.632, N9 0.608, E6w 0.626.
+  - **E10 − N10, primary:**
+    - Amazon: +0.014 ± 0.006, p 0.067, not distinguishable from zero (expected: not supported).
+    - YelpChi: +0.154 ± 0.005, p 9.4e-13, supported (expected: supported).
+  - **Secondary:**
+    - E9 − N9: YelpChi +0.155, p 5.2e-12, supported. Amazon +0.019, p 0.57, not distinguishable; on Amazon, N9 stopped at epoch 1–2 in 14 of 25 fits on split 1 and 7 of 25 on split 2, an early-stopping failure that inflates this Δ and its CV variance.
+    - E5w − E6w: YelpChi +0.140, p 1.3e-09, supported. Amazon +0.002, p 0.75, not distinguishable.
+    - E9 − E5: Amazon +0.021 (positive on every split), YelpChi −0.004. Both p-values pending.
+  - **Still pending:** p-values and Holm for every contrast against E5, E1 or B. They need the laptop's per-fold outputs.
+
 ---
 
 ## 12. Status and next steps

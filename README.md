@@ -276,21 +276,25 @@ What these do and do not show:
 
 ## Results (GAT and bigger GNN, 3 splits, Amazon and YelpChi, 2026-11-09/10)
 
-The professor's feedback of 2026-11-03 asked for GAT and a bigger GNN. Pre-registered in RESEARCH_PLAN §11 (sixth amendment); full tables and the attention analysis are in [`docs/GAT_DEEP_RESULTS.md`](docs/GAT_DEEP_RESULTS.md). Every feature is used. GNNs are scored like df-analyze's Model A; B and E1 are at the pilot budget.
+The professor's feedback of 2026-11-03 asked for GAT and a bigger GNN. Pre-registered in RESEARCH_PLAN §11 (sixth amendment); every score, verdict and the attention analysis are in [`docs/GAT_DEEP_RESULTS.md`](docs/GAT_DEEP_RESULTS.md). Every feature is used. GNNs are scored like df-analyze's Model A; B and E1 are at the pilot budget.
 
 | Setup | Amazon test PR-AUC (splits 0–2) | YelpChi test PR-AUC (splits 0–2) |
 |---|---|---|
 | E10: GAT (4-head attention per relation) | 0.909 ± 0.010 | 0.786 ± 0.007 |
+| E9: SIGN (1–3-hop means per relation + MLP) | 0.916 ± 0.008 | 0.763 ± 0.008 |
 | E5w: bigger GraphSAGE (3 layers, hidden 256/512, residual, LayerNorm, JK) | 0.900 ± 0.013 | 0.766 ± 0.008 |
 | E5: GraphSAGE (2026-10-31) | 0.895 ± 0.018 | 0.767 ± 0.007 |
+| N10 / N9: GAT / SIGN on a degree-preserving rewired graph | 0.894 / 0.898 | 0.632 / 0.608 |
+| E6w: E5w without edges | 0.898 ± 0.007 | 0.626 ± 0.018 |
 | B: df-analyze, own features | 0.918 ± 0.001 | 0.838 ± 0.007 |
 | E1: df-analyze + neighbour means | 0.929 ± 0.008 | 0.871 ± 0.013 |
 
-- **Bigger GraphSAGE does not help:** E5w − E5 is +0.004 on Amazon and −0.001 on YelpChi, negative on split 0 of each, so not supported.
-- **Attention helps a little:** E10 beats E5 on all six splits (+0.013 on Amazon, +0.020 on YelpChi). The p-value over the CV folds is pending (it needs E5's per-fold outputs from the laptop).
-- **No GNN reaches df-analyze:** E10 trails E1 by 0.020 (Amazon) and 0.085 (YelpChi), and B on both.
+- **Bigger GraphSAGE does not help:** E5w − E5 is +0.004 (Amazon) and −0.001 (YelpChi), negative on split 0 of each, so not supported.
+- **Attention helps a little:** E10 beats E5 on all six splits (+0.013 and +0.020); the p-value is pending (it needs E5's per-fold outputs from the laptop). SIGN is the best GNN on Amazon and level with E5 on YelpChi.
+- **The real graph matters on YelpChi, little on Amazon:** real − rewired is +0.154 for GAT and +0.155 for SIGN on YelpChi (supported); on Amazon +0.014 and +0.019 (not distinguishable). Edges − no edges for E5w: +0.140 on YelpChi (supported), +0.002 on Amazon.
+- **No GNN reaches df-analyze with neighbour means:** the best GNN trails E1 by 0.012 (SIGN, Amazon) and 0.085 (GAT, YelpChi).
 - **Attention (split 0):** close to uniform on both datasets. On Amazon it gives fraud neighbours 1.6–1.9× their equal share, mostly through U-S-U. On YelpChi it is nearly pure averaging and leans on the same-user relation.
-- **Machines and devices:** run on `rtx4060-desktop`; Amazon E5w and E10 split 0 on the CPU, the rest on the GPU. E5, B and E1 ran on the laptop. Controls (N10, E6w) and SIGN (E9, N9) are still running.
+- **Machines and devices:** run on `rtx4060-desktop`. Amazon E5w and E10 split 0 ran on the CPU, the rest on the GPU. E5, E6, N3, B and E1 ran on the laptop. On Amazon, N9 often stopped training at epoch 1–2 (splits 1–2), which inflates E9 − N9 there.
 
 ## Graph feature blocks (Models 2 and 5)
 
