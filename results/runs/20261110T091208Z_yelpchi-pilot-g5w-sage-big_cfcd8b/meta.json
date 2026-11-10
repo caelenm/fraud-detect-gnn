@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "run_id": "20261110T091208Z_yelpchi-pilot-g5w-sage-big_cfcd8b",
+  "recorded_utc": "2026-11-10T09:14:45Z",
+  "started_utc": "2026-11-10T09:12:08Z",
+  "finished_utc": "2026-11-10T09:14:44Z",
+  "duration_min": 2.6,
+  "device": "rtx4060-desktop",
+  "device_details": {
+    "os": "Linux",
+    "platform": "Linux-6.6.87.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "wsl": true,
+    "python": "3.13.16",
+    "cpu": "AMD Ryzen 7 7700 8-Core Processor",
+    "gpus": [
+      {
+        "name": "NVIDIA GeForce RTX 4060",
+        "driver": "621.01",
+        "memory": "8188 MiB"
+      }
+    ]
+  },
+  "description": "E5w - E6w (edges in the bigger GraphSAGE), YelpChi, 3 splits (secondary contrast)",
+  "kind": "compare",
+  "status": "ok",
+  "dataset": "yelpchi",
+  "feature_set": "pilot_g5w_sage_big",
+  "split_repeat": null,
+  "seed": null,
+  "git_commit": "3b242f2df2a1bfc09951d5e9372eb91160337b50",
+  "git_dirty": false,
+  "command": "uv run scripts/compare_report.py --dataset yelpchi --a pilot_g6w_mlp_big --b pilot_g5w_sage_big --repeat k (k=0..2); uv run scripts/repeat_summary.py --dataset yelpchi --repeats 3 --prefix pilot_ --pairs g6w_mlp_big:g5w_sage_big --name e5w_vs_e6w",
+  "tags": [
+    "pilot",
+    "gat-deep",
+    "splits3"
+  ],
+  "source": "outputs/yelpchi/compare/e5w_vs_e6w.csv",
+  "results_rows": 1,
+  "results_columns": [
+    "variant",
+    "contrast",
+    "a",
+    "b",
+    "test_delta_split0",
+    "test_delta_split1",
+    "test_delta_split2",
+    "test_delta_mean",
+    "test_delta_sd",
+    "test_pr_auc_a_mean",
+    "test_pr_auc_a_sd",
+    "test_pr_auc_b_mean",
+    "test_pr_auc_b_sd",
+    "cv_folds",
+    "cv_delta_mean",
+    "corrected_t",
+    "p",
+    "verdict"
+  ]
+}
