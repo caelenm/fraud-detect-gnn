@@ -1298,6 +1298,16 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
     - YelpChi (3 splits): E5 0.767, E6 0.630, E1 0.871, B 0.838.
     - No result of E5w, E6w, E9, N9, E10 or N10 existed. The only fits run were timing fits on split 0 (one outer fold each, to early stopping), whose scores were not looked at.
 
+- **2026-11-10 (sixth amendment, results for E5w and E10).** The queue ran from 03:57 UTC on 2026-11-09 to 05:28 UTC on 2026-11-10 for these 12 jobs. Amazon E5w and E10 split 0 ran on the CPU, the rest on the GPU (device change above). Every result is in the results database (tag `gat-deep`). Tables and the attention analysis: [`GAT_DEEP_RESULTS.md`](GAT_DEEP_RESULTS.md).
+  - **Amazon** (no skill 0.095): E10 0.909 ± 0.010, E5w 0.900 ± 0.013; on the same splits E5 0.895, B 0.918, E1 0.929.
+  - **YelpChi** (no skill 0.145): E10 0.786 ± 0.007, E5w 0.766 ± 0.008; E5 0.767, B 0.838, E1 0.871.
+  - **Primary contrasts:**
+    - E5w − E5 is not supported on either dataset (Δ < 0 on split 0 of each; means +0.004 and −0.001), as expected.
+    - E10 − E5 is positive on all six splits (means +0.013 and +0.020, each mean > SD), against the expectation "not supported". Its p-value is pending: it needs E5's per-fold outputs from `rtx4060-laptop`.
+    - Best of {E5w, E10} (E10 on every split by CV) − E1 is worse on every split (−0.020 and −0.085): not supported, as expected.
+    - E10 − N10 is waiting for N10.
+  - **Attention** (`scripts/gat_attention.py`, E10's fold-0 model on split 0, refit within 0.005 of the run's held-out fold score): attention is close to uniform on both datasets. On Amazon, fraud neighbours get 1.6–1.9× their equal share (layer 1 U-S-U). On YelpChi it is within ±0.02 of equal, and layer-2 R-T-R and R-S-R attention is uniform.
+
 ---
 
 ## 12. Status and next steps

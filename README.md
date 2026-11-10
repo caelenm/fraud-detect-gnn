@@ -274,6 +274,24 @@ What these do and do not show:
 - **One split is not enough.** On YelpChi split 0, E2 led E1 by +0.037; splits 1 and 2 reversed that. The DGI setup varies more across splits (SD 0.026) than neighbour means (0.007).
 - **Two Amazon split-0 runs exist for B** (all features and without #36): the earlier ones on the laptop (0.919 and 0.518) and these reruns on the desktop (0.916 and 0.523). df-analyze's feature selection is not seeded. The dashboard counts the earlier run and keeps the rerun as a replication (in the database, not in its numbers); the verdict table above used the reruns.
 
+## Results (GAT and bigger GNN, 3 splits, Amazon and YelpChi, 2026-11-09/10)
+
+The professor's feedback of 2026-11-03 asked for GAT and a bigger GNN. Pre-registered in RESEARCH_PLAN §11 (sixth amendment); full tables and the attention analysis are in [`docs/GAT_DEEP_RESULTS.md`](docs/GAT_DEEP_RESULTS.md). Every feature is used. GNNs are scored like df-analyze's Model A; B and E1 are at the pilot budget.
+
+| Setup | Amazon test PR-AUC (splits 0–2) | YelpChi test PR-AUC (splits 0–2) |
+|---|---|---|
+| E10: GAT (4-head attention per relation) | 0.909 ± 0.010 | 0.786 ± 0.007 |
+| E5w: bigger GraphSAGE (3 layers, hidden 256/512, residual, LayerNorm, JK) | 0.900 ± 0.013 | 0.766 ± 0.008 |
+| E5: GraphSAGE (2026-10-31) | 0.895 ± 0.018 | 0.767 ± 0.007 |
+| B: df-analyze, own features | 0.918 ± 0.001 | 0.838 ± 0.007 |
+| E1: df-analyze + neighbour means | 0.929 ± 0.008 | 0.871 ± 0.013 |
+
+- **Bigger GraphSAGE does not help:** E5w − E5 is +0.004 on Amazon and −0.001 on YelpChi, negative on split 0 of each, so not supported.
+- **Attention helps a little:** E10 beats E5 on all six splits (+0.013 on Amazon, +0.020 on YelpChi). The p-value over the CV folds is pending (it needs E5's per-fold outputs from the laptop).
+- **No GNN reaches df-analyze:** E10 trails E1 by 0.020 (Amazon) and 0.085 (YelpChi), and B on both.
+- **Attention (split 0):** close to uniform on both datasets. On Amazon it gives fraud neighbours 1.6–1.9× their equal share, mostly through U-S-U. On YelpChi it is nearly pure averaging and leans on the same-user relation.
+- **Machines and devices:** run on `rtx4060-desktop`; Amazon E5w and E10 split 0 on the CPU, the rest on the GPU. E5, B and E1 ran on the laptop. Controls (N10, E6w) and SIGN (E9, N9) are still running.
+
 ## Graph feature blocks (Models 2 and 5)
 
 The graph reaches df-analyze as extra columns per node, joined next to the own features; df-analyze then treats each node as a table row exactly as in Model 1. Every rung uses the same split, folds, tuning and test scoring; only the input columns differ.
