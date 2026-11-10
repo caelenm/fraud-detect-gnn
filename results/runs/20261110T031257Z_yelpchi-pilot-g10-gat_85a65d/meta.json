@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "run_id": "20261110T031257Z_yelpchi-pilot-g10-gat_85a65d",
+  "recorded_utc": "2026-11-10T03:19:26Z",
+  "started_utc": "2026-11-10T03:12:57Z",
+  "finished_utc": "2026-11-10T03:19:26Z",
+  "duration_min": 6.5,
+  "device": "rtx4060-desktop",
+  "device_details": {
+    "os": "Linux",
+    "platform": "Linux-6.6.87.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "wsl": true,
+    "python": "3.13.16",
+    "cpu": "AMD Ryzen 7 7700 8-Core Processor",
+    "gpus": [
+      {
+        "name": "NVIDIA GeForce RTX 4060",
+        "driver": "621.01",
+        "memory": "8188 MiB"
+      }
+    ]
+  },
+  "description": "E10 GAT attention (fold-0 model, seed 555): focus, relation weight, attention on fraud neighbours; all 32 features, split 0",
+  "kind": "probe",
+  "status": "ok",
+  "dataset": "yelpchi",
+  "feature_set": "pilot_g10_gat",
+  "split_repeat": 0,
+  "seed": null,
+  "git_commit": "f6147e22d18e740420594685c7c64b5f1e838246",
+  "git_dirty": false,
+  "command": "uv run scripts/gat_attention.py --dataset yelpchi --split 0",
+  "tags": [
+    "pilot",
+    "gat-deep"
+  ],
+  "source": "outputs/yelpchi/pilot_g10_gat/attention/attention_summary.csv",
+  "results_rows": 48,
+  "results_columns": [
+    "layer",
+    "relation",
+    "head",
+    "n_edges_directed",
+    "n_nodes_deg2plus",
+    "mean_degree_deg2plus",
+    "entropy_ratio",
+    "entropy_ratio_p10",
+    "max_alpha",
+    "uniform_max",
+    "target_group",
+    "n_targets_mixed",
+    "fraud_share_attention",
+    "fraud_share_uniform",
+    "relation_to_root"
+  ]
+}
