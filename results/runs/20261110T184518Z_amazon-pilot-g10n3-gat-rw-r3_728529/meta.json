@@ -1,0 +1,131 @@
+{
+  "schema_version": 1,
+  "run_id": "20261110T184518Z_amazon-pilot-g10n3-gat-rw-r3_728529",
+  "recorded_utc": "2026-11-10T19:10:50Z",
+  "started_utc": "2026-11-10T18:45:18Z",
+  "finished_utc": "2026-11-10T19:10:49Z",
+  "duration_min": 25.5,
+  "device": "rtx4060-desktop",
+  "device_details": {
+    "os": "Linux",
+    "platform": "Linux-6.6.87.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "wsl": true,
+    "python": "3.13.16",
+    "cpu": "AMD Ryzen 7 7700 8-Core Processor",
+    "gpus": [
+      {
+        "name": "NVIDIA GeForce RTX 4060",
+        "driver": "621.01",
+        "memory": "8188 MiB"
+      }
+    ]
+  },
+  "description": "N10: GAT on the rewired graph (E10's setting), all 25 features, split 3, pilot (GAT / bigger-GNN round)",
+  "kind": "pipeline",
+  "status": "ok",
+  "dataset": "amazon",
+  "feature_set": "pilot_g10n3_gat_rw",
+  "split_repeat": 3,
+  "seed": 555,
+  "git_commit": "68229a18d587a0121dd0094fcb048795ffda1166",
+  "git_dirty": false,
+  "df_analyze_run": "gnn-20261110T191049Z",
+  "headline": {
+    "model_a": "GAT (rewired graph) (gnn)",
+    "test_pr_auc": 0.9162597239330088,
+    "test_pr_auc_low": 0.8929060421499301,
+    "test_pr_auc_high": 0.9385964460294899,
+    "test_auroc": 0.9763963180712368,
+    "test_auroc_low": 0.9649594359137476,
+    "test_auroc_high": 0.9852990117603236,
+    "no_skill_pr_auc": 0.09490740740740741,
+    "cv_pr_auc": 0.8865505571184565,
+    "cv_pr_auc_std": 0.03029894175769864,
+    "f1": 0.8599033816425121,
+    "threshold": 0.8387341613398046,
+    "n_train": 5183,
+    "n_test": 3456
+  },
+  "settings": {
+    "seed": 555,
+    "feature_set": "pilot_g10n3_gat_rw",
+    "split.repeat": 3,
+    "split.n_repeats": 5,
+    "df_analyze.classifiers": [
+      "lgbm",
+      "lr",
+      "catboost",
+      "gandalf",
+      "rf",
+      "knn"
+    ],
+    "df_analyze.htune_trials": 100,
+    "df_analyze.htune_cls_metric": "bal-acc",
+    "df_analyze.commit": "199e5638620693c267dac715784f1fd0e33fa796",
+    "gnn_embed": {
+      "layers": 2,
+      "hidden": 64,
+      "out_dim": 64,
+      "lr": 0.001,
+      "max_epochs": 300,
+      "patience": 20,
+      "pca_components": 8,
+      "device": "cpu",
+      "usu_edge_fraction": 1.0
+    },
+    "neighbour_agg": {
+      "statistics": [
+        "mean"
+      ],
+      "log1p_degree": true,
+      "rewire_swaps_per_edge": 10
+    },
+    "blocks": [
+      "own"
+    ]
+  },
+  "source": "outputs/amazon_repeat3/pilot_g10n3_gat_rw",
+  "command": "--dataset amazon --set split.n_repeats=5 --set split.repeat=3 --set feature_set=pilot_g10n3_gat_rw --set gnn_classify.device=cuda",
+  "packages": {
+    "numpy": "2.5.3",
+    "pandas": "3.0.6",
+    "pyarrow": "25.0.1",
+    "scikit-learn": "1.9.1",
+    "scipy": "1.18.1",
+    "pyyaml": "6.0.3",
+    "torch": "2.9.1",
+    "torch-geometric": "2.8.1"
+  },
+  "tags": [
+    "pilot",
+    "gat-deep"
+  ],
+  "results_rows": 1,
+  "results_columns": [
+    "model",
+    "selection",
+    "embed_selector",
+    "cv_pr_auc",
+    "cv_pr_auc_std",
+    "cv_auroc",
+    "cv_auroc_std",
+    "tuning_metric",
+    "pr_auc",
+    "auroc",
+    "f1",
+    "precision",
+    "recall",
+    "accuracy",
+    "balanced_accuracy",
+    "tp",
+    "fp",
+    "fn",
+    "tn",
+    "threshold",
+    "f1_at_05",
+    "precision_at_05",
+    "recall_at_05",
+    "accuracy_at_05",
+    "balanced_accuracy_at_05"
+  ]
+}
