@@ -1321,6 +1321,12 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
     - E9 − E5: Amazon +0.021 (positive on every split), YelpChi −0.004. Both p-values pending.
   - **Still pending:** p-values and Holm for every contrast against E5, E1 or B. They need the laptop's per-fold outputs.
 
+- **2026-11-10 (sixth amendment extended: Amazon splits 3–4; the user's request, written before any split 3–4 result of these rungs existed).** E5w, E10, N10, E6w, E9 and N9 also run on Amazon splits 3 and 4, so the Amazon contrasts cover the same 5 splits as E5, E6 and N3 (2026-10-31). YelpChi stays at 3 splits.
+  - **Unchanged:** the contrasts, the verdict rule, the expected verdicts, the rungs' settings and grids, and seed 555 with split seed = seed + 1000 × repeat (the same splits as the laptop's E5 runs; checked by train and test sizes).
+  - **Run on** `rtx4060-desktop`, GPU (`gnn_classify.device: cuda`), one job at a time, in the order E5w, E10, N10, E6w, E9, N9, splits 3 then 4.
+  - **Reporting:** the 5-split Amazon verdicts replace the 3-split ones once all 12 jobs are done (as on 2026-10-29); the 3-split tables stay in the database (tag `splits3`). If the queue stops early, the 3-split verdicts stand and the extra splits are reported as descriptive.
+  - **N9's early stopping is not changed** (left for the group), so N9 on splits 3–4 runs as on splits 0–2.
+
 ---
 
 ## 12. Status and next steps
