@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "run_id": "20261110T200200Z_amazon_d9a286",
+  "recorded_utc": "2026-11-10T20:06:33Z",
+  "started_utc": "2026-11-10T20:02:00Z",
+  "finished_utc": "2026-11-10T20:06:33Z",
+  "duration_min": 4.5,
+  "device": "rtx4060-desktop",
+  "device_details": {
+    "os": "Linux",
+    "platform": "Linux-6.6.87.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "wsl": true,
+    "python": "3.13.16",
+    "cpu": "AMD Ryzen 7 7700 8-Core Processor",
+    "gpus": [
+      {
+        "name": "NVIDIA GeForce RTX 4060",
+        "driver": "621.01",
+        "memory": "8188 MiB"
+      }
+    ]
+  },
+  "description": "Amazon, 5 splits (seventh-amendment extension): E10 - N10 +0.013 +/- 0.005, p 0.026, supported (primary); E9 - N9 +0.011 +/- 0.011, p 0.45, not distinguishable; E5w - E6w -0.001, p 0.97, worse",
+  "kind": "compare",
+  "status": "ok",
+  "dataset": "amazon",
+  "feature_set": null,
+  "split_repeat": null,
+  "seed": null,
+  "git_commit": "9c66767be860cb89f02bf1f268c783532e74f2a9",
+  "git_dirty": false,
+  "tags": [
+    "pilot",
+    "gat-deep",
+    "splits5"
+  ],
+  "notes": "Replaces the 3-split verdicts of 20261110T065522Z and 20261110T071843Z for Amazon (RESEARCH_PLAN \u00a711, 2026-11-10 extension). N9 again shows early-stopping trouble (CV 0.830 and 0.843 on splits 3-4 vs test 0.921 and 0.904), so E9 - N9's p is not meaningful.",
+  "source": "outputs/amazon/compare/gat_deep_splits5.csv",
+  "results_rows": 3,
+  "results_columns": [
+    "variant",
+    "contrast",
+    "a",
+    "b",
+    "test_delta_split0",
+    "test_delta_split1",
+    "test_delta_split2",
+    "test_delta_split3",
+    "test_delta_split4",
+    "test_delta_mean",
+    "test_delta_sd",
+    "test_pr_auc_a_mean",
+    "test_pr_auc_a_sd",
+    "test_pr_auc_b_mean",
+    "test_pr_auc_b_sd",
+    "cv_folds",
+    "cv_delta_mean",
+    "corrected_t",
+    "p",
+    "verdict"
+  ]
+}
