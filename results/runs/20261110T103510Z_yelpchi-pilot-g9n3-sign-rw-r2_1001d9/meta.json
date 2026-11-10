@@ -1,0 +1,132 @@
+{
+  "schema_version": 1,
+  "run_id": "20261110T103510Z_yelpchi-pilot-g9n3-sign-rw-r2_1001d9",
+  "recorded_utc": "2026-11-10T10:41:09Z",
+  "started_utc": "2026-11-10T10:35:10Z",
+  "finished_utc": "2026-11-10T10:41:08Z",
+  "duration_min": 6.0,
+  "device": "rtx4060-desktop",
+  "device_details": {
+    "os": "Linux",
+    "platform": "Linux-6.6.87.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "wsl": true,
+    "python": "3.13.16",
+    "cpu": "AMD Ryzen 7 7700 8-Core Processor",
+    "gpus": [
+      {
+        "name": "NVIDIA GeForce RTX 4060",
+        "driver": "621.01",
+        "memory": "8188 MiB"
+      }
+    ]
+  },
+  "description": "N9: SIGN on the rewired graph (E9's setting), all 32 features, split 2, pilot (GAT / bigger-GNN round)",
+  "kind": "pipeline",
+  "status": "ok",
+  "dataset": "yelpchi",
+  "feature_set": "pilot_g9n3_sign_rw",
+  "split_repeat": 2,
+  "seed": 555,
+  "git_commit": "874e4deea5564ac81107c1b23a0982a451e0ab58",
+  "git_dirty": false,
+  "df_analyze_run": "gnn-20261110T104108Z",
+  "headline": {
+    "model_a": "SIGN (rewired graph) (gnn)",
+    "test_pr_auc": 0.6172433970035233,
+    "test_pr_auc_low": 0.5980489526678283,
+    "test_pr_auc_high": 0.6366797918244803,
+    "test_auroc": 0.8794971594227775,
+    "test_auroc_low": 0.8707273842368208,
+    "test_auroc_high": 0.8885493439263242,
+    "no_skill_pr_auc": 0.14526659412404788,
+    "cv_pr_auc": 0.600090552984169,
+    "cv_pr_auc_std": 0.01771111247237434,
+    "f1": 0.5786837104854033,
+    "threshold": 0.7011017209665431,
+    "n_train": 27574,
+    "n_test": 18380,
+    "sanity_warning": "Model A's test PR-AUC 0.617 is more than 0.05 below the sanity band (0.80, from an untuned gradient-boosting model; docs/RESEARCH_PLAN.md \u00a72). Assume a pipeline bug (mis-typed features, a wrong label vector, a misaligned split) and investigate before reporting."
+  },
+  "settings": {
+    "seed": 555,
+    "feature_set": "pilot_g9n3_sign_rw",
+    "split.repeat": 2,
+    "split.n_repeats": 3,
+    "df_analyze.classifiers": [
+      "lgbm",
+      "lr",
+      "catboost",
+      "gandalf",
+      "rf",
+      "knn"
+    ],
+    "df_analyze.htune_trials": 100,
+    "df_analyze.htune_cls_metric": "bal-acc",
+    "df_analyze.commit": "199e5638620693c267dac715784f1fd0e33fa796",
+    "gnn_embed": {
+      "layers": 2,
+      "hidden": 64,
+      "out_dim": 64,
+      "lr": 0.001,
+      "max_epochs": 300,
+      "patience": 20,
+      "pca_components": 8,
+      "device": "cpu",
+      "usu_edge_fraction": 1.0
+    },
+    "neighbour_agg": {
+      "statistics": [
+        "mean"
+      ],
+      "log1p_degree": true,
+      "rewire_swaps_per_edge": 10
+    },
+    "blocks": [
+      "own"
+    ]
+  },
+  "source": "outputs/yelpchi_repeat2/pilot_g9n3_sign_rw",
+  "command": "--dataset yelpchi --set split.n_repeats=3 --set split.repeat=2 --set feature_set=pilot_g9n3_sign_rw --set gnn_classify.device=cuda",
+  "packages": {
+    "numpy": "2.5.3",
+    "pandas": "3.0.6",
+    "pyarrow": "25.0.1",
+    "scikit-learn": "1.9.1",
+    "scipy": "1.18.1",
+    "pyyaml": "6.0.3",
+    "torch": "2.9.1",
+    "torch-geometric": "2.8.1"
+  },
+  "tags": [
+    "pilot",
+    "gat-deep"
+  ],
+  "results_rows": 1,
+  "results_columns": [
+    "model",
+    "selection",
+    "embed_selector",
+    "cv_pr_auc",
+    "cv_pr_auc_std",
+    "cv_auroc",
+    "cv_auroc_std",
+    "tuning_metric",
+    "pr_auc",
+    "auroc",
+    "f1",
+    "precision",
+    "recall",
+    "accuracy",
+    "balanced_accuracy",
+    "tp",
+    "fp",
+    "fn",
+    "tn",
+    "threshold",
+    "f1_at_05",
+    "precision_at_05",
+    "recall_at_05",
+    "accuracy_at_05",
+    "balanced_accuracy_at_05"
+  ]
+}
