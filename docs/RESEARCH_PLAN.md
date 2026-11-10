@@ -1327,6 +1327,22 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
   - **Reporting:** the 5-split Amazon verdicts replace the 3-split ones once all 12 jobs are done (as on 2026-10-29); the 3-split tables stay in the database (tag `splits3`). If the queue stops early, the 3-split verdicts stand and the extra splits are reported as descriptive.
   - **N9's early stopping is not changed** (left for the group), so N9 on splits 3–4 runs as on splits 0–2.
 
+- **2026-11-10 (seventh amendment: the GNN classifiers without f19, Amazon; the user's request, written before any of these runs existed).** Every GNN classifier rung is also run without `own__f19` (`pilot_<rung>_no19`, block `own_no19`), so the end-to-end GNNs can be compared with df-analyze's no19 rungs (B, E1, E2; 2026-10-27/29). This lifts the 2026-10-31 "every feature only" choice for these rungs; the all-feature runs stay as they are.
+  - **Rungs:** E5, E5g, E6, N3, E5w, E6w, E9, N9, E10, N10, with their usual settings and grids. Leaving f19 out of each node's input also leaves it out of every neighbour message, hop mean and attention score. Each control (N3, N9, N10) takes its no19 sibling's chosen setting. None is a `gnn_oof` candidate.
+  - **Splits 0–2** (seed 555), the splits E1_no19 has. GPU (`gnn_classify.device: cuda`) on `rtx4060-desktop`, one job at a time, after the Amazon split 3–4 queue, in the order E5, E6, N3, E9, N9, E10, N10, E5w, E6w, E5g.
+  - **Primary contrasts (no19, Holm over these 4):**
+
+    | Contrast | Question | Expected |
+    |---|---|---|
+    | E5 − E6 | does the graph help an end-to-end GNN without f19? | supported |
+    | E5 − N3 | is that real structure rather than degree? | supported |
+    | best GNN − E1 | does an end-to-end GNN reach df-analyze with neighbour means? Best of {E5, E5w, E9, E10} per split by mean CV PR-AUC, never test | not supported |
+    | best GNN − B | does it beat df-analyze on own features? | supported |
+
+  - **Secondary** (verdicts reported, no family): E10 − E5, E10 − N10, E9 − N9, E9 − E5, E5w − E5, E5w − E6w, E5g − E5, and each rung's all-feature − no19 difference (descriptive, as F4 is for B).
+  - **Same rule and scoring** as the sixth amendment. B_no19 and E1_no19 ran on `rtx4060-laptop`; their p-values need its per-fold outputs.
+  - **What was known when this was written:** B_no19 0.516 / 0.535 / 0.565 / 0.558 / 0.542 (splits 0–4), E1_no19 0.703 / 0.699 / 0.706 (splits 0–2), E2_no19 about 0.66. No GNN classifier had been run without f19.
+
 ---
 
 ## 12. Status and next steps

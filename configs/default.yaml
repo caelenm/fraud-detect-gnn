@@ -173,6 +173,18 @@ feature_sets:
   # GAT (docs/GAT_DEEP_PLAN.md; approved 2026-11-08, not run yet).
   pilot_g10_gat: [own]         # E10: GAT, attention per relation
   pilot_g10n3_gat_rw: [own]    # N10: E10 on N2's rewired graph
+  # 2026-11-10 (Amazon only): every GNN classifier rung without f19 (see
+  # gnn_models), for comparison with df-analyze's no19 rungs.
+  pilot_g5_sage_no19: [own_no19]
+  pilot_g5g_rgcn_no19: [own_no19]
+  pilot_g6_mlp_no19: [own_no19]
+  pilot_g5n3_sage_rw_no19: [own_no19]
+  pilot_g5w_sage_big_no19: [own_no19]
+  pilot_g6w_mlp_big_no19: [own_no19]
+  pilot_g9_sign_no19: [own_no19]
+  pilot_g9n3_sign_rw_no19: [own_no19]
+  pilot_g10_gat_no19: [own_no19]
+  pilot_g10n3_gat_rw_no19: [own_no19]
   # E8 (Model 6): + the best GNN's out-of-fold score (gnn_oof stage); E8s
   # without the neighbour means.
   pilot_m8_own_nbr_gnnsup: [own, nbr, gnnsup]
@@ -233,6 +245,24 @@ gnn_models:
       heads: 4
   pilot_g10n3_gat_rw: {graph: rewired, norm: mean, setting_from: pilot_g10_gat,
                        train: *gat}
+  # 2026-11-10 (Amazon, the user's request): every GNN classifier rung without
+  # f19, to compare with df-analyze's no19 rungs (B, E1, E2). The own_no19
+  # block leaves f19 out of each node's input, so also out of every message,
+  # hop mean and attention score. Same settings and grids; each control takes
+  # its no19 sibling's setting. Not gnn_oof candidates.
+  pilot_g5_sage_no19: {graph: real, norm: mean}
+  pilot_g5g_rgcn_no19: {graph: real, norm: sym}
+  pilot_g6_mlp_no19: {graph: none, norm: mean}
+  pilot_g5n3_sage_rw_no19: {graph: rewired, norm: mean,
+                            setting_from: pilot_g5_sage_no19}
+  pilot_g5w_sage_big_no19: {graph: real, norm: mean, train: *larger_sage}
+  pilot_g6w_mlp_big_no19: {graph: none, norm: mean, train: *larger_sage}
+  pilot_g9_sign_no19: {graph: real, norm: mean, train: *sign}
+  pilot_g9n3_sign_rw_no19: {graph: rewired, norm: mean,
+                            setting_from: pilot_g9_sign_no19, train: *sign}
+  pilot_g10_gat_no19: {graph: real, norm: mean, train: *gat}
+  pilot_g10n3_gat_rw_no19: {graph: rewired, norm: mean,
+                            setting_from: pilot_g10_gat_no19, train: *gat}
 
 gnn_classify:
   # Each layer: root weight + one weight per relation on A_hat h, summed;
