@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "run_id": "20261110T201010Z_amazon_274a3b",
+  "recorded_utc": "2026-11-10T20:12:13Z",
+  "started_utc": "2026-11-10T20:10:10Z",
+  "finished_utc": "2026-11-10T20:12:12Z",
+  "duration_min": 2.0,
+  "device": "rtx4060-desktop",
+  "device_details": {
+    "os": "Linux",
+    "platform": "Linux-6.6.87.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "wsl": true,
+    "python": "3.13.16",
+    "cpu": "AMD Ryzen 7 7700 8-Core Processor",
+    "gpus": [
+      {
+        "name": "NVIDIA GeForce RTX 4060",
+        "driver": "621.01",
+        "memory": "8188 MiB"
+      }
+    ]
+  },
+  "description": "Amazon without f19, 3 splits (seventh amendment, primary): E5 - E6 +0.150 +/- 0.015, p 1.3e-06, supported; E5 - N3 +0.154 +/- 0.015, p 5.1e-09, supported",
+  "kind": "compare",
+  "status": "ok",
+  "dataset": "amazon",
+  "feature_set": null,
+  "split_repeat": null,
+  "seed": null,
+  "git_commit": "fe7645613f5f1fe2fd1ff8745fae3a24a3d6ec58",
+  "git_dirty": false,
+  "tags": [
+    "pilot",
+    "gnn-no19"
+  ],
+  "source": "outputs/amazon/compare/gnn_no19_graph.csv",
+  "results_rows": 2,
+  "results_columns": [
+    "variant",
+    "contrast",
+    "a",
+    "b",
+    "test_delta_split0",
+    "test_delta_split1",
+    "test_delta_split2",
+    "test_delta_mean",
+    "test_delta_sd",
+    "test_pr_auc_a_mean",
+    "test_pr_auc_a_sd",
+    "test_pr_auc_b_mean",
+    "test_pr_auc_b_sd",
+    "cv_folds",
+    "cv_delta_mean",
+    "corrected_t",
+    "p",
+    "verdict"
+  ]
+}
