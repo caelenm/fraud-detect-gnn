@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "run_id": "20261110T065522Z_amazon-pilot-g10-gat_71f416",
+  "recorded_utc": "2026-11-10T06:56:30Z",
+  "started_utc": "2026-11-10T06:55:22Z",
+  "finished_utc": "2026-11-10T06:56:21Z",
+  "duration_min": 1.0,
+  "device": "rtx4060-desktop",
+  "device_details": {
+    "os": "Linux",
+    "platform": "Linux-6.6.87.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "wsl": true,
+    "python": "3.13.16",
+    "cpu": "AMD Ryzen 7 7700 8-Core Processor",
+    "gpus": [
+      {
+        "name": "NVIDIA GeForce RTX 4060",
+        "driver": "621.01",
+        "memory": "8188 MiB"
+      }
+    ]
+  },
+  "description": "E10 - N10 (GAT, real vs rewired graph), Amazon, 3 splits: +0.014 +/- 0.006, p 0.067, not distinguishable from zero (pre-registered primary contrast)",
+  "kind": "compare",
+  "status": "ok",
+  "dataset": "amazon",
+  "feature_set": "pilot_g10_gat",
+  "split_repeat": null,
+  "seed": null,
+  "git_commit": "242712eeae62e2252bf59f93371cc0bd2df5c140",
+  "git_dirty": false,
+  "command": "uv run scripts/compare_report.py --dataset amazon --a pilot_g10n3_gat_rw --b pilot_g10_gat --repeat k (k=0..2); uv run scripts/repeat_summary.py --dataset amazon --repeats 3 --prefix pilot_ --pairs g10n3_gat_rw:g10_gat --name gat_vs_rewired",
+  "tags": [
+    "pilot",
+    "gat-deep",
+    "splits3"
+  ],
+  "source": "outputs/amazon/compare/gat_vs_rewired.csv",
+  "results_rows": 1,
+  "results_columns": [
+    "variant",
+    "contrast",
+    "a",
+    "b",
+    "test_delta_split0",
+    "test_delta_split1",
+    "test_delta_split2",
+    "test_delta_mean",
+    "test_delta_sd",
+    "test_pr_auc_a_mean",
+    "test_pr_auc_a_sd",
+    "test_pr_auc_b_mean",
+    "test_pr_auc_b_sd",
+    "cv_folds",
+    "cv_delta_mean",
+    "corrected_t",
+    "p",
+    "verdict"
+  ]
+}

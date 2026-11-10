@@ -1,0 +1,2 @@
+variant,contrast,a,b,test_delta_split0,test_delta_split1,test_delta_split2,test_delta_mean,test_delta_sd,test_pr_auc_a_mean,test_pr_auc_a_sd,test_pr_auc_b_mean,test_pr_auc_b_sd,cv_folds,cv_delta_mean,corrected_t,p,verdict
+-,g10_gat - g10n3_gat_rw,pilot_g10n3_gat_rw,pilot_g10_gat,0.0198728906641776,0.0078694784895131,0.0155991649087937,0.0144471780208281,0.0060840596069774,0.8944935015866523,0.0041527477640816,0.9089406796074804,0.0101169871436781,15,0.0099783655379361,1.9835417121575991,0.0672738346539935,not distinguishable from zero
