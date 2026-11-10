@@ -1,0 +1,2 @@
+variant,contrast,a,b,test_delta_split0,test_delta_split1,test_delta_split2,test_delta_mean,test_delta_sd,test_pr_auc_a_mean,test_pr_auc_a_sd,test_pr_auc_b_mean,test_pr_auc_b_sd,cv_folds,cv_delta_mean,corrected_t,p,verdict
+-,g10_gat_no19 - g5_sage_no19,pilot_g5_sage_no19,pilot_g10_gat_no19,0.0157900882103578,0.0125944227759112,0.017850912830071,0.01541180793878,0.0026485833751779,0.6765754701999813,0.007153762661321,0.6919872781387614,0.0080880988592407,15,0.0065912428061364,0.6981518013285494,0.496515576526582,not distinguishable from zero
