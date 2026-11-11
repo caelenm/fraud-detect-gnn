@@ -1343,6 +1343,18 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
   - **Same rule and scoring** as the sixth amendment. B_no19 and E1_no19 ran on `rtx4060-laptop`; their p-values need its per-fold outputs.
   - **What was known when this was written:** B_no19 0.516 / 0.535 / 0.565 / 0.558 / 0.542 (splits 0–4), E1_no19 0.703 / 0.699 / 0.706 (splits 0–2), E2_no19 about 0.66. No GNN classifier had been run without f19.
 
+- **2026-11-11 (results: Amazon splits 3–4 and the GNNs without f19; 42 jobs, 2026-11-10 15:33 to 2026-11-11 01:10 UTC, all on the GPU).** Tables: [`GAT_DEEP_RESULTS.md`](GAT_DEEP_RESULTS.md); database tags `splits5` and `gnn-no19`.
+  - **Amazon, all features, 5 splits** (these verdicts replace the 3-split ones):
+    - E10 − N10 +0.013 ± 0.005, p 0.026, **supported** (3 splits: p 0.067); expected "not supported".
+    - E9 − N9 +0.011, p 0.45, not distinguishable (N9 stopped at epoch 1–2 in 16 and 17 of 25 fits on splits 3–4, so this p is not meaningful). E5w − E6w −0.001, p 0.97.
+    - Against laptop rungs (p pending): E5w − E5 −0.002 (Δ < 0 on 3 splits, not supported); E10 − E5 +0.012 ± 0.006, positive on every split; best of {E5w, E10} (E10 on every split) − E1 −0.021, worse on every split, not supported.
+  - **Amazon without f19, splits 0–2 (seventh amendment):**
+    - Means: E10 0.692, E5g 0.692, E9 0.683, E5w 0.683, E5 0.677, N9 0.551, N10 0.545, E6 0.527, N3 0.523, E6w 0.520 (B_no19 0.539, E1_no19 0.702).
+    - Primary: E5 − E6 +0.150, p 1.3e-06, **supported**; E5 − N3 +0.154, p 5.1e-09, **supported** (both as expected; both stay below 0.05 after Holm over 4). Best GNN (E10 on every split, by CV) − E1 −0.011 ± 0.007, worse on every split: **not supported**, as expected (p pending). Best GNN − B +0.153 ± 0.017, positive on every split, mean > SD (p pending).
+    - Secondary: E10 − N10 +0.148 (p 8.9e-05), E9 − N9 +0.133 (p 6.7e-04) and E5w − E6w +0.163 (p 1.3e-05) supported; E10 − E5 +0.015 (p 0.50), E9 − E5 +0.007, E5w − E5 +0.007 and E5g − E5 +0.015 not distinguishable.
+    - N9's early stopping hardly failed without f19 (5, 1 and 3 of 25 fits at epoch ≤ 2).
+  - **Reading:** with f19, Amazon's graph adds little to a GNN; without it, every GNN gains 0.13–0.16 from the real graph and almost nothing from a rewired one, so the GNNs' graph gain is real structure rather than degree. The best GNN without f19 comes within 0.011 of E1.
+
 ---
 
 ## 12. Status and next steps
