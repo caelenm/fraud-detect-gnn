@@ -15,6 +15,7 @@ automatically.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -250,6 +251,216 @@ def fake_feature_graph(
     own.columns = [C.NODE_ID, *(f"own__f{j:02d}" for j in range(width))]
     edges = {r: fake_edges(n, 3 * n, seed + i) for i, r in enumerate(relations)}
     return nodes, own, edges
+
+
+def toy_explain_graph(
+    n: int = 30, seed: int = 0
+) -> tuple[pd.DataFrame, dict[str, np.ndarray]]:
+    """Invented own block (own__f00, own__f01) and two relations for the
+    explanation tests. In `upu`, node 0 has three neighbours and node 29 has
+    exactly one (node 28); the rest of the graph is random."""
+    rng = np.random.default_rng(seed)
+    own = pd.DataFrame(
+        {
+            C.NODE_ID: np.arange(n),
+            "own__f00": rng.normal(size=n),
+            "own__f01": rng.normal(size=n),
+        }
+    )
+    upu = fake_edges(n - 2, 2 * n, seed)
+    upu = upu[:, upu[0] != 0]  # node 0's neighbours are set below
+    planted = np.array([[0, 0, 0, 28], [1, 2, 3, 29]], dtype=np.int32)
+    upu = np.unique(np.concatenate([upu, planted], axis=1), axis=1)
+    return own, {"upu": upu, "usu": fake_edges(n - 2, n, seed + 1)}
+
+
+def toy_explain_table(
+    n: int = 600, n_folds: int = 3, seed: int = 0
+) -> tuple[pd.DataFrame, np.ndarray, np.ndarray]:
+    """Invented training table for the explanation tests: `signal` nearly decides
+    the label, the two noise columns do not, and folds are assigned at random."""
+    rng = np.random.default_rng(seed)
+    signal = rng.normal(size=n)
+    y = (signal + rng.normal(0, 0.3, size=n) > 1.0).astype(int)
+    x = pd.DataFrame(
+        {"signal": signal, "noise_0": rng.normal(size=n), "noise_1": rng.normal(size=n)}
+    )
+    return x, y, rng.integers(0, n_folds, size=n)
+
+
+def fake_explain_outputs(tmp_path: Path) -> tuple[Path, Path, dict[str, np.ndarray]]:
+    """Invented outputs of scripts/dfa/shap_explain.py, written to tmp_path: random
+    SHAP values, group values, neighbour influences, check tables and one case
+    card. They describe no real model or node."""
+    rng = np.random.default_rng(0)
+    folder = tmp_path / "explain"
+    folder.mkdir()
+    n, n_nodes = 60, 80
+    columns = ["own_f00", "own_f01", "nbr_upu_mean_f00", "nbr_upu_log1p_degree"]
+    frame = pd.DataFrame(rng.normal(size=(n, 4)), columns=[f"shap__{c}" for c in columns])
+    frame.insert(0, "margin", rng.normal(size=n))
+    frame.insert(0, "prob", rng.uniform(size=n))
+    frame.insert(0, C.LABEL, rng.integers(0, 2, size=n))
+    frame.insert(0, C.GROUP_ID, np.arange(n) // 2)
+    frame.insert(0, C.NODE_ID, np.arange(n))
+    frame.to_parquet(folder / "shap_test.parquet")
+    groups = pd.DataFrame(
+        {
+            C.NODE_ID: np.arange(n),
+            C.GROUP_ID: np.arange(n) // 2,
+            "group__own": rng.normal(size=n),
+            "group__nbr_upu": rng.normal(size=n),
+            "group__degree": rng.normal(size=n),
+        }
+    )
+    groups.to_parquet(folder / "group_shapley.parquet")
+    meta = {
+        "dataset": "amazon",
+        "repeat": 0,
+        "feature_set": "fake_set",
+        "budget": "pilot",
+        "model": "lgbm",
+        "selection": "none",
+        "embed_selector": None,
+        "n_input_columns": 4,
+        "threshold": 0.5,
+        "sections": {
+            "shap": {
+                "feature_perturbation": "interventional",
+                "n_background": 10,
+                "n_test_rows": n,
+                "implementation_check": {"max_additivity_error": 1e-9},
+            }
+        },
+    }
+    (folder / "explain_meta.json").write_text(json.dumps(meta), encoding="utf-8")
+    pd.DataFrame(
+        {
+            "comparison": ["background size 200", "path-dependent TreeSHAP"],
+            "n_background": [200, 0],
+            "kendall_tau": [0.9, 0.7],
+            "top10_jaccard": [1.0, 0.8],
+            "top10_max_rank_move": [1, 2],
+        }
+    ).to_csv(folder / "sensitivity.csv", index=False)
+    pd.DataFrame(
+        {
+            "run": ["true labels", "permuted labels 0"],
+            "pr_auc": [0.8, 0.1],
+            "prevalence": [0.1, 0.1],
+            "total_mean_abs": [2.0, 0.5],
+            "spearman_with_true": [1.0, 0.1],
+        }
+    ).to_csv(folder / "randomisation.csv", index=False)
+    pd.DataFrame(
+        {
+            "refit": ["df-analyze's seed", "seed 2"],
+            "max_margin_gap_vs_model_a": [0.0, 0.5],
+            "kendall_tau": [0.9, 0.8],
+            "top10_jaccard": [1.0, 1.0],
+            "top10_max_rank_move": [1, 1],
+        }
+    ).to_csv(folder / "seed_stability.csv", index=False)
+    pd.DataFrame(
+        {
+            "column": columns,
+            "Model A": [4.0, 3.0, 2.0, 1.0],
+            "seed 2": [1.0, 3.0, 2.0, 4.0],
+        }
+    ).to_csv(folder / "seed_importance.csv", index=False)
+    pd.DataFrame(
+        {
+            "a": ["own_f00"],
+            "b": ["nbr_upu_mean_f00"],
+            "mean_abs_interaction": [0.1],
+            "own_x_graph": [True],
+            "n_rows": [5],
+            "feature_perturbation": ["tree_path_dependent"],
+        }
+    ).to_csv(folder / "interactions.csv", index=False)
+    roar = []
+    for fold in range(3):
+        for kind, name, k in (
+            ("baseline", "baseline", 0), ("block", "own", 2), ("top_k", "top 1", 1),
+            ("top_k", "top 2", 2), ("random", "random 1", 1), ("random", "random 2", 2),
+        ):  # fmt: skip
+            drop = 0.0 if kind == "baseline" else float(rng.uniform(0, 0.2))
+            roar.append(
+                {"fold": fold, "kind": kind, "name": name, "k": k, "draw": 0,
+                 "pr_auc": 0.8 - drop, "drop": drop}
+            )  # fmt: skip
+    pd.DataFrame(roar).to_csv(folder / "roar.csv", index=False)
+    influence = pd.DataFrame(
+        {
+            "target": rng.integers(0, n, size=200),
+            "neighbour": rng.integers(0, n_nodes, size=200),
+            "relation": "upu",
+            "degree": rng.integers(1, 9, size=200),
+            "delta_margin": rng.normal(size=200),
+            "delta_prob": rng.normal(0, 0.01, size=200),
+            "delta_prob_mean": rng.normal(0, 0.01, size=200),
+            "out_of_range": rng.random(200) < 0.1,
+        }
+    )
+    influence.to_parquet(folder / "neighbour_influence.parquet")
+    scores = rng.uniform(size=n_nodes)
+    pd.DataFrame({C.NODE_ID: np.arange(n_nodes), "prob": scores}).to_parquet(
+        folder / "node_scores.parquet"
+    )
+    pd.DataFrame(
+        {
+            "relation": ["upu"] * 4,
+            "degree": [3, 4, 5, 6],
+            "spearman_loo_vs_shapley": [0.9, 0.5, "", 0.7],
+            "shapley_abs_sum": [0.2, 0.3, 0.1, 0.2],
+            "loo_abs_sum": [0.1, 0.1, 0.1, 0.2],
+            "same_top_neighbour": [1, 0, 1, 1],
+        }
+    ).to_csv(folder / "neighbour_redundancy.csv", index=False)
+    card = {
+        "stratum": "false_positive",
+        "node_id": 7,
+        "label": 0,
+        "prob": 0.7,
+        "margin": 0.85,
+        "base_value": -2.0,
+        "threshold": 0.5,
+        "contributions": [
+            {"column": "own_f00", "value": 1.5, "shap": 2.0},
+            {"column": "nbr_upu_mean_f00", "value": 0.5, "shap": -0.15},
+        ],
+        "rest": 1.0,
+        "neighbours": [
+            {
+                "neighbour": 3,
+                "relation": "upu",
+                "degree": 4,
+                "delta_prob": 0.01,
+                "delta_prob_mean": 0.01,
+            }
+        ],  # fmt: skip
+        "nearest_training": [{"node_id": 9, "label": 0, "prob": 0.6}],
+        "counterfactual": {
+            "kind": "feature",
+            "name": "own_f00",
+            "to_value": 0.0,
+            "new_prob": 0.3,
+            "crosses_threshold": True,
+        },
+    }
+    cards = json.dumps({"cards": [card]})
+    (folder / "case_cards.json").write_text(cards, encoding="utf-8")
+    info = {
+        "columns": {
+            "own_f00": {"block_column": "own__f00"},
+            "own_f01": {"block_column": "own__f01"},
+            "nbr_upu_mean_f00": {"block_column": "nbr__upu_mean_f00"},
+            "nbr_upu_log1p_degree": {"block_column": "nbr__upu_log1p_degree"},
+        }
+    }
+    feature_set_json = tmp_path / "feature_set.json"
+    feature_set_json.write_text(json.dumps(info), encoding="utf-8")
+    return folder, feature_set_json, {"upu": fake_edges(n_nodes, 200, 0)}
 
 
 def fake_inferred_types(kinds: dict[str, str]) -> pd.DataFrame:

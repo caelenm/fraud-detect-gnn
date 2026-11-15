@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Model Explanations</title>
+  <link rel="stylesheet" href="/report.css">
+  <link rel="stylesheet" href="/dashboard.css">
+  <link rel="stylesheet" href="/explain.css">
+  <script src="/explain.js" defer></script>
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <div>
+        <div class="eyebrow">CS555 course project · results dashboard</div>
+        <h1>What drives the best models' scores?</h1>
+      </div>
+      <div class="meta" id="header-meta"></div>
+    </header>
+    <nav class="pages" aria-label="Dashboard pages">
+      <a href="/">Overview</a>
+      <a href="/questions">Research questions</a>
+      <a href="/methods">Methods</a>
+      <a href="/contrasts">Contrasts</a>
+      <a href="/datasets">Across datasets</a>
+      <a href="/classify">Classify a node</a>
+      <a href="/walkthrough">Explain a node</a>
+      <a href="/explain" aria-current="page">Explanation details</a>
+      <a href="/checks">Checks</a>
+    </nav>
+
+    <form class="controls" id="controls" aria-label="Which model">
+      <fieldset class="control">
+        <legend>Model explained</legend>
+        <div class="segmented wrap-buttons" id="model-buttons"></div>
+      </fieldset>
+      <div class="control push">
+        <button type="button" class="ghost" id="theme-toggle">Theme: auto</button>
+      </div>
+    </form>
+
+    <noscript>
+      <p class="notice">This page draws its charts with JavaScript. The same numbers are in each model's explain.html under outputs/ and in docs/EXPLAINABILITY_PLAN.md.</p>
+    </noscript>
+
+    <main>
+      <section id="read-first" aria-labelledby="read-first-title">
+        <h2 id="read-first-title">Read this first</h2>
+        <div class="grid-2">
+          <div class="panel panel-pad">
+            <h3 class="sub">What these numbers are</h3>
+            <ul class="plain small">
+              <li><b>SHAP values</b> here are exact Shapley values of a stated game: the model's log-odds, with absent features filled in from a fixed background sample of training nodes (interventional TreeSHAP). They add up exactly to each node's score. That is a property of the arithmetic, not proof the explanation is faithful; the tests below check that.</li>
+              <li><b>Neighbour influence</b> is necessity-style: how much a test node's score changes when one neighbour is removed and its neighbour means are recomputed. It is not "the important nodes", and redundant neighbours can each look unimportant.</li>
+              <li>Correlated features share credit unpredictably, so rankings among them are unstable; block totals are more reliable than single columns.</li>
+              <li>For GNN embeddings, SHAP credits embedding dimensions, not edges or nodes.</li>
+            </ul>
+          </div>
+          <div class="panel panel-pad">
+            <h3 class="sub">What they are not</h3>
+            <ul class="plain small">
+              <li>They explain the <b>model</b>, not the cause of fraud.</li>
+              <li>Amazon's <b>f19</b> is a probable label leak (a helpfulness-vote count, while the label is the share of helpful votes). The "without f19" model is the substantive explanation; "all 25 features" is a leakage audit.</li>
+              <li>YelpChi's labels come from Yelp's own spam filter, not from verified fraud.</li>
+              <li>Studies with fraud analysts found explanations did not reliably improve their decisions and can raise over-reliance. This page is for understanding the models in the course, not for deciding cases.</li>
+              <li>None of these models uses attention, so no attention weights are shown.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section id="model" aria-labelledby="model-title">
+        <h2 id="model-title">The model</h2>
+        <p class="lede" id="model-lede"></p>
+        <div id="model-state"></div>
+        <div class="stats" id="model-stats"></div>
+        <details class="more" id="model-checks-box">
+          <summary>Checks before any node is shown</summary>
+          <ul class="checks-list" id="model-checks"></ul>
+        </details>
+        <ul class="plain small" id="model-notes"></ul>
+      </section>
+
+      <section id="node" aria-labelledby="node-title">
+        <h2 id="node-title">Explain a random test node</h2>
+        <p class="lede">Draw a test node at random. The model was not fitted on it. Draws by outcome use the threshold chosen on training predictions.</p>
+        <p class="group-banner">Group only: this section shows row-level test data. Do not upload, commit or host it.</p>
+        <div class="panel panel-pad">
+          <div class="actions draw-actions">
+            <div class="segmented wrap-buttons" id="draw-buttons" role="group" aria-label="Which kind of node"></div>
+            <label class="field"><span class="control-label">Seed (optional)</span><input id="seed-input" inputmode="numeric" autocomplete="off" placeholder="random"></label>
+            <button type="button" class="primary" id="draw-button">Draw a node</button>
+          </div>
+          <div class="history" id="draw-history" aria-label="Earlier draws"></div>
+        </div>
+        <div id="card"></div>
+      </section>
+
+      <section id="overall" aria-labelledby="overall-title">
+        <h2 id="overall-title">What drives the model overall</h2>
+        <p class="lede">Mean absolute SHAP over the test nodes, with 95% intervals from resampling whole split groups. Colour shows the direction of the average push.</p>
+        <div class="panel panel-pad">
+          <div class="segmented wrap-buttons" id="stratum-buttons" role="group" aria-label="Which test nodes"></div>
+          <div class="legend" id="importance-legend"></div>
+          <div class="chart-scroll" id="importance-chart"></div>
+        </div>
+        <div class="grid-2">
+          <div class="panel panel-pad">
+            <h3 class="sub">By block</h3>
+            <p class="small muted">Summed SHAP adds a block's columns. Group Shapley treats the block as one player, on 1,000 test nodes. A gap between them is interaction across blocks.</p>
+            <div class="table-scroll" id="blocks-table"></div>
+          </div>
+          <div class="panel panel-pad">
+            <h3 class="sub">Strongest interactions</h3>
+            <p class="small muted">Mean absolute SHAP interaction value on a sample of test nodes.</p>
+            <div class="table-scroll" id="interactions-table"></div>
+            <div id="correlated-box"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="tests" aria-labelledby="tests-title">
+        <h2 id="tests-title">Do the explanations hold up?</h2>
+        <p class="lede">Tests on training cross-validation folds. They check the explanations, not the model.</p>
+        <div class="grid-2">
+          <div class="panel panel-pad">
+            <h3 class="sub">Removing the top-SHAP features vs random ones</h3>
+            <p class="small muted">The drop in CV PR-AUC after refitting without the k columns SHAP ranks highest, against k random columns. Faithful rankings should hurt more.</p>
+            <div class="table-scroll" id="roar-table"></div>
+          </div>
+          <div class="panel panel-pad">
+            <h3 class="sub">Label randomisation</h3>
+            <p class="small muted">Refit on shuffled training labels: PR-AUC should fall to the positive rate and the SHAP ranking should lose its agreement with the real one.</p>
+            <div class="table-scroll" id="randomisation-table"></div>
+          </div>
+          <div class="panel panel-pad">
+            <h3 class="sub">Stability across refits</h3>
+            <p class="small muted">The same model refit with other seeds; Kendall tau and top-10 overlap of the rankings.</p>
+            <div class="table-scroll" id="seeds-table"></div>
+          </div>
+          <div class="panel panel-pad">
+            <h3 class="sub">Sensitivity to the SHAP background</h3>
+            <p class="small muted">Other background samples and sizes, and the path-dependent mode.</p>
+            <div class="table-scroll" id="sensitivity-table"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="neighbours" aria-labelledby="neighbours-title">
+        <h2 id="neighbours-title">Neighbour influence overall</h2>
+        <p class="lede" id="neighbours-lede">Leave-one-neighbour-out on every test node: the change in its score when one neighbour is removed.</p>
+        <div id="neighbours-body"></div>
+      </section>
+    </main>
+
+    <footer id="page-footer"></footer>
+  </div>
+  <div class="tooltip" id="tooltip" role="status" hidden></div>
+</body>
+</html>

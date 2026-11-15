@@ -270,9 +270,100 @@ What these do and do not show:
 
 - **On Amazon the full budget gives the pilot's verdicts.** With all features, only neighbour means pass the rule. Without #36, both graph setups pass, and neighbour means beat the DGI embeddings.
 - **On YelpChi the graph gains shrink at the full budget.** E1 − B falls from +0.033 (pilot) to +0.015 and is still supported. E2 − B falls from +0.046 to +0.018 and is no longer distinguishable from zero. B barely moves (+0.003 on average); E1 and E2 drop by 0.015 and 0.025. So, as with the default-settings check, YelpChi's ranking of setups depends on the tuning, while the neighbour-means gain holds.
-- **This is not the stopped 100-trial check.** That check kept the pilot's 3 classifiers and included E7 and E8. These runs use all 6 classifiers and have no E7 or E8, so whether the trial count explains E7's and E8's shortfall is still open.
+- **This is not the stopped 100-trial check.** That check kept the pilot's 3 classifiers and included E7 and E8. These runs use all 6 classifiers and have no E7 or E8, so whether the trial count explains E7's and E8's shortfall is still open. (Full-budget E7 and E8 ran later, in the next section.)
 - **One split is not enough.** On YelpChi split 0, E2 led E1 by +0.037; splits 1 and 2 reversed that. The DGI setup varies more across splits (SD 0.026) than neighbour means (0.007).
 - **Two Amazon split-0 runs exist for B** (all features and without #36): the earlier ones on the laptop (0.919 and 0.518) and these reruns on the desktop (0.916 and 0.523). df-analyze's feature selection is not seeded. The dashboard counts the earlier run and keeps the rerun as a replication (in the database, not in its numbers); the verdict table above used the reruns.
+
+## Results (full-budget queue, 2026-11-09 to 2026-11-15)
+
+The sixth amendment's queue (RESEARCH_PLAN §11, written before the runs): the **full Model A budget** (6 classifiers, 100 trials, `bal-acc`, seed 555), one job at a time on the RTX 4060 laptop (`rtx4060-laptop`), splits 0–2 (Amazon without f19: splits 1–2, since split 0 ran on 2026-10-29 and 2026-10-30). 24 runs and 5 verdict tables are in the [results database](#results-database) (tags `full`, `full-queue`). Every run passed the split and column-type checks. Two runs, YelpChi E7 on splits 1 and 2, hit df-analyze's time limit while tuning logistic regression; the trials finished before it are kept, the user accepted them as they are (2026-11-12), and their database entries say so. Model A was not logistic regression in either run. The GNN classifiers (E5, E5g, E6, N3) were not rerun: `gnn_classify` ignores df-analyze's budget.
+
+**Test PR-AUC per split, full budget** (pilot means for comparison; B, E1 and E2 with all features are the desktop runs above, except B on Amazon split 0, which counts the laptop's earlier run):
+
+| Dataset, variant | Setup | Split 0 | Split 1 | Split 2 | Mean ± SD | Pilot |
+|---|---|---|---|---|---|---|
+| Amazon, without f19 | B | 0.525 | 0.542 | 0.573 | 0.546 ± 0.024 | 0.544 ± 0.019 (5 splits) |
+| Amazon, without f19 | E1 | 0.714 | 0.698 | 0.716 | **0.709 ± 0.010** | 0.702 ± 0.004 |
+| Amazon, without f19 | E2 | 0.646 | 0.697 | 0.652 | 0.665 ± 0.028 | 0.677 ± 0.015 (5 splits) |
+| Amazon, all 25 | E7 | 0.939 | 0.929 | 0.933 | 0.934 ± 0.005 | 0.938 ± 0.007 (5 splits) |
+| Amazon, all 25 | E7r | 0.939 | 0.932 | 0.931 | 0.934 ± 0.004 | 0.936 ± 0.005 (5 splits) |
+| Amazon, all 25 | E8 | 0.928 | 0.924 | 0.937 | 0.930 ± 0.007 | 0.930 ± 0.007 (5 splits) |
+| Amazon, all 25 | E8s | 0.936 | 0.926 | 0.929 | 0.930 ± 0.005 | 0.928 ± 0.004 (5 splits) |
+| YelpChi, all 32 | E7 | 0.858 | 0.855 | 0.831 | 0.848 ± 0.015 | 0.855 ± 0.021 |
+| YelpChi, all 32 | E8 | 0.797 | 0.779 | 0.786 | 0.788 ± 0.009 | 0.817 ± 0.016 |
+
+**Pre-registered contrasts** (rule of 2026-10-19, 3 splits, full budget):
+
+| Dataset, variant | Contrast | Δ, splits 0 / 1 / 2 | Mean ± SD | CV p | Verdict |
+|---|---|---|---|---|---|
+| Amazon, without f19 | E1 − B | +0.190 / +0.156 / +0.143 | +0.163 ± 0.024 | 3e-7 | supported |
+| Amazon, without f19 | E2 − B | +0.122 / +0.155 / +0.079 | +0.119 ± 0.038 | 1e-5 | supported |
+| Amazon, without f19 | E2 − E1 | −0.068 / −0.001 / −0.064 | −0.044 ± 0.037 | 0.062 | worse (not significant) |
+| Amazon, all 25 | E7 − E7r | −0.001 / −0.003 / +0.002 | −0.001 ± 0.003 | 0.31 | worse (not significant) |
+| Amazon, all 25 | E8 − E7 | −0.010 / −0.005 / +0.004 | −0.004 ± 0.007 | 0.95 | worse (not significant) |
+| Amazon, all 25 | E8 − E8s | −0.007 / −0.002 / +0.009 | −0.000 ± 0.008 | 0.97 | worse (not significant) |
+| YelpChi, all 32 | E8 − E7 | −0.061 / −0.076 / −0.045 | −0.061 ± 0.015 | 3e-6 | worse (significant) |
+
+**Descriptive, split 0 only** (no verdict; E1's models come from the desktop): Amazon E7 − E1 +0.007 and E8 − E1 −0.004; YelpChi E7 − E1 +0.008 and E8 − E1 −0.052.
+
+What these do and do not show:
+
+- **Without f19, the full budget gives the pilot's answer.** Neighbour means and DGI embeddings both beat own features by a wide margin, and neighbour means stay ahead of the embeddings (not significantly).
+- **With all 25 Amazon features, nothing separates E7, E7r, E8 and E8s.** Every difference is under 0.005 on average and changes sign across splits. Training the DGI encoder (E7 − E7r) adds nothing measurable here either.
+- **On YelpChi, the supervised GNN score still hurts.** E8 is below E7 on every split (−0.061, significant) and below E1 on split 0 (−0.052). On the test scores of all three splits, E8 is 0.069 below E1 on average, but that is not a pre-registered verdict: E1's splits 1–2 were run on the desktop, whose row-level outputs are not here. So the full budget does not close E8's pilot shortfall.
+- **E7 on YelpChi is not settled.** On split 0, E7 − E1 is +0.008 (the pilot's mean was −0.016), but one split carries no verdict, and on the test scores E7 falls 0.033 below E1 on split 2.
+- **The full budget changes the classifiers as well as the trials,** so it does not say which part of the pilot's tuning moved YelpChi's ranking.
+
+## Results (explanations, 2026-11-08)
+
+Why each best model scores as it does, at two levels: SHAP on the tabular input, and neighbour influence on the graph. Method, caveats and references: [`docs/EXPLAINABILITY_PLAN.md`](docs/EXPLAINABILITY_PLAN.md). SHAP here is computed after training from the model's inputs and outputs; no model in the ladder uses attention. These are exact Shapley values of a stated game, in log-odds: they explain the model, not the cause of fraud, and they were tested for what they can and cannot say. One seed, one RTX 4060 laptop, split 0 unless stated. Row-level pages stay in `outputs/.../explain/` for the group only.
+
+**Amazon without f19** (`m2_own_nbr_no19`, full budget, CatBoost, 99 columns, CV PR-AUC 0.712):
+
+- **Blocks.** Mean |group Shapley| per test node: own 1.15, U-S-U means 0.71, U-V-U means 0.34, U-P-U means 0.27, degree 0.13. Summing per-column SHAP gives nearly the same, so there is little cross-block interaction. Across refits and other good models, own takes 27–40% of total attribution and U-S-U 26–29%.
+- **Does the model need the graph?** Retraining without all graph columns lowers held-out CV PR-AUC by 0.182 ± 0.054 (SD over 5 folds). Without the own columns it falls only 0.023 ± 0.013, so neighbour means can largely stand in for them.
+- **Columns: only the top two are settled.** `f15` and `f18` stay in the top 10 in every fit. Below them ranks move: another seed gives a top-10 overlap (Jaccard) of 0.33–0.54 and Kendall tau 0.53–0.61, and pilot models on other splits give tau 0.31–0.48. Test-node bootstrap intervals look narrow because they hold the model fixed.
+- **Attribution is not necessity here.** Removing the top k columns by SHAP was not clearly worse than removing k random ones up to k = 16 (of 99). It was at k = 32 (fall 0.046 vs 0.007) and k = 64 (0.066 vs 0.017). The plan's test was k ≤ 8; larger k and the all-graph removal were added after seeing that, so read them as follow-up. Removing `f13`, `f15`, `f18` costs 0.012 ± 0.013, even though they hold the largest attributions.
+- **Sanity checks.** Refitting on permuted labels drops PR-AUC to about the prevalence and Spearman with the true ranking to 0.08–0.18; total |SHAP| falls only from 4.8 to about 3.0, since trees still split on noise. The choice of background hardly matters (tau ≥ 0.95, same top 10); path-dependent TreeSHAP gives tau 0.86 and the same top 10.
+- **Neighbours.** Removing one neighbour moves a score by 0.003 on average in U-P-U (median degree 9) and 0.0004–0.0005 in U-S-U and U-V-U, almost all of it from the mean rather than the degree. Leave-one-out understates overlap: against sampled Shapley on small neighbourhoods the median Spearman is 0.54–0.66, and the top neighbour agrees 29–41% of the time. Totals partly track centrality (top-100 overlap with the highest-degree nodes: 0.95 in U-P-U, 0.60 in U-V-U, 0.43 in U-S-U).
+
+**Amazon with every feature** (leakage audit, split 0, pilot budget; the full-budget model is below). What a leaky model leans on, not fraud behaviour:
+
+- **E1** (`pilot_m2_own_nbr`, CatBoost, 24 columns after selection, CV PR-AUC 0.939): `f00` 1.32 and `f19` 1.17 lead. Group Shapley: own 1.77, degree 0.29, U-S-U 0.18, U-P-U 0.08, U-V-U 0.06. Removing the own columns costs 0.306 ± 0.043; removing all graph columns costs 0.011 ± 0.009. Removing the top column costs 0.141 and the top two 0.259, against about 0.001 for random ones. Other seeds give tau 0.77–0.84, and `f00`, `f19`, `f18` and U-S-U degree stay in the top 10 in all 6 fits.
+- **E7r** (`pilot_m7r_own_nbr_gnnrand`, CatBoost, 127 columns, CV PR-AUC 0.939), the highest 5-split mean CV of the all-features setups (0.9388 against E1's 0.9371, far inside the fold SD of about 0.03, so not a clear winner): `f19` 1.57 and `f00` 1.26 lead. Group Shapley: own 2.29, U-S-U random-encoder columns 0.60, U-S-U means 0.54, degree 0.34. One random-encoder column, `gnnrand_usu_pc08`, ranks third in the main fit and in the top 10 in all 6, yet removing that whole block costs only 0.008 ± 0.005, and all graph columns 0.024 ± 0.019. Other seeds give tau 0.45–0.53, so ranks below the top three are not settled. Neighbour influence was not run: its neighbour-mean code cannot recompute the embedding columns.
+- **Permuted labels:** both models fall to near the prevalence, and Spearman with the true ranking is −0.58 to 0.06 (E1) and −0.08 to 0.09 (E7r), so both pass this check.
+
+**YelpChi** (`pilot_m5_own_gnnssl`, E2, pilot budget, LightGBM, 56 columns, CV PR-AUC 0.864):
+
+- **Blocks.** Own 1.63, R-U-R embeddings 1.03, R-S-R 0.47, R-T-R 0.26. R-U-R neighbours are the same author's other reviews, so this is closer to a user-level proxy than to a graph discovery.
+- **The attributions hold up better than on Amazon.** The top-k removal hurts clearly more than random at every k (top 8: 0.129 vs 0.011). Refits keep the same top 10 (tau 0.92–0.94), and other splits give tau 0.70–0.76. Removing all graph columns costs 0.039 ± 0.011, and removing own columns 0.307 ± 0.015.
+- **Sanity check, only partly passed.** On permuted labels PR-AUC falls to about the prevalence, but Spearman with the true ranking stays at 0.36–0.52, so some of the ranking does not depend on the labels.
+- **Neighbours through the encoder (approximate).** The DGI encoders were retrained and reproduced the saved embeddings exactly. With the encoder and PCA held fixed, one removal moves a score by 0.005 in R-U-R (median degree 3), 0.0013 in R-T-R (23) and 0.0011 in R-S-R (148), on 2,000 sampled test nodes and at most 30 sampled neighbours per target. Nothing is retrained, so this describes these weights on a smaller graph. The neighbour sampling means a node's total depends on which removals were drawn, so the top-node tables are weak evidence; the redundancy check was not run for this model.
+- **Neighbours on E1** (`pilot_m2_own_nbr`, the same 2,000 test nodes): one removal moves a score by 0.015 in R-U-R (8.3% of removals leave the training range) and 0.002–0.003 in the others. That page uses path-dependent SHAP, because interventional SHAP failed the implementation check there.
+
+**Full-budget models** (split 0; 6 classifiers, 100 trials). They were trained on a group member's machine and explained here from its bundles; each reproduces its recorded test PR-AUC to six decimals on this machine. The block order and the pilot's main readings hold, with the differences noted below. On YelpChi, E2 and E1 are not distinguishable at this budget, so neither is a clear best model.
+
+- **Amazon E1 with every feature** (`m2_own_nbr`, leakage audit, CatBoost, 103 columns, CV PR-AUC 0.939):
+  - **Columns.** `f19` 1.37 and `f00` 1.11 lead, the reverse of the pilot's order.
+  - **Blocks.** Group Shapley: own 1.97, U-S-U 0.50, U-P-U 0.28, degree 0.26, U-V-U 0.20.
+  - **Removal.** Removing the own columns costs 0.245 ± 0.029 and all graph columns 0.018 ± 0.010. The top column costs 0.160 ± 0.091 and the top two 0.211, against about 0 for random ones.
+  - **Stability is weaker than the pilot's.** Other seeds give tau 0.53–0.56 (pilot 0.77–0.84), though this model has 103 columns to the pilot's 24, so the two are not directly comparable. Only `f19`, `f00` and U-S-U degree stay in the top 10 in all 6 fits.
+  - **Permuted labels.** PR-AUC falls to 0.07–0.15 (prevalence 0.095), and Spearman with the true ranking is −0.13 to 0.16.
+- **YelpChi E2** (`m5_own_gnnssl`, LightGBM, 56 columns, CV PR-AUC 0.862, 26 of 18,383 test nodes excluded):
+  - **Blocks.** Own 2.01, R-U-R embeddings 1.31, R-S-R 0.59, R-T-R 0.36.
+  - **Removal.** Top 8 costs 0.114 against 0.009 for random ones. All graph columns cost 0.034 ± 0.012 and own columns 0.292 ± 0.008.
+  - **Stability.** Refits give tau 0.89–0.92, and splits 0.69–0.74.
+  - **Sanity check, still only partly passed.** On permuted labels PR-AUC falls to about the prevalence, but Spearman stays at 0.36–0.46. These attributions are path-dependent for all four models, because one permuted-label model failed the interventional check.
+- **YelpChi E1** (`m2_own_nbr`, LightGBM, 131 columns, CV PR-AUC 0.846, path-dependent SHAP):
+  - **Blocks.** R-U-R means 1.03, own 0.83, R-S-R 0.27, degree 0.16, R-T-R 0.10.
+  - **Neighbours.** On 2,000 test nodes, one removal moves a score by 0.015 in R-U-R (8.3% of removals leave the training range), 0.0025 in R-S-R and 0.0016 in R-T-R. Against sampled Shapley on small neighbourhoods the median Spearman is 0.46–0.74.
+  - **Centrality.** Total influence in R-S-R now largely follows degree at the top: top-100 overlap with the highest-degree nodes is 0.92, against 0.15 on the pilot model.
+
+**The DGI embeddings differ between machines.** With the same config, torch, PyG and CPU device, the group member's `gnnssl` block differs from this machine's (largest PCA-column gap 0.22 on YelpChi split 0, 2.52 on Amazon), while the neighbour-mean block differs only by rounding. The cause was not established. So "bit-identical on the CPU" holds on one machine only. Each explanation uses the embeddings its own model was trained on.
+
+**A problem the implementation check found.** shap 0.54's interventional TreeSHAP can send a LightGBM row the wrong way at a split when its value and the threshold agree in single precision. Such test nodes are left out and counted (24 of 18,383 on pilot YelpChi E2, 26 on full-budget), background rows that could do this are not used, and more than 1% failing stops the run. Pilot E1 on YelpChi failed on 6.7% of its rows and full-budget E1 on 1.15% of a training sample. On the full-budget failures that were diagnosed, every failing row was near a split threshold and all other rows matched to about 1e-8.
+
+**Not done:** the optional GNNExplainer cross-check (it would explain a GraphSAGE rung, not these models); neighbour influence for E7r; influence through the encoder for full-budget E2, since retraining here reproduces this machine's embeddings rather than the ones that model was trained on (`scripts/gnn_encoder_export.py` would have to run on the machine that trained it). Nothing here was used to choose a model or feature.
 
 ## Graph feature blocks (Models 2 and 5)
 

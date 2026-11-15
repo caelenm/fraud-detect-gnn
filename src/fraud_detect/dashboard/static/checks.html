@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sanity Checks</title>
+  <link rel="stylesheet" href="/report.css">
+  <link rel="stylesheet" href="/dashboard.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <div>
+        <div class="eyebrow">CS555 course project · results dashboard</div>
+        <h1>Sanity checks and coverage</h1>
+      </div>
+      <div class="meta" id="header-meta"></div>
+    </header>
+    <nav class="pages" aria-label="Dashboard pages">
+      <a href="/" data-keep="/">Overview</a>
+      <a href="/questions" data-keep="/questions">Research questions</a>
+      <a href="/methods" data-keep="/methods">Methods</a>
+      <a href="/contrasts" data-keep="/contrasts">Contrasts</a>
+      <a href="/datasets" data-keep="/datasets">Across datasets</a>
+      <a href="/classify" data-keep="/classify">Classify a node</a>
+      <a href="/walkthrough">Explain a node</a>
+      <a href="/explain">Explanation details</a>
+      <a href="/checks" data-keep="/checks" aria-current="page">Checks</a>
+    </nav>
+
+    <div id="check-banner" class="check-banner" hidden></div>
+
+    <form class="controls" id="controls" aria-label="Page settings">
+      <div class="control push">
+        <button type="button" class="ghost" id="theme-toggle">Theme: auto</button>
+      </div>
+    </form>
+
+    <noscript>
+      <p class="notice">This page draws its tables with JavaScript.</p>
+    </noscript>
+
+    <main>
+      <section id="checks" aria-labelledby="checks-title">
+        <h2 id="checks-title">Sanity checks</h2>
+        <p class="lede">Recomputed from the results database when this server started. A failure also shows at the top of every page.</p>
+        <div class="panel panel-pad" id="database-facts"></div>
+        <div class="panel table-panel">
+          <div class="table-scroll" id="checks-table"></div>
+        </div>
+        <div id="failed-entries"></div>
+      </section>
+    </main>
+
+    <footer id="page-footer"></footer>
+  </div>
+  <div class="tooltip" id="tooltip" role="status" hidden></div>
+</body>
+</html>

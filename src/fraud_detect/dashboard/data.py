@@ -498,6 +498,60 @@ def current_contrasts(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+def mark_replication_splits(rows: list[dict[str, Any]], runs: pd.DataFrame) -> None:
+    """Note on each contrast row the splits whose delta does not come from the
+    runs this page counts, but from a replication (a later rerun of the same
+    split, e.g. on another machine, whose own verdict table used it). Sets
+    `replication_splits`: [{"split", "setups": [display id], "devices": [...]}].
+    The check "Contrasts agree with the runs" makes sure such a delta matches
+    some recorded run; this only says which."""
+    usable = usable_runs(runs)
+    counted = {
+        (r.dataset, r.feature_set, r.split_repeat): r.test_pr_auc
+        for r in usable.itertuples()
+    }
+    reps = runs[
+        runs["replication"].astype(bool)
+        & (runs["status"] == "ok")
+        & ~runs["superseded"].astype(bool)
+    ]
+    rerun: dict[tuple, list[tuple[float, str]]] = {}
+    for r in reps.itertuples():
+        rerun.setdefault((r.dataset, r.feature_set, r.split_repeat), []).append(
+            (r.test_pr_auc, str(r.device))
+        )
+    for row in rows:
+        marked = []
+        for k, delta in enumerate(row["deltas"]):
+            a = counted.get((row["dataset"], row["a"], k))
+            b = counted.get((row["dataset"], row["b"], k))
+            if a is None or b is None or abs((b - a) - delta) <= 1e-6:
+                continue
+            a_opts = [(a, None)] + rerun.get((row["dataset"], row["a"], k), [])
+            b_opts = [(b, None)] + rerun.get((row["dataset"], row["b"], k), [])
+            # Which recorded runs give this delta (None: the counted run).
+            match = next(
+                (
+                    (da, db)
+                    for va, da in a_opts
+                    for vb, db in b_opts
+                    if abs((vb - va) - delta) <= 1e-6
+                ),
+                None,
+            )
+            if match is None:
+                continue  # the sanity check reports it
+            sides = [(row["a_id"], match[0]), (row["b_id"], match[1])]
+            marked.append(
+                {
+                    "split": k,
+                    "setups": [i for i, dev in sides if dev],
+                    "devices": sorted({dev for _, dev in sides if dev}),
+                }
+            )
+        row["replication_splits"] = marked
+
+
 def contrasts_for(
     rows: list[dict[str, Any]], dataset: str, variant: str
 ) -> dict[str, list[dict[str, Any]]]:
@@ -521,22 +575,31 @@ def contrasts_for(
 def key_questions(
     rows: list[dict[str, Any]], dataset: str, variant: str
 ) -> list[dict[str, Any]]:
-    """The project's questions, answered by the current pilot-budget contrasts
-    between each pair of default-size setups on this variant."""
+    """The project's questions, each answered by the current contrast between
+    the two default-size setups on this variant at each budget: `pilot` and
+    `full` hold that budget's row, or None if it was not run there. A question
+    answered at neither budget is left out. The two budgets are never mixed in
+    one answer, and a one-split answer stays descriptive (its verdict_kind)."""
     found = []
     for question, b_id, a_id in KEY_QUESTIONS:
-        for row in rows:
-            if (
-                row["dataset"] == dataset
-                and row["a_variant"] == variant
-                and row["b_variant"] == variant
-                and row["a_budget"] == reg.PILOT
-                and row["b_budget"] == reg.PILOT
-                and row["a_id"] == a_id
-                and row["b_id"] == b_id
-            ):
-                found.append({"question": question, **row})
-                break
+        answers: dict[str, dict[str, Any] | None] = {}
+        for budget in reg.BUDGETS:
+            answers[budget] = next(
+                (
+                    row
+                    for row in rows
+                    if row["dataset"] == dataset
+                    and row["a_variant"] == variant
+                    and row["b_variant"] == variant
+                    and row["a_budget"] == budget
+                    and row["b_budget"] == budget
+                    and row["a_id"] == a_id
+                    and row["b_id"] == b_id
+                ),
+                None,
+            )
+        if any(answers.values()):
+            found.append({"question": question, "b_id": b_id, "a_id": a_id, **answers})
     return found
 
 
@@ -645,17 +708,31 @@ def graph_gain(
     }
 
 
-def _agreement(rows: list[dict[str, Any]], variant: str) -> list[dict[str, Any]]:
-    """Contrasts run on both datasets (same pair of setups, this variant), with
-    both verdicts. Verdicts agree only if they are the same kind: a significant
-    drop on one dataset and a tiny lower mean on the other do not agree."""
+_AGREEMENT_KEYS = (
+    "mean",
+    "sd",
+    "p",
+    "n_splits",
+    "verdict_kind",
+    "verdict_label",
+    "replication_splits",  # set by mark_replication_splits, if it ran
+)
+
+
+def _agreement(
+    rows: list[dict[str, Any]], variant: str, budget: str = reg.PILOT
+) -> list[dict[str, Any]]:
+    """Contrasts run on both datasets (same pair of setups, this variant and
+    budget), with both verdicts. Verdicts agree only if they are the same kind:
+    a significant drop on one dataset and a tiny lower mean on the other do
+    not agree."""
     per_pair: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
     for row in rows:
         if (
             row["a_variant"] != variant
             or row["b_variant"] != variant
-            or row["a_budget"] != reg.PILOT
-            or row["b_budget"] != reg.PILOT
+            or row["a_budget"] != budget
+            or row["b_budget"] != budget
             or row["n_splits"] < 2
         ):
             continue
@@ -670,28 +747,8 @@ def _agreement(rows: list[dict[str, Any]], variant: str) -> list[dict[str, Any]]
                 "contrast": f"{b_id} − {a_id}",
                 "b_label": am["b_label"],
                 "a_label": am["a_label"],
-                "amazon": {
-                    k: am[k]
-                    for k in (
-                        "mean",
-                        "sd",
-                        "p",
-                        "n_splits",
-                        "verdict_kind",
-                        "verdict_label",
-                    )
-                },
-                "yelpchi": {
-                    k: ye[k]
-                    for k in (
-                        "mean",
-                        "sd",
-                        "p",
-                        "n_splits",
-                        "verdict_kind",
-                        "verdict_label",
-                    )
-                },
+                "amazon": {k: am[k] for k in _AGREEMENT_KEYS if k in am},
+                "yelpchi": {k: ye[k] for k in _AGREEMENT_KEYS if k in ye},
                 "agrees": am["verdict_kind"] == ye["verdict_kind"],
             }
         )
@@ -699,14 +756,16 @@ def _agreement(rows: list[dict[str, Any]], variant: str) -> list[dict[str, Any]]
 
 
 def cross_dataset(
-    runs: pd.DataFrame, contrast_rows: list[dict[str, Any]]
+    runs: pd.DataFrame, contrast_rows: list[dict[str, Any]], budget: str = reg.PILOT
 ) -> dict[str, Any]:
-    """The setups that ran on both datasets at the pilot budget with all
-    features; each dataset's normalised skill and gain over B, with Amazon's
-    without-f19 numbers beside them where they exist."""
-    amazon = _by_id(setup_summary(runs, "amazon", reg.PILOT, reg.ALL))
-    yelp = _by_id(setup_summary(runs, "yelpchi", reg.PILOT, reg.ALL))
-    no19 = _by_id(setup_summary(runs, "amazon", reg.PILOT, reg.NO19))
+    """The setups that ran on both datasets at one budget with all features;
+    each dataset's normalised skill and gain over B, with Amazon's without-f19
+    numbers beside them where they exist. Budgets are never mixed."""
+    if budget not in reg.BUDGETS:
+        raise DashboardDataError(f"Unknown budget {budget!r}")
+    amazon = _by_id(setup_summary(runs, "amazon", budget, reg.ALL))
+    yelp = _by_id(setup_summary(runs, "yelpchi", budget, reg.ALL))
+    no19 = _by_id(setup_summary(runs, "amazon", budget, reg.NO19))
     shared = [i for i in amazon if i in yelp]
     keep = (
         "test_pr_auc",
@@ -737,15 +796,16 @@ def cross_dataset(
                 "setup": setup,
                 "label": amazon[setup]["label"],
                 "family": amazon[setup]["family"],
-                "amazon": graph_gain(runs, "amazon", reg.PILOT, reg.ALL, setup),
-                "yelpchi": graph_gain(runs, "yelpchi", reg.PILOT, reg.ALL, setup),
-                "amazon_no19": graph_gain(runs, "amazon", reg.PILOT, reg.NO19, setup),
+                "amazon": graph_gain(runs, "amazon", budget, reg.ALL, setup),
+                "yelpchi": graph_gain(runs, "yelpchi", budget, reg.ALL, setup),
+                "amazon_no19": graph_gain(runs, "amazon", budget, reg.NO19, setup),
             }
         )
     return {
+        "budget": budget,
         "setups": setups,
         "gains": gains,
-        "agreement": _agreement(contrast_rows, reg.ALL),
+        "agreement": _agreement(contrast_rows, reg.ALL, budget),
     }
 
 
@@ -776,14 +836,25 @@ def overview(entries: list[Entry], runs: pd.DataFrame) -> dict[str, Any]:
             for ds in sorted(usable["dataset"].dropna().unique())
         },
         "devices": sorted(usable["device"].dropna().unique().tolist()),
+        "device_runs": {
+            str(device): {b: int(n) for b, n in group["budget"].value_counts().items()}
+            for device, group in usable.groupby("device")
+        },
         "seeds": seeds,
         "first_started": str(usable["started_utc"].min()) if len(usable) else None,
         "last_started": str(usable["started_utc"].max()) if len(usable) else None,
         "n_backfilled": int(usable["backfilled"].sum()),
+        "n_replications": int(
+            (runs["replication"].astype(bool) & (runs["status"] == "ok")).sum()
+        ),
         "full_budget_where": sorted(
             f"{r.dataset} split {r.split_repeat}"
             for r in full[["dataset", "split_repeat"]].drop_duplicates().itertuples()
         ),
+        "full_budget_splits": {
+            str(ds): sorted(int(k) for k in group["split_repeat"].unique())
+            for ds, group in full.groupby("dataset")
+        },
     }
 
 
@@ -805,19 +876,26 @@ def failed_entries(entries: list[Entry]) -> list[dict[str, Any]]:
 
 
 def coverage(
-    runs: pd.DataFrame, dataset: str, variant: str, feature_sets: list[str]
+    runs: pd.DataFrame,
+    dataset: str,
+    variant: str,
+    feature_sets: list[str],
+    budget: str = reg.PILOT,
 ) -> dict[str, Any]:
-    """For one dataset and variant: pilot setups with fewer splits than the
-    dataset's most, and setups in the config with no recorded run there, so a
-    missing row is never read as a missing result."""
+    """For one dataset, variant and budget: setups with fewer splits than the
+    most any setup has at that budget on this dataset, and setups in the config
+    with no recorded run there, so a missing row is never read as a missing
+    result."""
     usable = usable_runs(runs)
     rows = usable[usable["dataset"] == dataset]
     per_set = rows.groupby("feature_set")["split_repeat"].nunique()
-    pilot = rows[rows["budget"] == reg.PILOT]
+    at_budget = rows[rows["budget"] == budget]
     most = (
-        int(per_set.loc[list(pilot["feature_set"].unique())].max()) if len(pilot) else 0
+        int(per_set.loc[list(at_budget["feature_set"].unique())].max())
+        if len(at_budget)
+        else 0
     )
-    here = pilot[pilot["variant"] == variant]["feature_set"].unique()
+    here = at_budget[at_budget["variant"] == variant]["feature_set"].unique()
     fewer = [
         {
             "display_id": reg.parse_feature_set(name).display_id,
@@ -834,3 +912,85 @@ def coverage(
             not_run.append({"display_id": fs.display_id, "budget": fs.budget})
     not_run.sort(key=lambda r: (r["budget"], r["display_id"]))
     return {"most_splits": most, "fewer_splits": fewer, "not_run": not_run}
+
+
+def _ids_in_order(names: Any) -> list[str]:
+    parsed = sorted({reg.parse_feature_set(n) for n in names}, key=lambda f: f.sort_key)
+    return [f.display_id for f in parsed]
+
+
+def budget_gaps(runs: pd.DataFrame, dataset: str, variant: str) -> dict[str, list[str]]:
+    """Setups of one dataset and variant with a pilot run but no full-budget
+    run. GNN classifiers are listed apart: gnn_classify has no df-analyze
+    budget, so their pilot results are the only ones there are (sixth
+    amendment, 2026-11-09)."""
+    usable = usable_runs(runs)
+    rows = usable[(usable["dataset"] == dataset) & (usable["variant"] == variant)]
+    pilot = rows[rows["budget"] == reg.PILOT]
+    full_ids = set(_ids_in_order(rows[rows["budget"] == reg.FULL]["feature_set"]))
+    gnn, missing = [], []
+    for name in pilot["feature_set"].unique():
+        fs = reg.parse_feature_set(name)
+        if fs.display_id in full_ids:
+            continue
+        (gnn if fs.setup.gnn_rung else missing).append(name)
+    return {"gnn_rungs": _ids_in_order(gnn), "pilot_only": _ids_in_order(missing)}
+
+
+def full_budget_gaps(runs: pd.DataFrame) -> list[dict[str, Any]]:
+    """Per dataset and variant, the df-analyze setups that have a pilot run and
+    no full-budget run, in registry order; `none_at_full` when the variant has
+    no full-budget run at all."""
+    usable = usable_runs(runs)
+    out = []
+    for dataset in sorted(
+        usable["dataset"].dropna().unique(), key=lambda d: (d != "amazon", d)
+    ):
+        for variant in reg.VARIANTS:
+            rows = usable[(usable["dataset"] == dataset) & (usable["variant"] == variant)]
+            if rows.empty:
+                continue
+            gaps = budget_gaps(runs, dataset, variant)
+            if gaps["pilot_only"]:
+                out.append(
+                    {
+                        "dataset": str(dataset),
+                        "variant": variant,
+                        "missing": gaps["pilot_only"],
+                        "none_at_full": not (rows["budget"] == reg.FULL).any(),
+                    }
+                )
+    return out
+
+
+def pilot_split_gaps(runs: pd.DataFrame) -> list[dict[str, Any]]:
+    """Per dataset and variant at the pilot budget, the setups with fewer splits
+    than the most any setup of that variant has."""
+    usable = usable_runs(runs)
+    pilot = usable[usable["budget"] == reg.PILOT]
+    out = []
+    for (dataset, variant), rows in pilot.groupby(["dataset", "variant"]):
+        per_set = rows.groupby("feature_set")["split_repeat"].nunique()
+        most = int(per_set.max())
+        fewer = [
+            {
+                "display_id": reg.parse_feature_set(n).display_id,
+                "n_splits": int(per_set[n]),
+            }
+            for n in sorted(
+                per_set.index, key=lambda n: reg.parse_feature_set(n).sort_key
+            )
+            if per_set[n] < most
+        ]
+        if fewer:
+            out.append(
+                {
+                    "dataset": str(dataset),
+                    "variant": str(variant),
+                    "most": most,
+                    "fewer": fewer,
+                }
+            )
+    order = {v: i for i, v in enumerate(reg.VARIANTS)}
+    out.sort(key=lambda r: (r["dataset"] != "amazon", r["dataset"], order[r["variant"]]))
+    return out

@@ -11,6 +11,7 @@
   let meta = null;
   let lastMethods = null;
   let loadToken = 0;
+  let crossToken = 0;
 
   // ---- DOM helpers ------------------------------------------------------
   function fill(node, attrs, kids) {
@@ -30,8 +31,14 @@
   const h = (tag, attrs, ...kids) => fill(document.createElement(tag), attrs, kids);
   const s = (tag, attrs, ...kids) =>
     fill(document.createElementNS(SVG_NS, tag), attrs, kids);
+  // Each page holds only some sections, so a missing element means "not on this page".
   function put(id, ...kids) {
-    $(id).replaceChildren(...kids.flat().filter(Boolean));
+    const node = $(id);
+    if (node) node.replaceChildren(...kids.flat().filter(Boolean));
+  }
+  function setText(id, text) {
+    const node = $(id);
+    if (node) node.textContent = text;
   }
   function errorBox(error) {
     return h("div", { class: "error", text: "Could not load this section: " + error.message });
@@ -129,6 +136,10 @@
     const q = new URLSearchParams({ ds: state.ds, variant: state.variant, budget: state.budget });
     if (state.zoom) q.set("zoom", "1");
     window.history.replaceState(null, "", "?" + q.toString());
+    // The page links carry the same choices, so moving between pages keeps them.
+    for (const link of document.querySelectorAll("a[data-keep]")) {
+      link.setAttribute("href", link.dataset.keep + "?" + q.toString());
+    }
   }
   function datasetInfo(name) {
     return meta.datasets.find((d) => d.name === name);
@@ -140,6 +151,19 @@
     if (!meta.budgets.some((b) => b.name === state.budget)) state.budget = meta.default_budget;
   }
   function renderControls() {
+    if ($("dataset-buttons")) renderDatasetControls();
+    const budget = $("budget-select");
+    if (budget) {
+      budget.replaceChildren(
+        ...meta.budgets.map((b) =>
+          h("option", { value: b.name, selected: b.name === state.budget, text: b.label })
+        )
+      );
+    }
+    if ($("zoom-toggle")) $("zoom-toggle").checked = state.zoom;
+    writeUrl();
+  }
+  function renderDatasetControls() {
     put(
       "dataset-buttons",
       meta.datasets.map((d) =>
@@ -166,29 +190,22 @@
       )
     );
     $("variant-control").hidden = info.variants.length < 2;
-    const budget = $("budget-select");
-    budget.replaceChildren(
-      ...meta.budgets.map((b) =>
-        h("option", { value: b.name, selected: b.name === state.budget, text: b.label })
-      )
-    );
-    $("zoom-toggle").checked = state.zoom;
-    writeUrl();
   }
   function wireControls() {
     $("controls").addEventListener("submit", (e) => e.preventDefault());
-    $("variant-select").addEventListener("change", (e) => {
+    $("variant-select")?.addEventListener("change", (e) => {
       state.variant = e.target.value;
       writeUrl();
       syncAmazonPanel();
       loadDatasetViews();
     });
-    $("budget-select").addEventListener("change", (e) => {
+    $("budget-select")?.addEventListener("change", (e) => {
       state.budget = e.target.value;
       writeUrl();
       loadDatasetViews();
+      loadCross();
     });
-    $("zoom-toggle").addEventListener("change", (e) => {
+    $("zoom-toggle")?.addEventListener("change", (e) => {
       state.zoom = e.target.checked;
       writeUrl();
       if (lastMethods) renderLeaderboard(lastMethods);
@@ -227,7 +244,7 @@
     ];
     put("header-meta", rows.flatMap(([k, v]) => [h("span", { text: k }), h("b", { text: v })]));
     put("general-caveats", meta.general_caveats.map((t) => h("li", { text: t })));
-    $("verdict-rule").textContent = meta.verdict_rule;
+    setText("verdict-rule", meta.verdict_rule);
     put("not-run", meta.not_run.map((t) => h("li", { text: t })));
     put("demo-notes", meta.demo_notes.map((t) => h("li", { text: t })));
     const banner = $("check-banner");
@@ -255,37 +272,73 @@
       .join("; ");
     return h("span", { class: "earlier", text: "Replaces " + text });
   }
+  // A verdict table built on another machine may use that machine's rerun of a
+  // split; the runs tables count the earliest run, so say which split differs.
+  function replicationText(row) {
+    const marks = (row && row.replication_splits) || [];
+    if (!marks.length) return null;
+    return marks
+      .map((m) => "Split " + m.split + " uses the rerun of " + m.setups.join(" and ") + " on " + m.devices.join(", "))
+      .join("; ") + ", not the run the scores on this page count.";
+  }
+  function replicationNote(row) {
+    const text = replicationText(row);
+    return text ? h("span", { class: "earlier", text: text }) : null;
+  }
+  function answerCell(row) {
+    if (!row) return h("td", { class: "l muted", text: "not run" });
+    const plural = row.n_splits === 1 ? " split" : " splits";
+    return h("td", { class: "l" },
+      verdictChip(row.verdict_kind, row.verdict_label),
+      h("span", {
+        class: "sub-label",
+        text: "Δ " + signed(row.mean) + (row.sd === null ? "" : " ± " + num(row.sd)) +
+          " · " + row.n_splits + plural + " · CV p " + pValue(row.p),
+      }),
+      earlierNote(row),
+      replicationNote(row)
+    );
+  }
   function renderQuestions(contrasts, methods) {
     $("questions-lede").textContent =
       "On " + datasetInfo(state.ds).label + ", " + methods.variant_label +
-      ". Pilot budget. A question with no row was not run for this view.";
+      ". Each budget's answer is its own pre-registered contrast; the two are never mixed. A question with no row was not run for this view.";
     if (!contrasts.questions.length) {
       put("questions-body", h("div", { class: "panel empty", text: "No pre-registered contrast answers these questions for this view." }));
       return;
     }
+    const label = (name) => {
+      const text = meta.budgets.find((b) => b.name === name).label;
+      return text.charAt(0).toUpperCase() + text.slice(1);
+    };
     const table = h(
       "table",
       {},
       h("thead", {}, h("tr", {},
         h("th", { class: "wrap-cell", text: "Question" }),
         h("th", { class: "l", text: "Contrast" }),
-        h("th", { text: "Test Δ PR-AUC" }),
-        h("th", { text: "Splits" }),
-        h("th", { text: "CV p" }),
-        h("th", { class: "l", text: "Verdict" })
+        h("th", { class: "l", text: label("pilot") }),
+        h("th", { class: "l", text: label("full") })
       )),
       h("tbody", {}, contrasts.questions.map((q) =>
         h("tr", {},
-          h("td", { class: "wrap-cell" }, q.question, earlierNote(q)),
+          h("td", { class: "wrap-cell", text: q.question }),
           h("td", { class: "l", text: q.b_id + " " + MINUS + " " + q.a_id }),
-          h("td", { text: signed(q.mean) + (q.sd === null ? "" : " ± " + num(q.sd)) }),
-          h("td", { text: q.n_splits }),
-          h("td", { text: pValue(q.p) }),
-          h("td", { class: "l" }, verdictChip(q.verdict_kind, q.verdict_label))
+          answerCell(q.pilot),
+          answerCell(q.full)
         )
       ))
     );
-    put("questions-body", h("div", { class: "panel table-panel" }, h("div", { class: "table-scroll" }, table)));
+    const differ = contrasts.questions.filter(
+      (q) => q.pilot && q.full && q.full.n_splits > 1 && q.pilot.verdict_kind !== q.full.verdict_kind
+    );
+    put("questions-body",
+      differ.length
+        ? h("div", { class: "notice", text: "The two budgets disagree on " + differ.map((q) => q.b_id + " " + MINUS + " " + q.a_id).join(", ") + ". Neither budget's verdict replaces the other's: they answer the question under different tuning." })
+        : null,
+      h("div", { class: "panel table-panel" }, h("div", { class: "table-scroll" }, table)),
+      h("p", { class: "small muted", text: "Δ is the test PR-AUC difference, mean ± SD over splits; CV p is the Nadeau–Bengio corrected p over the training CV folds. A one-split answer has no spread, so it is descriptive only." })
+    );
   }
 
   // ---- Section 1: the leaderboard ------------------------------------------
@@ -418,6 +471,7 @@
       put("best-callout");
       return;
     }
+    const elsewhere = best.budget !== view.budget;
     const lines = [
       h("p", {},
         h("b", { text: "Highest mean CV PR-AUC: " + best.display_id + " " }),
@@ -434,6 +488,11 @@
       lines.push(h("p", { text: "No other setup is within one SD of it in CV. A CV ranking is not a test; see the contrasts below." }));
     }
     lines.push(h("p", { text: best.rule }));
+    if (elsewhere) {
+      const gaps = view.budget_gaps;
+      const missing = [...gaps.pilot_only, ...gaps.gnn_rungs];
+      lines.unshift(h("p", { class: "small", text: "This table is the " + view.budget + " budget, but the best setup is chosen at the " + best.budget + " budget" + (missing.length ? ", because these setups have no " + view.budget + "-budget run: " + missing.join(", ") + "." : ".") }));
+    }
     put("best-callout", h("div", { class: "callout" }, lines));
   }
 
@@ -463,7 +522,7 @@
               r.n_backfilled ? h("span", { class: "sub-label", text: r.n_backfilled + " of " + r.n_splits + " runs recorded later (backfill)" }) : null
             ),
             h("td", {},
-              r.n_splits + (view.budget === "pilot" && r.n_splits < most ? " of " + most : "")
+              r.n_splits + (r.n_splits < most ? " of " + most : "")
             ),
             h("td", { text: meanSd(r.test_pr_auc, r.test_pr_auc_sd) }),
             h("td", { text: r.test_per_split.map((v) => num(v)).join(" / ") }),
@@ -501,7 +560,12 @@
     const items = [];
     const c = view.coverage;
     if (c.fewer_splits.length) {
-      items.push(h("li", { text: "Fewer splits than this dataset's " + c.most_splits + ": " + c.fewer_splits.map((f) => f.display_id + " (" + f.n_splits + ")").join(", ") + ". Means over different splits are not strictly comparable." }));
+      items.push(h("li", { text: "Fewer splits than the " + c.most_splits + " this dataset has at this budget: " + c.fewer_splits.map((f) => f.display_id + " (" + f.n_splits + ")").join(", ") + ". Means over different splits are not strictly comparable." }));
+    }
+    const gaps = view.budget_gaps;
+    if (view.budget === "full") {
+      if (gaps.pilot_only.length) items.push(h("li", { text: "Pilot budget only, so not in this table: " + gaps.pilot_only.join(", ") + "." }));
+      if (gaps.gnn_rungs.length) items.push(h("li", { text: "GNN classifiers have no df-analyze budget, so their only runs are under the pilot budget: " + gaps.gnn_rungs.join(", ") + "." }));
     }
     const pilot = c.not_run.filter((n) => n.budget === "pilot").map((n) => n.display_id);
     const full = c.not_run.filter((n) => n.budget === "full").map((n) => n.display_id);
@@ -515,10 +579,6 @@
     $("methods-lede").textContent =
       datasetInfo(view.dataset).label + ", " + view.variant_label + ", " +
       view.budget + " budget. Pilot and full runs are never mixed in one row.";
-    put(
-      "dataset-caveats",
-      view.caveats.map((t) => h("div", { class: "notice", text: t }))
-    );
     renderBest(view);
     renderLeaderboard(view);
     renderMethodsTable(view);
@@ -531,6 +591,7 @@
     return h("div", { class: "panel table-panel" }, h("div", { class: "table-scroll" }, h("table", {},
       h("thead", {}, h("tr", {},
         h("th", { class: "l", text: "Contrast" }),
+        h("th", { class: "l", text: "Budget" }),
         h("th", { text: "Test Δ per split" }),
         h("th", { text: "Mean ± SD" }),
         h("th", { text: "Headroom" }),
@@ -544,8 +605,10 @@
           h("td", { class: "l" },
             h("b", { text: contrastName(r) }),
             h("span", { class: "sub-label", text: r.b_label + " vs " + r.a_label }),
-            earlierNote(r)
+            earlierNote(r),
+            replicationNote(r)
           ),
+          h("td", { class: "l", text: r.a_budget === r.b_budget ? r.a_budget : r.a_budget + " → " + r.b_budget }),
           h("td", { text: r.deltas.map((v) => signed(v)).join(" / ") + (r.deltas.length < maxSplits ? " (" + r.deltas.length + ")" : "") }),
           h("td", { text: signed(r.mean) + (r.sd === null ? "" : " ± " + num(r.sd)) }),
           h("td", { text: Math.round(r.headroom * 100) + "%" }),
@@ -707,14 +770,20 @@
     return svg;
   }
 
+  function splitsText(rows, key) {
+    const counts = [...new Set(rows.filter((r) => r[key]).map((r) => r[key].n_splits))].sort((a, b) => b - a);
+    return counts.length === 1 ? counts[0] + " splits" : counts.join(" or ") + " splits";
+  }
   function renderCross(cross) {
+    setText("cross-lede", "Setups that ran on both datasets, at the " +
+      meta.budgets.find((b) => b.name === cross.budget).label + " budget. Budgets are never mixed.");
     if (!cross.setups.length) {
-      put("cross-body", h("div", { class: "panel empty", text: "No setup has run on both datasets at the pilot budget." }));
+      put("cross-body", h("div", { class: "panel empty", text: "No setup has run on both datasets at the " + cross.budget + " budget." }));
       return;
     }
     const am = (r) => r.amazon;
     const parts = [
-      h("div", { class: "notice", text: "Amazon has 5 splits and YelpChi 3. Amazon's all-feature scores include f19, which likely leaks the label, and YelpChi has no counterpart to it; the without-f19 markers are beside them where those runs exist. All runs are at the pilot budget." }),
+      h("div", { class: "notice", text: "Amazon has " + splitsText(cross.setups, "amazon") + " here and YelpChi " + splitsText(cross.setups, "yelpchi") + ". Amazon's all-feature scores include f19, which likely leaks the label, and YelpChi has no counterpart to it; the without-f19 markers are beside them where those runs exist. All runs here are at the " + cross.budget + " budget." }),
       h("h3", { class: "sub", text: "Skill on a shared scale" }),
       h("p", { class: "small muted", text: "The base rates differ (Amazon " + num(am(cross.setups[0]).no_skill) + ", YelpChi " + num(cross.setups[0].yelpchi.no_skill) + "), so raw PR-AUC is not comparable between datasets. Skill = (PR-AUC − no skill) / (1 − no skill)." }),
       h("div", { class: "panel chart-panel" }, seriesLegend(), h("div", { class: "chart-scroll" }, skillChart(cross.setups))),
@@ -732,7 +801,7 @@
           h("td", { text: r.amazon_no19 ? meanSd(r.amazon_no19.test_pr_auc, r.amazon_no19.test_pr_auc_sd) : "not run" }))))
       ))),
       h("h3", { class: "sub spaced", text: "Gain over B, per dataset" }),
-      h("p", { class: "small muted", text: "Small dots are single splits. E6 uses no graph, so its row is not a graph gain; it is here because it is the GNN's control." }),
+      h("p", { class: "small muted", text: "Small dots are single splits." + (cross.gains.some((g) => g.setup === "E6") ? " E6 uses no graph, so its row is not a graph gain; it is here because it is the GNN's control." : "") }),
       h("div", { class: "panel chart-panel" }, seriesLegend(), h("div", { class: "chart-scroll" }, gainChart(cross.gains))),
       h("div", { class: "panel table-panel" }, h("div", { class: "table-scroll" }, h("table", {},
         h("thead", {}, h("tr", {},
@@ -746,8 +815,9 @@
         }))
       ))),
       h("h3", { class: "sub spaced", text: "Do the verdicts agree?" }),
-      h("p", { class: "small muted", text: "All features, pilot budget, the current verdict on each dataset. Two verdicts agree only if they are the same kind: a significant drop and a tiny lower mean do not." }),
-      h("div", { class: "panel table-panel" }, h("div", { class: "table-scroll" }, h("table", {},
+      h("p", { class: "small muted", text: "All features, " + cross.budget + " budget, the current verdict on each dataset. Two verdicts agree only if they are the same kind: a significant drop and a tiny lower mean do not." }),
+      cross.agreement.length ? null : h("div", { class: "panel empty", text: "No contrast with a verdict was run on both datasets at this budget." }),
+      cross.agreement.length === 0 ? null : h("div", { class: "panel table-panel" }, h("div", { class: "table-scroll" }, h("table", {},
         h("thead", {}, h("tr", {},
           h("th", { class: "l", text: "Contrast" }),
           h("th", { text: "Amazon Δ" }), h("th", { class: "l", text: "Amazon verdict" }),
@@ -762,6 +832,15 @@
           h("td", { class: "l" }, h("span", { class: "badge " + (r.agrees ? "good" : "warn"), text: r.agrees ? "agrees" : "differs" })))))
       ))),
     ];
+    const reruns = cross.agreement.flatMap((r) =>
+      ["amazon", "yelpchi"].map((ds) => {
+        const text = replicationText(r[ds]);
+        return text ? r.contrast + " on " + datasetInfo(ds).label + ": " + text : null;
+      })
+    ).filter(Boolean);
+    if (reruns.length) {
+      parts.push(h("p", { class: "small muted", text: "Why a verdict's Δ can differ from the gain table above: " + reruns.join(" ") }));
+    }
     put("cross-body", parts);
   }
 
@@ -1030,9 +1109,11 @@
 
   // ---- Loading -------------------------------------------------------------
   async function loadDatasetViews() {
+    const scoped = ["questions-body", "best-callout", "leaderboard", "methods-table", "verdicts-body", "sensitivity"]
+      .filter((id) => $(id));
+    if (!scoped.length) return; // this page shows no per-dataset view
     const token = ++loadToken;
     const q = "ds=" + encodeURIComponent(state.ds) + "&variant=" + encodeURIComponent(state.variant);
-    const scoped = ["questions-body", "best-callout", "leaderboard", "methods-table", "verdicts-body", "sensitivity"];
     scoped.forEach((id) => $(id).classList.add("stale"));
     try {
       const [methods, contrasts] = await Promise.all([
@@ -1041,13 +1122,25 @@
       ]);
       if (token !== loadToken) return; // a newer choice has been made
       lastMethods = methods;
-      renderMethods(methods);
-      renderQuestions(contrasts, methods);
-      renderVerdicts(contrasts);
+      // The dataset's caveats (Amazon's f19 warning) go on every page that shows a dataset.
+      put("dataset-caveats", methods.caveats.map((t) => h("div", { class: "notice", text: t })));
+      if ($("leaderboard")) renderMethods(methods);
+      if ($("questions-body")) renderQuestions(contrasts, methods);
+      if ($("verdicts-body")) renderVerdicts(contrasts);
     } catch (e) {
-      if (token === loadToken) put("methods-table", errorBox(e));
+      if (token === loadToken) put(scoped[0], errorBox(e));
     }
     scoped.forEach((id) => $(id).classList.remove("stale"));
+  }
+  async function loadCross() {
+    if (!$("cross-body")) return;
+    const token = ++crossToken;
+    try {
+      const cross = await api("/api/cross?budget=" + encodeURIComponent(state.budget));
+      if (token === crossToken) renderCross(cross);
+    } catch (e) {
+      if (token === crossToken) put("cross-body", errorBox(e));
+    }
   }
   async function start() {
     readUrl();
@@ -1063,17 +1156,15 @@
     renderHeader();
     syncAmazonPanelFirst();
     await loadDatasetViews();
-    try {
-      renderCross(await api("/api/cross"));
-    } catch (e) {
-      put("cross-body", errorBox(e));
+    await loadCross();
+    if ($("checks-table")) {
+      try {
+        renderChecks((await api("/api/checks")).checks);
+      } catch (e) {
+        put("checks-table", errorBox(e));
+      }
     }
-    try {
-      renderChecks((await api("/api/checks")).checks);
-    } catch (e) {
-      put("checks-table", errorBox(e));
-    }
-    pollStatus();
+    if ($("classify-panels")) pollStatus();
   }
   function syncAmazonPanelFirst() {
     if (state.variant === "no19") panelFor("amazon").variant = "no19";

@@ -169,6 +169,13 @@ feature_sets:
   # without the neighbour means.
   pilot_m8_own_nbr_gnnsup: [own, nbr, gnnsup]
   pilot_m8s_own_gnnsup: [own, gnnsup]
+  # 2026-11-09: the same four at the full Model A settings (all classifiers,
+  # 100 trials). The GNN classifier rungs ignore df-analyze's budget, so they
+  # have no full-budget version; gnnsup still comes from the pilot_g5* rungs.
+  m7_own_nbr_gnnssl: [own, nbr, gnnssl]
+  m7r_own_nbr_gnnrand: [own, nbr, gnnrand]
+  m8_own_nbr_gnnsup: [own, nbr, gnnsup]
+  m8s_own_gnnsup: [own, gnnsup]
 
 # GNN classifier rungs (Models 3-4; 2026-10-31, docs/GNN_MODELS_PLAN.md §2):
 # feature sets the gnn_classify stage trains and scores instead of

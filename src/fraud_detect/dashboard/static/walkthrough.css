@@ -1,0 +1,68 @@
+/* The "explain a node" walkthrough: only what dashboard.css does not already have.
+ * Towards fraud uses --series-2 and towards benign --series-1, the dashboard's
+ * blue/orange pair (validated there for colour-vision deficiencies). */
+.wrap-buttons { flex-wrap: wrap; }
+.walk { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 20px;
+  align-items: start; }
+@media (max-width: 900px) { .walk { grid-template-columns: minmax(0, 1fr); } }
+.walk main { min-width: 0; }
+.step { background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; padding: 14px 18px; margin: 0 0 14px; }
+.step h2 { margin: 0 0 8px; font-size: 1.1rem; }
+.step-no { margin: 0; font-size: 12px; color: var(--muted); font-weight: 600; }
+.step.caution { border-color: var(--warn); }
+.empty { color: var(--muted); font-size: 14px; margin: 0; }
+
+.sample-row { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; }
+.sample-row .id { font-family: var(--mono); font-size: 1.05rem; }
+.score-wrap { flex: 1; min-width: 220px; }
+.score-wrap svg { display: block; width: 100%; height: 22px; }
+.score-track { fill: var(--surface-2); }
+.score-fill { fill: var(--accent); }
+.score-thr { stroke: var(--text); stroke-width: 2; }
+.pill { font-size: 12.5px; font-weight: 600; padding: 3px 10px; border-radius: 999px; }
+.pill.flagged { background: var(--bad-soft); color: var(--bad); }
+.pill.cleared { background: var(--good-soft); color: var(--good); }
+.words { font-family: Georgia, "Times New Roman", serif; font-size: 1.05rem;
+  line-height: 1.7; margin: 0; max-width: 75ch; }
+
+.term { border-bottom: 1px dotted var(--muted); cursor: help; }
+.term:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.wf-row { display: grid; grid-template-columns: minmax(150px, 230px) minmax(0, 1fr) 64px;
+  gap: 10px; align-items: center; min-height: 26px; font-size: 13.5px; }
+.wf-row.total { border-top: 1px solid var(--border); font-weight: 600; margin-top: 4px;
+  padding-top: 4px; }
+.wf-row svg { display: block; width: 100%; height: 16px; }
+.wf-row .val { font-family: var(--mono); font-size: 12.5px; text-align: right; }
+.bar-up { fill: var(--series-2); }
+.bar-down { fill: var(--series-1); }
+.bar-mark { fill: var(--text); }
+.bar-thr { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 2; }
+.key-row { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12.5px;
+  color: var(--muted); margin-top: 10px; }
+.swatch { display: inline-block; width: 11px; height: 11px; border-radius: 2px;
+  vertical-align: -1px; margin-right: 5px; }
+.swatch.up { background: var(--series-2); }
+.swatch.down { background: var(--series-1); }
+.blk-row { display: grid; grid-template-columns: minmax(150px, 230px) minmax(0, 1fr) 64px;
+  gap: 10px; align-items: center; min-height: 26px; font-size: 13.5px; }
+.blk-row svg { display: block; width: 100%; height: 16px; }
+.blk-row .val { font-family: var(--mono); font-size: 12.5px; text-align: right; }
+.zero-line { stroke: var(--muted); stroke-width: 1; }
+.nb-rel + .nb-rel { margin-top: 12px; }
+.nb-rel h3 { font-size: .95rem; margin: 0 0 4px; }
+.nb-row { display: grid; grid-template-columns: 120px 70px minmax(0, 1fr); gap: 10px;
+  padding: 4px 0; border-bottom: 1px solid var(--border); font-size: 13.5px; }
+.nb-row .val { font-family: var(--mono); font-size: 12.5px; }
+
+.glossary { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; }
+.glossary h2 { margin-top: 0; }
+.g-card { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px;
+  margin: 0 0 8px; background: var(--surface); font-size: 12.5px; }
+.g-card.on { border-color: var(--accent); background: var(--accent-soft); }
+.g-card b { display: block; font-family: var(--mono); font-size: 12.5px; margin-bottom: 2px; }
+.g-card .src { color: var(--muted); margin-top: 4px; }
+.g-card a, .sources a, .step a { color: var(--accent); }
+ol.sources { font-size: 13px; padding-left: 22px; margin: 0; }
+ol.sources li { margin: 6px 0; }
+ol.sources li:target { background: var(--accent-soft); }

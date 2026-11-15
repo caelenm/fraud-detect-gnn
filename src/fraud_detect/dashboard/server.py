@@ -25,6 +25,7 @@ from fraud_detect.config import REPO_ROOT, df_analyze_dir
 from fraud_detect.dashboard import checks as checks_module
 from fraud_detect.dashboard import classify as cl
 from fraud_detect.dashboard import data, narrative
+from fraud_detect.dashboard import explain as ex
 from fraud_detect.dashboard import registry as reg
 from fraud_detect.dashboard.worker import ModelWorker, WorkerError
 from fraud_detect.external import (
@@ -38,9 +39,29 @@ HOST = "127.0.0.1"
 DEFAULT_PORT = 8555
 STATIC_DIR = Path(__file__).with_name("static")
 REPORT_CSS = Path(__file__).parent.parent / "report" / "report.css"
+# One page per section, each with the same page links; app.js draws whichever
+# sections a page holds. /walkthrough and /explain have their own scripts.
+APP_PAGES = {
+    "/": "index.html",
+    "/questions": "questions.html",
+    "/methods": "methods.html",
+    "/contrasts": "contrasts.html",
+    "/datasets": "datasets.html",
+    "/classify": "classify.html",
+    "/checks": "checks.html",
+}
 STATIC_FILES = {
-    "/": (STATIC_DIR / "index.html", "text/html; charset=utf-8"),
+    **{
+        path: (STATIC_DIR / name, "text/html; charset=utf-8")
+        for path, name in APP_PAGES.items()
+    },
     "/app.js": (STATIC_DIR / "app.js", "text/javascript; charset=utf-8"),
+    "/walkthrough": (STATIC_DIR / "walkthrough.html", "text/html; charset=utf-8"),
+    "/walkthrough.js": (STATIC_DIR / "walkthrough.js", "text/javascript; charset=utf-8"),
+    "/walkthrough.css": (STATIC_DIR / "walkthrough.css", "text/css; charset=utf-8"),
+    "/explain": (STATIC_DIR / "explain.html", "text/html; charset=utf-8"),
+    "/explain.js": (STATIC_DIR / "explain.js", "text/javascript; charset=utf-8"),
+    "/explain.css": (STATIC_DIR / "explain.css", "text/css; charset=utf-8"),
     "/dashboard.css": (STATIC_DIR / "dashboard.css", "text/css; charset=utf-8"),
     "/report.css": (REPORT_CSS, "text/css; charset=utf-8"),
 }
@@ -120,6 +141,7 @@ class App:
         self.runs = data.runs_table(self.entries)
         all_rows = data.all_contrasts(self.entries)
         self.contrasts = data.current_contrasts(all_rows)
+        data.mark_replication_splits(self.contrasts, self.runs)
         self.checks = checks_module.run_all(
             db_dir, self.entries, self.runs, all_rows, self.contrasts
         )
@@ -133,7 +155,10 @@ class App:
         )
         self.overview = data.overview(self.entries, self.runs)
         self.failed = data.failed_entries(self.entries)
-        self.cross = data.cross_dataset(self.runs, self.contrasts)
+        self.cross = {
+            budget: data.cross_dataset(self.runs, self.contrasts, budget)
+            for budget in reg.BUDGETS
+        }
         self.commit = git_commit(REPO_ROOT)
         self.worker_factory = worker_factory
         self.worker: ModelWorker | None = None
@@ -143,6 +168,11 @@ class App:
             for variant in variants:
                 key = cl.target_key(dataset, variant)
                 self.panels[key] = PanelState(key, dataset, variant)
+        self.explain_models: dict[str, ex.ExplainModel] = {}
+        self.explain_state: dict[str, tuple[str, str]] = {
+            ex.target_key(d, v): (LOADING, "Loading the saved explanation.")
+            for d, v, _ in ex.TARGETS
+        }
         self._lock = threading.Lock()
 
     # ---- Aggregate answers ------------------------------------------------
@@ -185,7 +215,7 @@ class App:
             "general_caveats": narrative.general_caveats(self.overview, self.failed),
             "verdict_rule": narrative.VERDICT_RULE,
             "label_column_note": narrative.label_column_note(),
-            "not_run": list(narrative.NOT_RUN),
+            "not_run": narrative.not_run(self.runs),
             "demo_notes": narrative.demo_notes(),
             "failed_entries": self.failed,
             "failed_checks": failed_checks,
@@ -200,12 +230,18 @@ class App:
             raise BadRequest(f"Unknown budget {budget!r}; choose from {reg.BUDGETS}")
         rows = data.setup_summary(self.runs, dataset, budget, variant)
         best = data.best_setup(self.runs, dataset, variant, self.contrasts)
-        no19 = (
-            data.setup_summary(self.runs, dataset, reg.PILOT, reg.NO19)
-            if dataset == "amazon"
-            else []
+        summaries = {
+            (b, v): data.setup_summary(self.runs, dataset, b, v)
+            for b in reg.BUDGETS
+            for v in (reg.ALL, reg.NO19)
+        }
+        # The f19 warning quotes the budget on view when B has run there both
+        # ways, else the pilot's.
+        has_b = all(
+            any(r["display_id"] == "B" for r in summaries[(budget, v)])
+            for v in (reg.ALL, reg.NO19)
         )
-        pilot_all = data.setup_summary(self.runs, dataset, reg.PILOT, reg.ALL)
+        caveat_budget = budget if has_b else reg.PILOT
         default_check = data.default_settings_check(self.entries, dataset)
         return {
             "dataset": dataset,
@@ -216,12 +252,19 @@ class App:
             "families": list(reg.FAMILIES),
             "best": best,
             "caveats": narrative.dataset_caveats(
-                dataset, variant, pilot_all, no19, default_check
+                dataset,
+                variant,
+                summaries[(caveat_budget, reg.ALL)],
+                summaries[(caveat_budget, reg.NO19)],
+                default_check,
+                caveat_budget,
+                summaries[(reg.FULL, reg.ALL)],
             ),
             "has_label_column": any(r["label_derived_column"] for r in rows),
             "coverage": data.coverage(
-                self.runs, dataset, variant, list(self.config["feature_sets"])
+                self.runs, dataset, variant, list(self.config["feature_sets"]), budget
             ),
+            "budget_gaps": data.budget_gaps(self.runs, dataset, variant),
         }
 
     def api_contrasts(self, dataset: Any, variant: Any) -> dict[str, Any]:
@@ -236,8 +279,10 @@ class App:
             "tuned_vs_default": data.tuned_vs_default_cv(self.entries, dataset),
         }
 
-    def api_cross(self) -> dict[str, Any]:
-        return self.cross
+    def api_cross(self, budget: Any = reg.PILOT) -> dict[str, Any]:
+        if budget not in self.cross:
+            raise BadRequest(f"Unknown budget {budget!r}; choose from {reg.BUDGETS}")
+        return self.cross[budget]
 
     def api_best(self) -> dict[str, Any]:
         out = {}
@@ -388,6 +433,62 @@ class App:
         except cl.ClassifyError as e:
             raise BadRequest(str(e)) from e
 
+    # ---- Explainability page ----------------------------------------------
+    def load_explain(self) -> None:
+        """Load each saved explanation in turn; runs in the background. One that
+        cannot be loaded says why; the others still work."""
+        for dataset, variant, candidates in ex.TARGETS:
+            key = ex.target_key(dataset, variant)
+            try:
+                model = ex.load_model(self.config, dataset, variant, candidates)
+            except ex.ExplainUnavailable as e:
+                state = (UNAVAILABLE, str(e))
+            except Exception as e:  # one broken model must not take the others down
+                state = (UNAVAILABLE, f"{type(e).__name__}: {e}"[:500])
+            else:
+                with self._lock:
+                    self.explain_models[key] = model
+                state = (READY, "")
+            with self._lock:
+                self.explain_state[key] = state
+
+    def api_explain_models(self) -> dict[str, Any]:
+        with self._lock:
+            states = dict(self.explain_state)
+            models = dict(self.explain_models)
+        out = []
+        for dataset, variant, _ in ex.TARGETS:
+            key = ex.target_key(dataset, variant)
+            state, message = states[key]
+            entry: dict[str, Any] = {
+                "key": key,
+                "dataset": dataset,
+                "dataset_label": DATASET_LABELS.get(dataset, dataset),
+                "state": state,
+                "message": message,
+            }
+            if key in models:
+                entry.update(models[key].summary())
+            out.append(entry)
+        return {"models": out, "commit": self.commit}
+
+    def api_explain_node(self, body: Any) -> dict[str, Any]:
+        if not isinstance(body, dict):
+            raise BadRequest("The request body must be a JSON object")
+        key = str(body.get("model"))
+        with self._lock:
+            known = key in self.explain_state
+            state, message = self.explain_state.get(key, (UNAVAILABLE, ""))
+            model = self.explain_models.get(key)
+        if not known:
+            raise BadRequest(f"Unknown model {body.get('model')!r}")
+        if state != READY or model is None:
+            raise BadRequest(message or f"{key} is not ready yet")
+        try:
+            return model.draw(str(body.get("draw", "any")), body.get("seed"))
+        except ex.ExplainRequestError as e:
+            raise BadRequest(str(e)) from e
+
     def close(self) -> None:
         if self.worker is not None:
             self.worker.close()
@@ -461,10 +562,11 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                 "/api/contrasts": lambda: app.api_contrasts(
                     query.get("ds"), query.get("variant", reg.ALL)
                 ),
-                "/api/cross": app.api_cross,
+                "/api/cross": lambda: app.api_cross(query.get("budget", reg.PILOT)),
                 "/api/best": app.api_best,
                 "/api/checks": app.api_checks,
                 "/api/status": app.api_status,
+                "/api/explain/models": app.api_explain_models,
             }
             if url.path in routes:
                 self._answer(routes[url.path])
@@ -478,7 +580,12 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
             if not self._host_allowed() or not self._origin_allowed():
                 self._json(403, {"error": "This server only answers on localhost"})
                 return
-            if urlsplit(self.path).path != "/api/classify":
+            posts = {
+                "/api/classify": app.api_classify,
+                "/api/explain/node": app.api_explain_node,
+            }
+            endpoint = posts.get(urlsplit(self.path).path)
+            if endpoint is None:
                 self._json(404, {"error": "No such endpoint"})
                 return
             try:
@@ -499,7 +606,7 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
             except (json.JSONDecodeError, UnicodeDecodeError):
                 self._json(400, {"error": "The body is not JSON"})
                 return
-            self._answer(lambda: app.api_classify(body))
+            self._answer(lambda: endpoint(body))
 
     return Handler
 

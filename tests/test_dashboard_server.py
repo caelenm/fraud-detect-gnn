@@ -140,10 +140,24 @@ def test_contrasts_and_cross_dataset(aggregate):
     assert {r["a_id"] for r in view["families"]["primary"]} == {"B", "E6"}
     assert view["default_check"] is None
     _, cross = client.get("/api/cross")
+    assert cross["budget"] == "pilot"
     assert [s["setup"] for s in cross["setups"]] == ["B", "E1", "E2", "E5", "E6"]
     agreement = {r["contrast"]: r for r in cross["agreement"]}
     assert agreement["E1 − B"]["agrees"] is True
     assert agreement["E5 − E6"]["agrees"] is False
+    # Only Amazon has a full-budget run here, so nothing is on both datasets.
+    status, full = client.get("/api/cross?budget=full")
+    assert status == 200 and full["budget"] == "full" and full["setups"] == []
+    status, body = client.get("/api/cross?budget=t100")
+    assert status == 400 and body["error"]
+
+
+def test_methods_say_what_the_budget_on_view_leaves_out(aggregate):
+    _, client = aggregate
+    _, full = client.get("/api/methods?ds=amazon&budget=full&variant=all")
+    assert full["budget_gaps"] == {"gnn_rungs": ["E5", "E6"], "pilot_only": ["E1", "E2"]}
+    assert full["coverage"]["most_splits"] == 1  # within the full budget
+    assert full["best"]["budget"] == "pilot"
 
 
 def test_checks_endpoint_lists_every_check(aggregate):
