@@ -30,8 +30,14 @@
   const h = (tag, attrs, ...kids) => fill(document.createElement(tag), attrs, kids);
   const s = (tag, attrs, ...kids) =>
     fill(document.createElementNS(SVG_NS, tag), attrs, kids);
+  // Each page holds only some sections, so a missing element means "not on this page".
   function put(id, ...kids) {
-    $(id).replaceChildren(...kids.flat().filter(Boolean));
+    const node = $(id);
+    if (node) node.replaceChildren(...kids.flat().filter(Boolean));
+  }
+  function setText(id, text) {
+    const node = $(id);
+    if (node) node.textContent = text;
   }
   function errorBox(error) {
     return h("div", { class: "error", text: "Could not load this section: " + error.message });
@@ -129,6 +135,10 @@
     const q = new URLSearchParams({ ds: state.ds, variant: state.variant, budget: state.budget });
     if (state.zoom) q.set("zoom", "1");
     window.history.replaceState(null, "", "?" + q.toString());
+    // The page links carry the same choices, so moving between pages keeps them.
+    for (const link of document.querySelectorAll("a[data-keep]")) {
+      link.setAttribute("href", link.dataset.keep + "?" + q.toString());
+    }
   }
   function datasetInfo(name) {
     return meta.datasets.find((d) => d.name === name);
@@ -140,6 +150,19 @@
     if (!meta.budgets.some((b) => b.name === state.budget)) state.budget = meta.default_budget;
   }
   function renderControls() {
+    if ($("dataset-buttons")) renderDatasetControls();
+    const budget = $("budget-select");
+    if (budget) {
+      budget.replaceChildren(
+        ...meta.budgets.map((b) =>
+          h("option", { value: b.name, selected: b.name === state.budget, text: b.label })
+        )
+      );
+    }
+    if ($("zoom-toggle")) $("zoom-toggle").checked = state.zoom;
+    writeUrl();
+  }
+  function renderDatasetControls() {
     put(
       "dataset-buttons",
       meta.datasets.map((d) =>
@@ -166,29 +189,21 @@
       )
     );
     $("variant-control").hidden = info.variants.length < 2;
-    const budget = $("budget-select");
-    budget.replaceChildren(
-      ...meta.budgets.map((b) =>
-        h("option", { value: b.name, selected: b.name === state.budget, text: b.label })
-      )
-    );
-    $("zoom-toggle").checked = state.zoom;
-    writeUrl();
   }
   function wireControls() {
     $("controls").addEventListener("submit", (e) => e.preventDefault());
-    $("variant-select").addEventListener("change", (e) => {
+    $("variant-select")?.addEventListener("change", (e) => {
       state.variant = e.target.value;
       writeUrl();
       syncAmazonPanel();
       loadDatasetViews();
     });
-    $("budget-select").addEventListener("change", (e) => {
+    $("budget-select")?.addEventListener("change", (e) => {
       state.budget = e.target.value;
       writeUrl();
       loadDatasetViews();
     });
-    $("zoom-toggle").addEventListener("change", (e) => {
+    $("zoom-toggle")?.addEventListener("change", (e) => {
       state.zoom = e.target.checked;
       writeUrl();
       if (lastMethods) renderLeaderboard(lastMethods);
@@ -227,7 +242,7 @@
     ];
     put("header-meta", rows.flatMap(([k, v]) => [h("span", { text: k }), h("b", { text: v })]));
     put("general-caveats", meta.general_caveats.map((t) => h("li", { text: t })));
-    $("verdict-rule").textContent = meta.verdict_rule;
+    setText("verdict-rule", meta.verdict_rule);
     put("not-run", meta.not_run.map((t) => h("li", { text: t })));
     put("demo-notes", meta.demo_notes.map((t) => h("li", { text: t })));
     const banner = $("check-banner");
@@ -515,10 +530,6 @@
     $("methods-lede").textContent =
       datasetInfo(view.dataset).label + ", " + view.variant_label + ", " +
       view.budget + " budget. Pilot and full runs are never mixed in one row.";
-    put(
-      "dataset-caveats",
-      view.caveats.map((t) => h("div", { class: "notice", text: t }))
-    );
     renderBest(view);
     renderLeaderboard(view);
     renderMethodsTable(view);
@@ -1030,9 +1041,11 @@
 
   // ---- Loading -------------------------------------------------------------
   async function loadDatasetViews() {
+    const scoped = ["questions-body", "best-callout", "leaderboard", "methods-table", "verdicts-body", "sensitivity"]
+      .filter((id) => $(id));
+    if (!scoped.length) return; // this page shows no per-dataset view
     const token = ++loadToken;
     const q = "ds=" + encodeURIComponent(state.ds) + "&variant=" + encodeURIComponent(state.variant);
-    const scoped = ["questions-body", "best-callout", "leaderboard", "methods-table", "verdicts-body", "sensitivity"];
     scoped.forEach((id) => $(id).classList.add("stale"));
     try {
       const [methods, contrasts] = await Promise.all([
@@ -1041,11 +1054,13 @@
       ]);
       if (token !== loadToken) return; // a newer choice has been made
       lastMethods = methods;
-      renderMethods(methods);
-      renderQuestions(contrasts, methods);
-      renderVerdicts(contrasts);
+      // The dataset's caveats (Amazon's f19 warning) go on every page that shows a dataset.
+      put("dataset-caveats", methods.caveats.map((t) => h("div", { class: "notice", text: t })));
+      if ($("leaderboard")) renderMethods(methods);
+      if ($("questions-body")) renderQuestions(contrasts, methods);
+      if ($("verdicts-body")) renderVerdicts(contrasts);
     } catch (e) {
-      if (token === loadToken) put("methods-table", errorBox(e));
+      if (token === loadToken) put(scoped[0], errorBox(e));
     }
     scoped.forEach((id) => $(id).classList.remove("stale"));
   }
@@ -1063,17 +1078,21 @@
     renderHeader();
     syncAmazonPanelFirst();
     await loadDatasetViews();
-    try {
-      renderCross(await api("/api/cross"));
-    } catch (e) {
-      put("cross-body", errorBox(e));
+    if ($("cross-body")) {
+      try {
+        renderCross(await api("/api/cross"));
+      } catch (e) {
+        put("cross-body", errorBox(e));
+      }
     }
-    try {
-      renderChecks((await api("/api/checks")).checks);
-    } catch (e) {
-      put("checks-table", errorBox(e));
+    if ($("checks-table")) {
+      try {
+        renderChecks((await api("/api/checks")).checks);
+      } catch (e) {
+        put("checks-table", errorBox(e));
+      }
     }
-    pollStatus();
+    if ($("classify-panels")) pollStatus();
   }
   function syncAmazonPanelFirst() {
     if (state.variant === "no19") panelFor("amazon").variant = "no19";

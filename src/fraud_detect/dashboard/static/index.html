@@ -12,45 +12,39 @@
   <div class="wrap">
     <header class="top">
       <div>
-        <div class="eyebrow">CS555 course project · results dashboard · <a href="/explain">model explanations</a></div>
+        <div class="eyebrow">CS555 course project · results dashboard</div>
         <h1>Does a graph help fraud classification?</h1>
       </div>
       <div class="meta" id="header-meta"></div>
     </header>
+    <nav class="pages" aria-label="Dashboard pages">
+      <a href="/" data-keep="/" aria-current="page">Overview</a>
+      <a href="/questions" data-keep="/questions">Research questions</a>
+      <a href="/methods" data-keep="/methods">Methods</a>
+      <a href="/contrasts" data-keep="/contrasts">Contrasts</a>
+      <a href="/datasets" data-keep="/datasets">Across datasets</a>
+      <a href="/classify" data-keep="/classify">Classify a node</a>
+      <a href="/walkthrough">Explain a node</a>
+      <a href="/explain">Explanation details</a>
+      <a href="/checks" data-keep="/checks">Checks</a>
+    </nav>
 
     <div id="check-banner" class="check-banner" hidden></div>
 
-    <form class="controls" id="controls" aria-label="What to show">
-      <fieldset class="control">
-        <legend>Dataset</legend>
-        <div class="segmented" id="dataset-buttons"></div>
-      </fieldset>
-      <label class="control" id="variant-control">
-        <span class="control-label">Amazon features</span>
-        <select id="variant-select"></select>
-      </label>
-      <label class="control">
-        <span class="control-label">Budget</span>
-        <select id="budget-select"></select>
-      </label>
-      <label class="control check">
-        <input type="checkbox" id="zoom-toggle">
-        <span>Zoom the score axis</span>
-      </label>
+    <form class="controls" id="controls" aria-label="Page settings">
       <div class="control push">
         <button type="button" class="ghost" id="theme-toggle">Theme: auto</button>
       </div>
     </form>
 
     <noscript>
-      <p class="notice">This page draws its charts with JavaScript. The same numbers are in docs/GNN_RESULTS.md and docs/RQ_RESULTS.md.</p>
+      <p class="notice">This dashboard draws its pages with JavaScript. The same numbers are in docs/GNN_RESULTS.md and docs/RQ_RESULTS.md.</p>
     </noscript>
 
     <main>
       <section id="read-first" aria-labelledby="read-first-title">
         <h2 id="read-first-title">Read this first</h2>
         <p class="lede">The limits of these results, before the results.</p>
-        <div id="dataset-caveats"></div>
         <div class="grid-2">
           <div class="panel panel-pad">
             <h3 class="sub">How to read the numbers</h3>
@@ -65,55 +59,18 @@
         </div>
       </section>
 
-      <section id="questions" aria-labelledby="questions-title">
-        <h2 id="questions-title">The questions, answered</h2>
-        <p class="lede" id="questions-lede"></p>
-        <div id="questions-body"></div>
-      </section>
-
-      <section id="methods" aria-labelledby="methods-title">
-        <h2 id="methods-title">Every method on this dataset</h2>
-        <p class="lede" id="methods-lede"></p>
-        <div id="best-callout"></div>
-        <div class="panel chart-panel">
-          <div class="legend" id="leaderboard-legend"></div>
-          <div class="chart-scroll" id="leaderboard"></div>
+      <section id="pages" aria-labelledby="pages-title">
+        <h2 id="pages-title">What each page shows</h2>
+        <div class="page-cards">
+          <a class="panel panel-pad page-card" href="/questions" data-keep="/questions"><b>Research questions</b><span>RQ1 to RQ3 and the GNN round, answered with their pre-registered verdicts.</span></a>
+          <a class="panel panel-pad page-card" href="/methods" data-keep="/methods"><b>Methods</b><span>Every setup on one dataset: test PR-AUC against the no-skill baseline, and the best setup by CV.</span></a>
+          <a class="panel panel-pad page-card" href="/contrasts" data-keep="/contrasts"><b>Contrasts</b><span>Each pre-registered comparison, split by split, with its verdict.</span></a>
+          <a class="panel panel-pad page-card" href="/datasets" data-keep="/datasets"><b>Across datasets</b><span>How much the graph adds on Amazon and on YelpChi, side by side.</span></a>
+          <a class="panel panel-pad page-card" href="/classify" data-keep="/classify"><b>Classify a node</b><span>Draw a random test node and see the best model's score. Group only.</span></a>
+          <a class="panel panel-pad page-card" href="/walkthrough"><b>Explain a node</b><span>A step-by-step reading of one score: features, graph, neighbours. Group only.</span></a>
+          <a class="panel panel-pad page-card" href="/explain"><b>Explanation details</b><span>SHAP over all test nodes and the tests of the explanations.</span></a>
+          <a class="panel panel-pad page-card" href="/checks" data-keep="/checks"><b>Checks</b><span>The sanity checks behind every number on these pages.</span></a>
         </div>
-        <div class="panel table-panel">
-          <div class="table-scroll" id="methods-table"></div>
-        </div>
-        <div id="coverage"></div>
-      </section>
-
-      <section id="verdicts" aria-labelledby="verdicts-title">
-        <h2 id="verdicts-title">Pre-registered contrasts</h2>
-        <p class="lede">Each row is the test PR-AUC of B minus A, on the splits both ran. Written down before the runs.</p>
-        <div id="verdicts-body"></div>
-        <div id="sensitivity"></div>
-      </section>
-
-      <section id="cross" aria-labelledby="cross-title">
-        <h2 id="cross-title">Across the two datasets</h2>
-        <p class="lede">Setups that ran on both, at the pilot budget. This section does not follow the dataset toggle.</p>
-        <div id="cross-body"></div>
-      </section>
-
-      <section id="classify" aria-labelledby="classify-title">
-        <h2 id="classify-title">Classify a random test node</h2>
-        <p class="lede">Each panel holds that dataset's best setup by CV, its saved model on split 0. Only test nodes can be drawn; the model was not fitted on them.</p>
-        <p class="group-banner">Group only: this section shows row-level test data. Do not upload, commit or host it.</p>
-        <ul class="plain small" id="demo-notes"></ul>
-        <div class="classify-grid" id="classify-panels"></div>
-      </section>
-
-      <section id="checks" aria-labelledby="checks-title">
-        <h2 id="checks-title">Sanity checks and coverage</h2>
-        <p class="lede">Recomputed from the results database when this server started. A failure also shows at the top of the page.</p>
-        <div class="panel panel-pad" id="database-facts"></div>
-        <div class="panel table-panel">
-          <div class="table-scroll" id="checks-table"></div>
-        </div>
-        <div id="failed-entries"></div>
       </section>
     </main>
 

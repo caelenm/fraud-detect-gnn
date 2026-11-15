@@ -39,9 +39,26 @@ HOST = "127.0.0.1"
 DEFAULT_PORT = 8555
 STATIC_DIR = Path(__file__).with_name("static")
 REPORT_CSS = Path(__file__).parent.parent / "report" / "report.css"
+# One page per section, each with the same page links; app.js draws whichever
+# sections a page holds. /walkthrough and /explain have their own scripts.
+APP_PAGES = {
+    "/": "index.html",
+    "/questions": "questions.html",
+    "/methods": "methods.html",
+    "/contrasts": "contrasts.html",
+    "/datasets": "datasets.html",
+    "/classify": "classify.html",
+    "/checks": "checks.html",
+}
 STATIC_FILES = {
-    "/": (STATIC_DIR / "index.html", "text/html; charset=utf-8"),
+    **{
+        path: (STATIC_DIR / name, "text/html; charset=utf-8")
+        for path, name in APP_PAGES.items()
+    },
     "/app.js": (STATIC_DIR / "app.js", "text/javascript; charset=utf-8"),
+    "/walkthrough": (STATIC_DIR / "walkthrough.html", "text/html; charset=utf-8"),
+    "/walkthrough.js": (STATIC_DIR / "walkthrough.js", "text/javascript; charset=utf-8"),
+    "/walkthrough.css": (STATIC_DIR / "walkthrough.css", "text/css; charset=utf-8"),
     "/explain": (STATIC_DIR / "explain.html", "text/html; charset=utf-8"),
     "/explain.js": (STATIC_DIR / "explain.js", "text/javascript; charset=utf-8"),
     "/explain.css": (STATIC_DIR / "explain.css", "text/css; charset=utf-8"),

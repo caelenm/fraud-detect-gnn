@@ -1,7 +1,9 @@
-"""The page's files: no external requests, no markup built from values.
+"""The pages' files: no external requests, no markup built from values.
 
 The rules for the comparison page apply here too (AGENTS.md): charts are inline
 SVG, nothing is loaded from elsewhere, and every value is inserted as text.
+The dashboard is one page per section; app.js draws whichever sections a page
+holds, so every element it names must exist on at least one of them.
 """
 
 from __future__ import annotations
@@ -12,15 +14,31 @@ import subprocess
 
 import pytest
 
-from fraud_detect.dashboard.server import REPORT_CSS, STATIC_DIR, STATIC_FILES
+from fraud_detect.dashboard.server import APP_PAGES, REPORT_CSS, STATIC_DIR, STATIC_FILES
 
-HTML = (STATIC_DIR / "index.html").read_text("utf-8")
+PAGES = {path: (STATIC_DIR / name).read_text("utf-8") for path, name in APP_PAGES.items()}
+OTHER_PAGES = {
+    "/walkthrough": (STATIC_DIR / "walkthrough.html").read_text("utf-8"),
+    "/explain": (STATIC_DIR / "explain.html").read_text("utf-8"),
+}
+ALL_PAGES = {**PAGES, **OTHER_PAGES}
 JS = (STATIC_DIR / "app.js").read_text("utf-8")
 CSS = (STATIC_DIR / "dashboard.css").read_text("utf-8")
 SVG_NAMESPACE = "http://www.w3.org/2000/svg"
+NAV = re.compile(r'<nav class="pages".*?</nav>', re.S)
+SHARED = (
+    "header-meta",
+    "check-banner",
+    "controls",
+    "theme-toggle",
+    "page-footer",
+    "tooltip",
+)
 
 
-@pytest.mark.parametrize("text", [HTML, JS, CSS, REPORT_CSS.read_text("utf-8")])
+@pytest.mark.parametrize(
+    "text", [*PAGES.values(), JS, CSS, REPORT_CSS.read_text("utf-8")]
+)
 def test_no_file_reaches_anything_external(text):
     urls = re.findall(r"(?:https?:)?//[a-z0-9.-]+\.[a-z]{2,}[^\s\"')]*", text, flags=re.I)
     assert [
@@ -29,17 +47,43 @@ def test_no_file_reaches_anything_external(text):
     assert "@import" not in text and "url(" not in text
 
 
-def test_the_html_loads_only_its_own_files():
-    sources = re.findall(r'(?:src|href)="([^"]+)"', HTML)
-    assert sorted(sources) == ["/app.js", "/dashboard.css", "/explain", "/report.css"]
-    assert all(s in STATIC_FILES for s in sources)
+@pytest.mark.parametrize("path", PAGES)
+def test_each_page_loads_only_its_own_files(path):
+    html = PAGES[path]
+    loaded = re.findall(r'(?:src|<link[^>]*href)="([^"]+)"', html)
+    assert sorted(loaded) == ["/app.js", "/dashboard.css", "/report.css"]
+    linked = re.findall(r'<a [^>]*href="([^"]+)"', html)
+    assert linked and all(link in STATIC_FILES for link in linked), linked
 
 
-def test_the_html_needs_nothing_the_content_security_policy_forbids():
-    assert "<style" not in HTML
-    assert not re.search(r"<script(?![^>]*\bsrc=)", HTML)
-    assert not re.search(r"\son[a-z]+=", HTML)
-    assert not re.search(r"\sstyle=", HTML)
+@pytest.mark.parametrize("path", PAGES)
+def test_each_page_needs_nothing_the_content_security_policy_forbids(path):
+    html = PAGES[path]
+    assert "<style" not in html
+    assert not re.search(r"<script(?![^>]*\bsrc=)", html)
+    assert not re.search(r"\son[a-z]+=", html)
+    assert not re.search(r"\sstyle=", html)
+
+
+def test_every_page_has_the_same_page_links_and_marks_itself():
+    navs = {}
+    for path, html in ALL_PAGES.items():
+        found = NAV.findall(html)
+        assert len(found) == 1, path
+        nav = found[0]
+        current = re.findall(r'<a href="([^"]+)"[^>]*aria-current="page"', nav)
+        assert current == [path], (path, current)
+        # The same links in the same order; only the marker and kept state differ.
+        navs[path] = re.findall(r'<a href="([^"]+)"', nav)
+    first = next(iter(navs.values()))
+    assert sorted(first) == sorted(ALL_PAGES)
+    assert all(links == first for links in navs.values()), navs
+
+
+def test_every_page_app_js_draws_has_its_shared_furniture():
+    for path, html in PAGES.items():
+        for element in SHARED:
+            assert f'id="{element}"' in html, (path, element)
 
 
 @pytest.mark.parametrize(
@@ -64,27 +108,35 @@ def test_the_script_only_calls_its_own_server():
     assert "fetch(path" in JS and JS.count("fetch(") == 1
 
 
-def test_every_element_the_script_names_exists():
+def test_every_element_the_script_names_exists_on_some_page():
     named = set(re.findall(r"\$\(\"([a-z-]+)\"\)", JS))
     named |= set(re.findall(r"\bput\(\s*\"([a-z-]+)\"", JS))
+    named |= set(re.findall(r"\bsetText\(\s*\"([a-z-]+)\"", JS))
     named |= set(
         re.findall(
             r"\"([a-z]+(?:-[a-z]+)+)\"",
             " ".join(re.findall(r"const scoped = \[[^\]]+\]", JS)),
         )
     )
-    ids = set(re.findall(r'\bid="([a-z-]+)"', HTML))
+    ids = set()
+    for html in PAGES.values():
+        ids |= set(re.findall(r'\bid="([a-z-]+)"', html))
     assert named and named <= ids, named - ids
 
 
-def test_the_page_keeps_its_honest_furniture():
-    assert "Group only" in HTML and "Do not upload, commit or host" in HTML
-    assert "Read this first" in HTML
-    assert HTML.index('id="read-first"') < HTML.index('id="methods"')
-    assert "Sanity checks" in HTML
+def test_the_pages_keep_their_honest_furniture():
+    overview, classify = PAGES["/"], PAGES["/classify"]
+    assert "Read this first" in overview
+    assert "Group only" in classify and "Do not upload, commit or host" in classify
+    assert "Sanity checks" in PAGES["/checks"]
+    # Every page that shows one dataset shows its caveats (Amazon's f19 warning).
+    for path in ("/questions", "/methods", "/contrasts"):
+        html = PAGES[path]
+        assert 'id="dataset-caveats"' in html, path
+        assert html.index('id="dataset-caveats"') < html.index("<section"), path
     # A zoomed axis must say so, and the budget filter must exist.
     assert "does not start at 0" in JS
-    assert 'id="budget-select"' in HTML
+    assert 'id="budget-select"' in PAGES["/methods"]
 
 
 def test_dark_mode_is_chosen_not_flipped():

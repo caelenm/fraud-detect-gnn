@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Classify a Node</title>
+  <link rel="stylesheet" href="/report.css">
+  <link rel="stylesheet" href="/dashboard.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <div>
+        <div class="eyebrow">CS555 course project · results dashboard</div>
+        <h1>Classify a random test node</h1>
+      </div>
+      <div class="meta" id="header-meta"></div>
+    </header>
+    <nav class="pages" aria-label="Dashboard pages">
+      <a href="/" data-keep="/">Overview</a>
+      <a href="/questions" data-keep="/questions">Research questions</a>
+      <a href="/methods" data-keep="/methods">Methods</a>
+      <a href="/contrasts" data-keep="/contrasts">Contrasts</a>
+      <a href="/datasets" data-keep="/datasets">Across datasets</a>
+      <a href="/classify" data-keep="/classify" aria-current="page">Classify a node</a>
+      <a href="/walkthrough">Explain a node</a>
+      <a href="/explain">Explanation details</a>
+      <a href="/checks" data-keep="/checks">Checks</a>
+    </nav>
+
+    <div id="check-banner" class="check-banner" hidden></div>
+
+    <form class="controls" id="controls" aria-label="Page settings">
+      <div class="control push">
+        <button type="button" class="ghost" id="theme-toggle">Theme: auto</button>
+      </div>
+    </form>
+
+    <noscript>
+      <p class="notice">This page needs JavaScript to draw a node.</p>
+    </noscript>
+
+    <main>
+      <section id="classify" aria-labelledby="classify-title">
+        <h2 id="classify-title">The best setup on each dataset</h2>
+        <p class="lede">Each panel holds that dataset's best setup by CV, its saved model on split 0. Only test nodes can be drawn; the model was not fitted on them.</p>
+        <p class="group-banner">Group only: this section shows row-level test data. Do not upload, commit or host it.</p>
+        <ul class="plain small" id="demo-notes"></ul>
+        <div class="classify-grid" id="classify-panels"></div>
+      </section>
+    </main>
+
+    <footer id="page-footer"></footer>
+  </div>
+  <div class="tooltip" id="tooltip" role="status" hidden></div>
+</body>
+</html>

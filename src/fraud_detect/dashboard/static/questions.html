@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Research Questions</title>
+  <link rel="stylesheet" href="/report.css">
+  <link rel="stylesheet" href="/dashboard.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <div>
+        <div class="eyebrow">CS555 course project · results dashboard</div>
+        <h1>The questions, answered</h1>
+      </div>
+      <div class="meta" id="header-meta"></div>
+    </header>
+    <nav class="pages" aria-label="Dashboard pages">
+      <a href="/" data-keep="/">Overview</a>
+      <a href="/questions" data-keep="/questions" aria-current="page">Research questions</a>
+      <a href="/methods" data-keep="/methods">Methods</a>
+      <a href="/contrasts" data-keep="/contrasts">Contrasts</a>
+      <a href="/datasets" data-keep="/datasets">Across datasets</a>
+      <a href="/classify" data-keep="/classify">Classify a node</a>
+      <a href="/walkthrough">Explain a node</a>
+      <a href="/explain">Explanation details</a>
+      <a href="/checks" data-keep="/checks">Checks</a>
+    </nav>
+
+    <div id="check-banner" class="check-banner" hidden></div>
+
+    <form class="controls" id="controls" aria-label="What to show">
+      <fieldset class="control">
+        <legend>Dataset</legend>
+        <div class="segmented" id="dataset-buttons"></div>
+      </fieldset>
+      <label class="control" id="variant-control">
+        <span class="control-label">Amazon features</span>
+        <select id="variant-select"></select>
+      </label>
+      <label class="control">
+        <span class="control-label">Budget</span>
+        <select id="budget-select"></select>
+      </label>
+      <div class="control push">
+        <button type="button" class="ghost" id="theme-toggle">Theme: auto</button>
+      </div>
+    </form>
+
+    <noscript>
+      <p class="notice">This page draws its charts with JavaScript. The same numbers are in docs/GNN_RESULTS.md and docs/RQ_RESULTS.md.</p>
+    </noscript>
+
+    <main>
+      <div id="dataset-caveats"></div>
+      <section id="questions" aria-labelledby="questions-title">
+        <h2 id="questions-title">Research questions</h2>
+        <p class="lede" id="questions-lede"></p>
+        <div id="questions-body"></div>
+      </section>
+    </main>
+
+    <footer id="page-footer"></footer>
+  </div>
+  <div class="tooltip" id="tooltip" role="status" hidden></div>
+</body>
+</html>

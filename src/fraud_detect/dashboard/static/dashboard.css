@@ -22,6 +22,21 @@
 }
 
 [hidden] { display: none !important; }
+
+/* One link per page, the same on every page; the current one is marked. */
+nav.pages { display: flex; flex-wrap: wrap; gap: 4px 2px; margin: 0 0 12px;
+  border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+nav.pages a { font-size: 13.5px; color: var(--muted); text-decoration: none;
+  padding: 6px 10px; border-radius: 8px; }
+nav.pages a:hover { background: var(--surface-2); color: var(--text); }
+nav.pages a[aria-current="page"] { background: var(--accent-soft); color: var(--accent);
+  font-weight: 600; }
+.page-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px; margin-top: 14px; }
+a.page-card { display: flex; flex-direction: column; gap: 4px; text-decoration: none;
+  color: var(--text); margin: 0; }
+a.page-card:hover { border-color: var(--accent); }
+a.page-card span { font-size: 13px; color: var(--muted); }
 .eyebrow a { color: inherit; }
 .wrap { max-width: 1240px; }
 section { scroll-margin-top: 90px; }

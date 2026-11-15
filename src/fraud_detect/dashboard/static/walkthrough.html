@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Explain a Node</title>
+  <link rel="stylesheet" href="/report.css">
+  <link rel="stylesheet" href="/dashboard.css">
+  <link rel="stylesheet" href="/walkthrough.css">
+  <script src="/walkthrough.js" defer></script>
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <div>
+        <div class="eyebrow">CS555 course project · results dashboard</div>
+        <h1>Why did the model score this node?</h1>
+      </div>
+      <div class="meta" id="header-meta"></div>
+    </header>
+    <nav class="pages" aria-label="Dashboard pages">
+      <a href="/">Overview</a>
+      <a href="/questions">Research questions</a>
+      <a href="/methods">Methods</a>
+      <a href="/contrasts">Contrasts</a>
+      <a href="/datasets">Across datasets</a>
+      <a href="/classify">Classify a node</a>
+      <a href="/walkthrough" aria-current="page">Explain a node</a>
+      <a href="/explain">Explanation details</a>
+      <a href="/checks">Checks</a>
+    </nav>
+
+    <form class="controls" id="controls" aria-label="Which model and which node">
+      <fieldset class="control">
+        <legend>Model explained</legend>
+        <div class="segmented wrap-buttons" id="model-buttons"></div>
+      </fieldset>
+      <fieldset class="control">
+        <legend>Kind of node</legend>
+        <div class="segmented wrap-buttons" id="draw-buttons"></div>
+      </fieldset>
+      <div class="control">
+        <button type="button" class="primary" id="draw-button">Draw a test node</button>
+      </div>
+      <div class="control push">
+        <button type="button" class="ghost" id="theme-toggle">Theme: auto</button>
+      </div>
+    </form>
+
+    <noscript>
+      <p class="notice">This page needs JavaScript to draw and explain a node.</p>
+    </noscript>
+
+    <p class="group-banner">Group only: this page shows row-level test data. Do not upload, commit or host it.</p>
+    <div id="model-note"></div>
+
+    <div class="walk">
+      <main>
+        <section class="step" id="step-sample" aria-labelledby="step-sample-title">
+          <p class="step-no">Step 1</p>
+          <h2 id="step-sample-title">The sample</h2>
+          <div id="sample-body"><p class="empty">Choose a model and draw a test node.</p></div>
+        </section>
+
+        <section class="step" id="step-words" aria-labelledby="step-words-title">
+          <p class="step-no">Step 2</p>
+          <h2 id="step-words-title">In plain words</h2>
+          <div id="words-body"></div>
+        </section>
+
+        <section class="step" id="step-features" aria-labelledby="step-features-title">
+          <p class="step-no">Step 3</p>
+          <h2 id="step-features-title">Feature contributions</h2>
+          <p class="lede small" id="features-lede"></p>
+          <div id="features-body"></div>
+        </section>
+
+        <section class="step" id="step-blocks" aria-labelledby="step-blocks-title">
+          <p class="step-no">Step 4</p>
+          <h2 id="step-blocks-title">Own features or the graph?</h2>
+          <p class="lede small" id="blocks-lede"></p>
+          <div id="blocks-body"></div>
+        </section>
+
+        <section class="step" id="step-neighbours" aria-labelledby="step-neighbours-title">
+          <p class="step-no">Step 5</p>
+          <h2 id="step-neighbours-title">Which neighbours mattered</h2>
+          <p class="lede small" id="neighbours-lede"></p>
+          <div id="neighbours-body"></div>
+        </section>
+
+        <section class="step caution" id="step-care" aria-labelledby="step-care-title">
+          <p class="step-no">Step 6</p>
+          <h2 id="step-care-title">Read with care</h2>
+          <p class="small">This explains what caused the model's classification decision, not the cause of fraud. On Amazon, f19 is a probable label leak. Studies with fraud analysts found explanations did not reliably improve their decisions <a href="#src-12">[12]</a>.</p>
+          <p class="small muted">For SHAP over all test nodes, and the tests of whether these explanations hold up, see <a href="/explain">Explanation details</a>.</p>
+        </section>
+
+        <section class="step" id="sources" aria-labelledby="sources-title">
+          <h2 id="sources-title">Sources</h2>
+          <p class="small muted">Papers are cited by their identifiers rather than linked, because this dashboard makes no requests outside this computer. Project documents are in the repository.</p>
+          <ol class="sources" id="sources-list"></ol>
+        </section>
+      </main>
+      <aside class="glossary" aria-labelledby="glossary-title">
+        <h2 id="glossary-title" class="sub">What the labels mean</h2>
+        <p class="small muted">Hover over or focus a dotted term to find its card.</p>
+        <div id="glossary-body"></div>
+      </aside>
+    </div>
+
+    <footer id="page-footer"></footer>
+  </div>
+  <div class="tooltip" id="tooltip" role="status" hidden></div>
+</body>
+</html>

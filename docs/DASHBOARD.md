@@ -138,17 +138,21 @@ If you skip 5c, `uv run scripts/dashboard.py --no-model` still shows the panels,
 | A red banner at the top of the page | A sanity check failed. Do not present these numbers until it is explained. Run `uv run scripts/dashboard.py --check` to see the details. |
 | WSL stops by itself after a while | WSL shuts down when idle. Keep the terminal with the server open. |
 
-## What the page shows
+## What the pages show
 
-The toggles at the top scope the first sections, and they are kept in the URL, so a link opens the same view.
+Each section has its own page, with the same row of page links at the top of every page. The dataset, feature and budget choices sit above the pages that use them and are kept in the URL and in the page links, so moving between pages keeps the view. Every page that shows one dataset shows that dataset's caveats first (Amazon's `f19` warning).
 
-1. **Read this first.** The limits of the results, before the results: the budget, the single machine and seed, Amazon's `f19` warning, YelpChi's sensitivity to tuning, what was not run, and how a verdict is decided.
-2. **The questions, answered.** The project's questions, each with its contrast, Δ, CV p and verdict.
-3. **Every method on this dataset.** The setup with the highest CV score and how close the others are, a chart of test and CV PR-AUC per setup, and the table behind it, including each run's database entry. It also lists what was not run for this view.
-4. **Pre-registered contrasts.** The primary family with Holm-adjusted p values, the other contrasts, and the one-split descriptive ones kept apart. On YelpChi, also the default-settings sensitivity check.
-5. **Across the two datasets.** Normalised skill, the gain over B per dataset, and whether the verdicts agree.
-6. **Classify a random test node.** See below.
-7. **Sanity checks and coverage.** Every check with its result, and anything started but not finished.
+1. **Overview (`/`).** Read this first: the limits of the results, before the results (the budget, the single machine and seed, YelpChi's sensitivity to tuning, what was not run, and how a verdict is decided), and what each page shows.
+2. **Research questions (`/questions`).** The project's questions, each with its contrast, Δ, CV p and verdict.
+3. **Methods (`/methods`).** The setup with the highest CV score and how close the others are, a chart of test and CV PR-AUC per setup, and the table behind it, including each run's database entry. It also lists what was not run for this view.
+4. **Contrasts (`/contrasts`).** The primary family with Holm-adjusted p values, the other contrasts, and the one-split descriptive ones kept apart. On YelpChi, also the default-settings sensitivity check.
+5. **Across datasets (`/datasets`).** Normalised skill, the gain over B per dataset, and whether the verdicts agree.
+6. **Classify a node (`/classify`).** See below.
+7. **Explain a node (`/walkthrough`).** See below.
+8. **Explanation details (`/explain`).** See below.
+9. **Checks (`/checks`).** Every check with its result, and anything started but not finished. A failed check also shows at the top of every page.
+
+Pages 1–6 and 9 are drawn by one script (`static/app.js`), which draws whichever sections a page holds; the page list is `APP_PAGES` in `server.py`.
 
 ### Reading the classify panel
 
@@ -160,9 +164,22 @@ Each panel holds its dataset's best setup by CV, and that setup's Model A on spl
 - **"Most unusual features" are not an explanation.** They are the node's highest values against the training nodes. They describe the node, not the model's reasoning.
 - **Neighbour colours use training labels** for that picture only. No model input uses a neighbour's label.
 
+## Explain a node (`/walkthrough`)
+
+One test node's score, read in six steps down one page, for the course audience. It reads the same saved explanations as `/explain` (the same two API calls) and computes nothing new; it is row-level, so group only.
+
+1. **The sample:** a random test node (any, by class, or by outcome), its score against the training-chosen threshold, and the decision. The true label stays hidden until **Reveal true label**.
+2. **In plain words:** one sentence filled from a fixed template with the numbers of steps 3 and 4: the score and threshold, the base score, the two largest pushes toward fraud, the largest pull towards benign, and the graph blocks' share of everything pushing towards the decided class.
+3. **Feature contributions:** the six largest SHAP values as a log-odds waterfall from the base to the score, the rest summed.
+4. **Own features or the graph:** each block's group Shapley value where this node is in that sample, otherwise its summed SHAP (the page says which).
+5. **Which neighbours mattered:** the three largest neighbour influences per relation, where they were computed.
+6. **Read with care:** what the explanation is not.
+
+Amazon opens on all 25 features with the `f19` note; the other models are one click away. A **glossary** beside the steps explains every label the current node uses (features, relations, blocks and methods, for both datasets); hovering over or focusing a dotted term highlights its card, and every card cites a numbered source at the foot of the page. Papers are cited by identifier, not linked, because the dashboard makes no requests outside the machine. The glossary text is in `static/walkthrough.js` (`GLOSSARY`, `SOURCES`).
+
 ## The explanations page (`/explain`)
 
-A second page, linked at the top of the first, at `http://127.0.0.1:8555/explain`. It shows SHAP and neighbour influence for each explained model, from the outputs `scripts/dfa/shap_explain.py` and `scripts/explain_report.py` already saved on split 0 (see [`EXPLAINABILITY_PLAN.md`](EXPLAINABILITY_PLAN.md)). It computes nothing new about a model and needs no model worker, so it also works with `--no-model`. It is row-level, like the classify panel: group only.
+A second page, linked from every page, at `http://127.0.0.1:8555/explain`. It shows SHAP and neighbour influence for each explained model, from the outputs `scripts/dfa/shap_explain.py` and `scripts/explain_report.py` already saved on split 0 (see [`EXPLAINABILITY_PLAN.md`](EXPLAINABILITY_PLAN.md)). It computes nothing new about a model and needs no model worker, so it also works with `--no-model`. It is row-level, like the classify panel: group only.
 
 - **Which models:** Amazon E1 without `f19` (the substantive explanation) and with all 25 features (a leakage audit), and YelpChi E2 and E1. Each uses the full-budget explanation where one exists and the pilot one otherwise (`TARGETS` in `src/fraud_detect/dashboard/explain.py`). A model without finished outputs says what to run.
 - **Checks before any node is shown:** the SHAP rows are exactly the split's test nodes, with `test_ids.csv`'s labels; none was trained on; the saved margins give the saved probabilities; base value plus SHAP gives every margin; neighbour influence covers test nodes only; the nearest neighbours in SHAP space are training nodes. A failed check takes the model off the page. Rows that failed SHAP's implementation check are never drawn.
