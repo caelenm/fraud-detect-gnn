@@ -221,11 +221,72 @@ def test_the_page_says_what_the_numbers_are(db):
     view = data.overview(entries, runs)
     note = narrative.budget_note(view)
     assert f"{view['budgets'][reg.PILOT]} of the {view['n_runs']}" in note
-    assert "amazon split 0" in note
+    assert "Amazon splits 0–2" in note and "YelpChi splits 0–2" in note
     amazon_all = data.setup_summary(runs, "amazon", reg.PILOT, reg.ALL)
     no19 = data.setup_summary(runs, "amazon", reg.PILOT, reg.NO19)
     warning = narrative.amazon_f19(amazon_all, no19)
     assert "likely leaks" in warning and "0.922" in warning and "0.544" in warning
+
+
+def test_full_budget_answers_stand_beside_the_pilot(db):
+    # YelpChi's E2 − B is supported at the pilot budget and not distinguishable
+    # at the full budget; the questions page must show both.
+    _, _, _, current = db
+    questions = {
+        (q["b_id"], q["a_id"]): q for q in data.key_questions(current, "yelpchi", reg.ALL)
+    }
+    e2 = questions[("E2", "B")]
+    assert e2["pilot"]["verdict_kind"] == data.SUPPORTED
+    assert e2["full"]["verdict_kind"] == data.NOT_DISTINGUISHABLE
+    assert e2["full"]["n_splits"] == 3
+
+
+def test_the_desktop_verdicts_say_they_used_its_rerun_of_b(db):
+    # The full-budget Amazon table from rtx4060-desktop used that machine's B on
+    # split 0, while the runs tables count the laptop's earlier B.
+    _, runs, _, current = db
+    rows = [dict(r) for r in current]
+    data.mark_replication_splits(rows, runs)
+    full = [
+        r
+        for r in rows
+        if r["dataset"] == "amazon"
+        and r["a_budget"] == reg.FULL
+        and r["a_id"] == "B"
+        and r["a_variant"] in (reg.ALL, reg.NO36)  # no19 ran on the laptop alone
+    ]
+    assert full
+    for row in full:
+        assert row["replication_splits"] == [
+            {"split": 0, "setups": ["B"], "devices": ["rtx4060-desktop"]}
+        ], (row["b_id"], row["a_variant"])
+    # No contrast built on the laptop's own runs is marked.
+    pilot = [r for r in rows if r["a_budget"] == reg.PILOT]
+    assert not any(r["replication_splits"] for r in pilot)
+
+
+def test_the_not_run_list_matches_the_database(db):
+    _, runs, _, _ = db
+    items = narrative.not_run(runs)
+    joined = " ".join(items)
+    # Both datasets have full-budget runs, so neither is "pilot only" as a whole
+    # for all features.
+    assert "YelpChi, all 32 features." not in joined
+    assert "Amazon, all 25 features." not in joined
+    for gap in data.full_budget_gaps(runs):
+        if not gap["none_at_full"]:  # a wholly pilot-only variant is named, not listed
+            assert all(i in joined for i in gap["missing"])
+    usable = data.usable_runs(runs)
+    for gap in data.full_budget_gaps(runs):
+        rows = usable[
+            (usable["dataset"] == gap["dataset"]) & (usable["variant"] == gap["variant"])
+        ]
+        full_ids = set(
+            rows[rows["budget"] == reg.FULL]["feature_set"].map(
+                lambda n: reg.parse_feature_set(n).display_id
+            )
+        )
+        assert not full_ids & set(gap["missing"])
 
 
 def test_the_default_settings_order_is_reported(db):

@@ -13,7 +13,7 @@ from synthetic import (
     fake_run_entry,
 )
 
-from fraud_detect.dashboard import data
+from fraud_detect.dashboard import checks, data
 from fraud_detect.dashboard import registry as reg
 
 
@@ -141,6 +141,34 @@ def test_a_separate_rerun_is_a_replication_and_the_earliest_run_counts(tmp_path)
     assert runs["replication"].sum() == 1 and data.duplicate_runs(runs) == []
     (row,) = data.setup_summary(runs, "amazon", reg.FULL, reg.ALL)
     assert row["n_splits"] == 1 and row["test_pr_auc"] == pytest.approx(0.8)
+
+
+def test_a_contrast_built_on_a_rerun_says_which_split(tmp_path):
+    # B on split 0 was run twice; the earliest (0.80) counts, but another
+    # machine's verdict table used its own rerun (0.82).
+    for tag, test, day, device in (("a", 0.80, "01", "fake-laptop"),
+                                   ("b", 0.82, "02", "fake-desktop")):  # fmt: skip
+        fake_run_entry(tmp_path, "amazon", "m1_own", 0, test=test, tag_id=tag,
+                       started_utc=f"2026-01-{day}T00:00:00Z",
+                       df_analyze_run=f"202601{day}T000000Z", device=device)  # fmt: skip
+    fake_run_entry(tmp_path, "amazon", "m1_own", 1, test=0.80)
+    fake_run_entry(tmp_path, "amazon", "m2_own_nbr", 0, test=0.85)
+    fake_run_entry(tmp_path, "amazon", "m2_own_nbr", 1, test=0.86)
+    fake_compare_entry(
+        tmp_path,
+        "amazon",
+        [fake_contrast_row("m1_own", "m2_own_nbr", [0.03, 0.06], p=0.01, pr_a=0.81)],
+        "x",
+    )
+    entries, runs = load(tmp_path)
+    rows = contrasts_of(entries)
+    data.mark_replication_splits(rows, runs)
+    (row,) = rows
+    assert row["replication_splits"] == [
+        {"split": 0, "setups": ["B"], "devices": ["fake-desktop"]}
+    ]
+    # The check that guards it still passes: the delta matches a recorded run.
+    assert checks.check_contrasts_match_runs(rows, runs).ok
 
 
 def test_the_same_df_analyze_run_recorded_twice_is_still_a_duplicate(tmp_path):
@@ -414,9 +442,32 @@ def test_key_questions_skip_what_was_not_run_and_other_budgets(tmp_path):
     )
     entries, _ = load(tmp_path)
     questions = data.key_questions(contrasts_of(entries), "amazon", reg.ALL)
-    assert [(q["b_id"], q["a_id"]) for q in questions] == [("E1", "B")]
+    assert [(q["b_id"], q["a_id"]) for q in questions] == [("E1", "B"), ("E2", "B")]
+    e1, e2 = questions
+    assert e1["pilot"]["mean"] == pytest.approx(0.1) and e1["full"] is None
+    # A full-budget answer stands beside the pilot's, never in place of it.
+    assert e2["pilot"] is None and e2["full"]["a_budget"] == reg.FULL
+    assert e2["full"]["verdict_kind"] == data.DESCRIPTIVE  # one split
     # E2 at size 16 is not the default-size question "E2 − B".
     assert data.key_questions(contrasts_of(entries), "amazon", reg.NO19) == []
+
+
+def test_key_questions_never_mix_budgets_in_one_answer(tmp_path):
+    fake_compare_entry(
+        tmp_path,
+        "amazon",
+        [
+            fake_contrast_row("pilot_m1_own", "pilot_m2_own_nbr", [0.1, 0.1], p=0.01),
+            fake_contrast_row("m1_own", "m2_own_nbr", [0.02, -0.01], p=0.4),
+            fake_contrast_row("pilot_m1_own", "m2_own_nbr", [0.5, 0.5], p=0.001),
+        ],
+        "x",
+    )
+    entries, _ = load(tmp_path)
+    (q,) = data.key_questions(contrasts_of(entries), "amazon", reg.ALL)
+    assert q["pilot"]["verdict_kind"] == data.SUPPORTED
+    assert q["full"]["verdict_kind"] == data.NOT_DISTINGUISHABLE
+    assert q["pilot"]["b_budget"] == reg.PILOT and q["full"]["a_budget"] == reg.FULL
 
 
 def test_a_superseded_or_failed_compare_entry_gives_no_verdict(tmp_path):
@@ -519,6 +570,34 @@ def test_agreement_leaves_out_contrasts_on_one_dataset(tmp_path):
     assert data.cross_dataset(runs, contrasts_of(entries))["agreement"] == []
 
 
+def test_cross_dataset_at_the_full_budget_uses_only_full_runs(tmp_path):
+    for ds, no_skill in (("amazon", 0.1), ("yelpchi", 0.15)):
+        fake_run_entry(tmp_path, ds, "pilot_m1_own", test=0.5, no_skill=no_skill)
+        fake_run_entry(tmp_path, ds, "m1_own", test=0.6, no_skill=no_skill)
+        fake_run_entry(tmp_path, ds, "m2_own_nbr", test=0.7, no_skill=no_skill)
+        fake_compare_entry(
+            tmp_path,
+            ds,
+            [
+                fake_contrast_row("m1_own", "m2_own_nbr", [0.1, 0.1], p=0.01),
+                fake_contrast_row("pilot_m1_own", "pilot_m2_own_nbr", [0.1, 0.1], p=0.01),
+            ],
+            ds,
+        )
+    entries, runs = load(tmp_path)
+    full = data.cross_dataset(runs, contrasts_of(entries), reg.FULL)
+    assert full["budget"] == reg.FULL
+    assert [r["setup"] for r in full["setups"]] == ["B", "E1"]
+    assert full["setups"][0]["amazon"]["test_pr_auc"] == pytest.approx(0.6)
+    assert [g["amazon"]["mean"] for g in full["gains"]] == [pytest.approx(0.1)]
+    (agree,) = full["agreement"]
+    assert agree["contrast"] == "E1 − B" and agree["agrees"]
+    pilot = data.cross_dataset(runs, contrasts_of(entries), reg.PILOT)
+    assert [r["setup"] for r in pilot["setups"]] == ["B"]
+    with pytest.raises(data.DashboardDataError):
+        data.cross_dataset(runs, [], "t100")
+
+
 # ---- Overview, coverage, sensitivity --------------------------------------
 def test_overview_counts_and_coverage(tmp_path):
     fake_ladder_db(tmp_path)
@@ -533,6 +612,9 @@ def test_overview_counts_and_coverage(tmp_path):
     assert view["budgets"][reg.FULL] == 1 and view["n_backfilled"] == 1
     assert view["devices"] == ["fake-laptop"] and view["seeds"] == [555]
     assert view["full_budget_where"] == ["amazon split 0"]
+    assert view["full_budget_splits"] == {"amazon": [0]}
+    assert sum(view["device_runs"]["fake-laptop"].values()) == view["n_runs"]
+    assert view["n_replications"] == 0
     names = [
         "pilot_m1_own",
         "pilot_m5r_own_gnnrand",
@@ -555,6 +637,50 @@ def test_coverage_flags_fewer_splits(tmp_path):
     cov = data.coverage(runs, "amazon", reg.ALL, [])
     assert cov["most_splits"] == 5
     assert cov["fewer_splits"] == [{"display_id": "E1", "n_splits": 1}]
+
+
+def test_coverage_counts_splits_within_the_budget_on_view(tmp_path):
+    for k in range(5):
+        fake_run_entry(tmp_path, "amazon", "pilot_m1_own", k)
+    for k in range(3):
+        fake_run_entry(tmp_path, "amazon", "m1_own", k)
+    fake_run_entry(tmp_path, "amazon", "m2_own_nbr", 0)
+    _, runs = load(tmp_path)
+    cov = data.coverage(runs, "amazon", reg.ALL, [], reg.FULL)
+    # Three full-budget splits is the most at that budget, not the pilot's five.
+    assert cov["most_splits"] == 3
+    assert cov["fewer_splits"] == [{"display_id": "E1", "n_splits": 1}]
+
+
+def test_budget_gaps_keep_gnn_classifiers_apart(tmp_path):
+    for name in ("pilot_m1_own", "pilot_m2_own_nbr", "pilot_g5_sage", "m1_own"):
+        fake_run_entry(tmp_path, "amazon", name)
+    fake_run_entry(tmp_path, "amazon", "pilot_m1_own_no19")
+    _, runs = load(tmp_path)
+    gaps = data.budget_gaps(runs, "amazon", reg.ALL)
+    assert gaps == {"gnn_rungs": ["E5"], "pilot_only": ["E1"]}
+    full = data.full_budget_gaps(runs)
+    assert {"dataset": "amazon", "variant": reg.ALL, "missing": ["E1"],
+            "none_at_full": False} in full  # fmt: skip
+    assert {"dataset": "amazon", "variant": reg.NO19, "missing": ["B"],
+            "none_at_full": True} in full  # fmt: skip
+
+
+def test_pilot_split_gaps_compare_within_a_variant(tmp_path):
+    for k in range(5):
+        fake_run_entry(tmp_path, "amazon", "pilot_m1_own_no19", k)
+    for k in range(3):
+        fake_run_entry(tmp_path, "amazon", "pilot_m2_own_nbr_no19", k)
+        fake_run_entry(tmp_path, "amazon", "pilot_m1_own", k)  # all 3: no gap
+    _, runs = load(tmp_path)
+    assert data.pilot_split_gaps(runs) == [
+        {
+            "dataset": "amazon",
+            "variant": reg.NO19,
+            "most": 5,
+            "fewer": [{"display_id": "E1", "n_splits": 3}],
+        }
+    ]
 
 
 def test_default_settings_check_reads_both_entries(tmp_path):

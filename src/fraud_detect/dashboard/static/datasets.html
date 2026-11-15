@@ -31,7 +31,11 @@
 
     <div id="check-banner" class="check-banner" hidden></div>
 
-    <form class="controls" id="controls" aria-label="Page settings">
+    <form class="controls" id="controls" aria-label="What to show">
+      <label class="control">
+        <span class="control-label">Budget</span>
+        <select id="budget-select"></select>
+      </label>
       <div class="control push">
         <button type="button" class="ghost" id="theme-toggle">Theme: auto</button>
       </div>
@@ -44,7 +48,7 @@
     <main>
       <section id="cross" aria-labelledby="cross-title">
         <h2 id="cross-title">What the graph adds, dataset by dataset</h2>
-        <p class="lede">Setups that ran on both datasets, at the pilot budget.</p>
+        <p class="lede" id="cross-lede">Setups that ran on both datasets, at one budget.</p>
         <div id="cross-body"></div>
       </section>
     </main>

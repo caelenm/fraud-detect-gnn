@@ -142,11 +142,11 @@ If you skip 5c, `uv run scripts/dashboard.py --no-model` still shows the panels,
 
 Each section has its own page, with the same row of page links at the top of every page. The dataset, feature and budget choices sit above the pages that use them and are kept in the URL and in the page links, so moving between pages keeps the view. Every page that shows one dataset shows that dataset's caveats first (Amazon's `f19` warning).
 
-1. **Overview (`/`).** Read this first: the limits of the results, before the results (the budget, the single machine and seed, YelpChi's sensitivity to tuning, what was not run, and how a verdict is decided), and what each page shows.
-2. **Research questions (`/questions`).** The project's questions, each with its contrast, Δ, CV p and verdict.
-3. **Methods (`/methods`).** The setup with the highest CV score and how close the others are, a chart of test and CV PR-AUC per setup, and the table behind it, including each run's database entry. It also lists what was not run for this view.
-4. **Contrasts (`/contrasts`).** The primary family with Holm-adjusted p values, the other contrasts, and the one-split descriptive ones kept apart. On YelpChi, also the default-settings sensitivity check.
-5. **Across datasets (`/datasets`).** Normalised skill, the gain over B per dataset, and whether the verdicts agree.
+1. **Overview (`/`).** Read this first: the limits of the results, before the results (the budgets and where each was run, the machines and seed, YelpChi's sensitivity to tuning, what was not run, and how a verdict is decided), and what each page shows. "Not run" is built from the database (setups with no full-budget run, setups with fewer splits) plus the few gaps the database cannot show (V1, HGT, other datasets), so it changes as runs are recorded.
+2. **Research questions (`/questions`).** The project's questions, each with its contrast and, side by side, the pilot-budget and the full-budget answer (Δ, splits, CV p, verdict), or "not run". The two budgets are separate pre-registered contrasts: neither replaces the other, and the page says where they disagree.
+3. **Methods (`/methods`).** The setup with the highest CV score and how close the others are, a chart of test and CV PR-AUC per setup, and the table behind it, including each run's database entry. It also lists what was not run for this view. At the full budget it names the setups that have pilot runs only (the GNN classifiers have no df-analyze budget, so their only runs are under the pilot) and says why the best setup is chosen at the pilot budget.
+4. **Contrasts (`/contrasts`).** The primary family with Holm-adjusted p values, the other contrasts, and the one-split descriptive ones kept apart, each with its budget. On YelpChi, also the default-settings sensitivity check.
+5. **Across datasets (`/datasets`).** At the chosen budget: normalised skill, the gain over B per dataset, and whether the verdicts agree.
 6. **Classify a node (`/classify`).** See below.
 7. **Explain a node (`/walkthrough`).** See below.
 8. **Explanation details (`/explain`).** See below.

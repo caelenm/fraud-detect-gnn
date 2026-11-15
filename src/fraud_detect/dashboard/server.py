@@ -141,6 +141,7 @@ class App:
         self.runs = data.runs_table(self.entries)
         all_rows = data.all_contrasts(self.entries)
         self.contrasts = data.current_contrasts(all_rows)
+        data.mark_replication_splits(self.contrasts, self.runs)
         self.checks = checks_module.run_all(
             db_dir, self.entries, self.runs, all_rows, self.contrasts
         )
@@ -154,7 +155,10 @@ class App:
         )
         self.overview = data.overview(self.entries, self.runs)
         self.failed = data.failed_entries(self.entries)
-        self.cross = data.cross_dataset(self.runs, self.contrasts)
+        self.cross = {
+            budget: data.cross_dataset(self.runs, self.contrasts, budget)
+            for budget in reg.BUDGETS
+        }
         self.commit = git_commit(REPO_ROOT)
         self.worker_factory = worker_factory
         self.worker: ModelWorker | None = None
@@ -211,7 +215,7 @@ class App:
             "general_caveats": narrative.general_caveats(self.overview, self.failed),
             "verdict_rule": narrative.VERDICT_RULE,
             "label_column_note": narrative.label_column_note(),
-            "not_run": list(narrative.NOT_RUN),
+            "not_run": narrative.not_run(self.runs),
             "demo_notes": narrative.demo_notes(),
             "failed_entries": self.failed,
             "failed_checks": failed_checks,
@@ -226,12 +230,18 @@ class App:
             raise BadRequest(f"Unknown budget {budget!r}; choose from {reg.BUDGETS}")
         rows = data.setup_summary(self.runs, dataset, budget, variant)
         best = data.best_setup(self.runs, dataset, variant, self.contrasts)
-        no19 = (
-            data.setup_summary(self.runs, dataset, reg.PILOT, reg.NO19)
-            if dataset == "amazon"
-            else []
+        summaries = {
+            (b, v): data.setup_summary(self.runs, dataset, b, v)
+            for b in reg.BUDGETS
+            for v in (reg.ALL, reg.NO19)
+        }
+        # The f19 warning quotes the budget on view when B has run there both
+        # ways, else the pilot's.
+        has_b = all(
+            any(r["display_id"] == "B" for r in summaries[(budget, v)])
+            for v in (reg.ALL, reg.NO19)
         )
-        pilot_all = data.setup_summary(self.runs, dataset, reg.PILOT, reg.ALL)
+        caveat_budget = budget if has_b else reg.PILOT
         default_check = data.default_settings_check(self.entries, dataset)
         return {
             "dataset": dataset,
@@ -242,12 +252,19 @@ class App:
             "families": list(reg.FAMILIES),
             "best": best,
             "caveats": narrative.dataset_caveats(
-                dataset, variant, pilot_all, no19, default_check
+                dataset,
+                variant,
+                summaries[(caveat_budget, reg.ALL)],
+                summaries[(caveat_budget, reg.NO19)],
+                default_check,
+                caveat_budget,
+                summaries[(reg.FULL, reg.ALL)],
             ),
             "has_label_column": any(r["label_derived_column"] for r in rows),
             "coverage": data.coverage(
-                self.runs, dataset, variant, list(self.config["feature_sets"])
+                self.runs, dataset, variant, list(self.config["feature_sets"]), budget
             ),
+            "budget_gaps": data.budget_gaps(self.runs, dataset, variant),
         }
 
     def api_contrasts(self, dataset: Any, variant: Any) -> dict[str, Any]:
@@ -262,8 +279,10 @@ class App:
             "tuned_vs_default": data.tuned_vs_default_cv(self.entries, dataset),
         }
 
-    def api_cross(self) -> dict[str, Any]:
-        return self.cross
+    def api_cross(self, budget: Any = reg.PILOT) -> dict[str, Any]:
+        if budget not in self.cross:
+            raise BadRequest(f"Unknown budget {budget!r}; choose from {reg.BUDGETS}")
+        return self.cross[budget]
 
     def api_best(self) -> dict[str, Any]:
         out = {}
@@ -543,7 +562,7 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                 "/api/contrasts": lambda: app.api_contrasts(
                     query.get("ds"), query.get("variant", reg.ALL)
                 ),
-                "/api/cross": app.api_cross,
+                "/api/cross": lambda: app.api_cross(query.get("budget", reg.PILOT)),
                 "/api/best": app.api_best,
                 "/api/checks": app.api_checks,
                 "/api/status": app.api_status,
