@@ -270,9 +270,49 @@ What these do and do not show:
 
 - **On Amazon the full budget gives the pilot's verdicts.** With all features, only neighbour means pass the rule. Without #36, both graph setups pass, and neighbour means beat the DGI embeddings.
 - **On YelpChi the graph gains shrink at the full budget.** E1 − B falls from +0.033 (pilot) to +0.015 and is still supported. E2 − B falls from +0.046 to +0.018 and is no longer distinguishable from zero. B barely moves (+0.003 on average); E1 and E2 drop by 0.015 and 0.025. So, as with the default-settings check, YelpChi's ranking of setups depends on the tuning, while the neighbour-means gain holds.
-- **This is not the stopped 100-trial check.** That check kept the pilot's 3 classifiers and included E7 and E8. These runs use all 6 classifiers and have no E7 or E8, so whether the trial count explains E7's and E8's shortfall is still open.
+- **This is not the stopped 100-trial check.** That check kept the pilot's 3 classifiers and included E7 and E8. These runs use all 6 classifiers and have no E7 or E8, so whether the trial count explains E7's and E8's shortfall is still open. (Full-budget E7 and E8 ran later, in the next section.)
 - **One split is not enough.** On YelpChi split 0, E2 led E1 by +0.037; splits 1 and 2 reversed that. The DGI setup varies more across splits (SD 0.026) than neighbour means (0.007).
 - **Two Amazon split-0 runs exist for B** (all features and without #36): the earlier ones on the laptop (0.919 and 0.518) and these reruns on the desktop (0.916 and 0.523). df-analyze's feature selection is not seeded. The dashboard counts the earlier run and keeps the rerun as a replication (in the database, not in its numbers); the verdict table above used the reruns.
+
+## Results (full-budget queue, 2026-11-09 to 2026-11-15)
+
+The sixth amendment's queue (RESEARCH_PLAN §11, written before the runs): the **full Model A budget** (6 classifiers, 100 trials, `bal-acc`, seed 555), one job at a time on the RTX 4060 laptop (`rtx4060-laptop`), splits 0–2 (Amazon without f19: splits 1–2, since split 0 ran on 2026-10-29 and 2026-10-30). 24 runs and 5 verdict tables are in the [results database](#results-database) (tags `full`, `full-queue`). Every run passed the split and column-type checks. Two runs, YelpChi E7 on splits 1 and 2, hit df-analyze's time limit while tuning logistic regression; the trials finished before it are kept, the user accepted them as they are (2026-11-12), and their database entries say so. Model A was not logistic regression in either run. The GNN classifiers (E5, E5g, E6, N3) were not rerun: `gnn_classify` ignores df-analyze's budget.
+
+**Test PR-AUC per split, full budget** (pilot means for comparison; B, E1 and E2 with all features are the desktop runs above, except B on Amazon split 0, which counts the laptop's earlier run):
+
+| Dataset, variant | Setup | Split 0 | Split 1 | Split 2 | Mean ± SD | Pilot |
+|---|---|---|---|---|---|---|
+| Amazon, without f19 | B | 0.525 | 0.542 | 0.573 | 0.546 ± 0.024 | 0.544 ± 0.019 (5 splits) |
+| Amazon, without f19 | E1 | 0.714 | 0.698 | 0.716 | **0.709 ± 0.010** | 0.702 ± 0.004 |
+| Amazon, without f19 | E2 | 0.646 | 0.697 | 0.652 | 0.665 ± 0.028 | 0.677 ± 0.015 (5 splits) |
+| Amazon, all 25 | E7 | 0.939 | 0.929 | 0.933 | 0.934 ± 0.005 | 0.938 ± 0.007 (5 splits) |
+| Amazon, all 25 | E7r | 0.939 | 0.932 | 0.931 | 0.934 ± 0.004 | 0.936 ± 0.005 (5 splits) |
+| Amazon, all 25 | E8 | 0.928 | 0.924 | 0.937 | 0.930 ± 0.007 | 0.930 ± 0.007 (5 splits) |
+| Amazon, all 25 | E8s | 0.936 | 0.926 | 0.929 | 0.930 ± 0.005 | 0.928 ± 0.004 (5 splits) |
+| YelpChi, all 32 | E7 | 0.858 | 0.855 | 0.831 | 0.848 ± 0.015 | 0.855 ± 0.021 |
+| YelpChi, all 32 | E8 | 0.797 | 0.779 | 0.786 | 0.788 ± 0.009 | 0.817 ± 0.016 |
+
+**Pre-registered contrasts** (rule of 2026-10-19, 3 splits, full budget):
+
+| Dataset, variant | Contrast | Δ, splits 0 / 1 / 2 | Mean ± SD | CV p | Verdict |
+|---|---|---|---|---|---|
+| Amazon, without f19 | E1 − B | +0.190 / +0.156 / +0.143 | +0.163 ± 0.024 | 3e-7 | supported |
+| Amazon, without f19 | E2 − B | +0.122 / +0.155 / +0.079 | +0.119 ± 0.038 | 1e-5 | supported |
+| Amazon, without f19 | E2 − E1 | −0.068 / −0.001 / −0.064 | −0.044 ± 0.037 | 0.062 | worse (not significant) |
+| Amazon, all 25 | E7 − E7r | −0.001 / −0.003 / +0.002 | −0.001 ± 0.003 | 0.31 | worse (not significant) |
+| Amazon, all 25 | E8 − E7 | −0.010 / −0.005 / +0.004 | −0.004 ± 0.007 | 0.95 | worse (not significant) |
+| Amazon, all 25 | E8 − E8s | −0.007 / −0.002 / +0.009 | −0.000 ± 0.008 | 0.97 | worse (not significant) |
+| YelpChi, all 32 | E8 − E7 | −0.061 / −0.076 / −0.045 | −0.061 ± 0.015 | 3e-6 | worse (significant) |
+
+**Descriptive, split 0 only** (no verdict; E1's models come from the desktop): Amazon E7 − E1 +0.007 and E8 − E1 −0.004; YelpChi E7 − E1 +0.008 and E8 − E1 −0.052.
+
+What these do and do not show:
+
+- **Without f19, the full budget gives the pilot's answer.** Neighbour means and DGI embeddings both beat own features by a wide margin, and neighbour means stay ahead of the embeddings (not significantly).
+- **With all 25 Amazon features, nothing separates E7, E7r, E8 and E8s.** Every difference is under 0.005 on average and changes sign across splits. Training the DGI encoder (E7 − E7r) adds nothing measurable here either.
+- **On YelpChi, the supervised GNN score still hurts.** E8 is below E7 on every split (−0.061, significant) and below E1 on split 0 (−0.052). On the test scores of all three splits, E8 is 0.069 below E1 on average, but that is not a pre-registered verdict: E1's splits 1–2 were run on the desktop, whose row-level outputs are not here. So the full budget does not close E8's pilot shortfall.
+- **E7 on YelpChi is not settled.** On split 0, E7 − E1 is +0.008 (the pilot's mean was −0.016), but one split carries no verdict, and on the test scores E7 falls 0.033 below E1 on split 2.
+- **The full budget changes the classifiers as well as the trials,** so it does not say which part of the pilot's tuning moved YelpChi's ranking.
 
 ## Results (explanations, 2026-11-08)
 

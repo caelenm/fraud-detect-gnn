@@ -1,0 +1,138 @@
+{
+  "schema_version": 1,
+  "run_id": "20261109T235902Z_amazon-m7r-own-nbr-gnnrand_5f58a5",
+  "recorded_utc": "2026-11-10T01:23:50Z",
+  "started_utc": "2026-11-09T23:59:02Z",
+  "finished_utc": "2026-11-10T01:23:38Z",
+  "duration_min": 84.6,
+  "device": "rtx4060-laptop",
+  "device_details": {
+    "os": "Linux",
+    "platform": "Linux-5.10.16.3-microsoft-standard-WSL2-x86_64-with-glibc2.41",
+    "wsl": true,
+    "python": "3.13.15",
+    "cpu": "Intel(R) Core(TM) Ultra 9 185H",
+    "gpus": [
+      {
+        "name": "NVIDIA GeForce RTX 4060 Laptop GPU",
+        "driver": "571.96",
+        "memory": "8188 MiB"
+      }
+    ]
+  },
+  "description": "E7r, all 25 features, split 0, full budget",
+  "kind": "pipeline",
+  "status": "ok",
+  "dataset": "amazon",
+  "feature_set": "m7r_own_nbr_gnnrand",
+  "split_repeat": 0,
+  "seed": 555,
+  "git_commit": "65e16cdab594c42683055b30967d4545b58bb697",
+  "git_dirty": false,
+  "df_analyze_run": "20261109T235903Z",
+  "headline": {
+    "model_a": "lgbm (none)",
+    "test_pr_auc": 0.9390873018458001,
+    "test_pr_auc_low": 0.9174847630606711,
+    "test_pr_auc_high": 0.9574942373312991,
+    "test_auroc": 0.9865611939367476,
+    "test_auroc_low": 0.9793859145889656,
+    "test_auroc_high": 0.9920277066825952,
+    "no_skill_pr_auc": 0.09490740740740741,
+    "cv_pr_auc": 0.943137863863154,
+    "cv_pr_auc_std": 0.0315353176134116,
+    "f1": 0.8762214983713354,
+    "threshold": 0.4787168281796124,
+    "n_train": 5183,
+    "n_test": 3456
+  },
+  "settings": {
+    "htune_trials": 100,
+    "seed": 555,
+    "feature_set": "m7r_own_nbr_gnnrand",
+    "split.repeat": 0,
+    "split.n_repeats": 3,
+    "df_analyze.classifiers": [
+      "lgbm",
+      "lr",
+      "catboost",
+      "gandalf",
+      "rf",
+      "knn"
+    ],
+    "df_analyze.htune_trials": 100,
+    "df_analyze.htune_cls_metric": "bal-acc",
+    "df_analyze.commit": "199e5638620693c267dac715784f1fd0e33fa796",
+    "gnn_embed": {
+      "layers": 2,
+      "hidden": 64,
+      "out_dim": 64,
+      "lr": 0.001,
+      "max_epochs": 300,
+      "patience": 20,
+      "pca_components": 8,
+      "device": "cpu",
+      "usu_edge_fraction": 1.0
+    },
+    "neighbour_agg": {
+      "statistics": [
+        "mean"
+      ],
+      "log1p_degree": true,
+      "rewire_swaps_per_edge": 10
+    },
+    "blocks": [
+      "own",
+      "nbr",
+      "gnnrand"
+    ]
+  },
+  "source": "outputs/amazon/m7r_own_nbr_gnnrand",
+  "command": "--dataset amazon --set split.n_repeats=3 --set split.repeat=0 --set feature_set=m7r_own_nbr_gnnrand",
+  "packages": {
+    "numpy": "2.5.3",
+    "pandas": "3.0.6",
+    "pyarrow": "25.0.1",
+    "scikit-learn": "1.9.1",
+    "scipy": "1.18.1",
+    "pyyaml": "6.0.3",
+    "torch": "2.9.1",
+    "torch-geometric": "2.8.1"
+  },
+  "tags": [
+    "full",
+    "full-queue"
+  ],
+  "results_rows": 28,
+  "results_columns": [
+    "model",
+    "selection",
+    "embed_selector",
+    "cv_pr_auc",
+    "cv_pr_auc_std",
+    "cv_auroc",
+    "cv_bal_acc",
+    "cv_pr_auc_default",
+    "cv_auroc_default",
+    "cv_tuning_gain",
+    "tuning_metric",
+    "tuning_score",
+    "pr_auc",
+    "auroc",
+    "f1",
+    "precision",
+    "recall",
+    "accuracy",
+    "balanced_accuracy",
+    "tp",
+    "fp",
+    "fn",
+    "tn",
+    "threshold",
+    "f1_at_05",
+    "precision_at_05",
+    "recall_at_05",
+    "accuracy_at_05",
+    "balanced_accuracy_at_05"
+  ]
+}

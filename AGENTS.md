@@ -49,6 +49,13 @@ Not run: E1/N1/N2 on splits 3–4.
 - DGI embeddings differ between the two machines despite the same config, versions and CPU device (cause not established), so "bit-identical on the CPU" holds on one machine only.
 - `--path-dependent` also covers the randomisation section. Do not raise the implementation check's 1% limit.
 
+**New on 2026-11-15 (sixth amendment: full-budget queue, 24 runs + 5 verdict tables, tags `full`, `full-queue`; README "Results (full-budget queue)", RESEARCH_PLAN §11):** at 6 classifiers and 100 trials on splits 0–2, Amazon `no19` B, E1, E2; Amazon all-features E7, E7r, E8, E8s; YelpChi E7, E8.
+- Amazon `no19`: E1 − B +0.163 and E2 − B +0.119, both supported, as at the pilot budget.
+- Amazon all features: E7, E7r, E8 and E8s cannot be told apart (every contrast under 0.005, none significant).
+- YelpChi: E8 − E7 −0.061, significantly worse; E8 is below E1 on split 0 (descriptive) and on every split's test score. E7 − E1 is +0.008 on split 0 only, so not settled.
+- YelpChi E7 on splits 1–2 hit df-analyze's tuning time limit for logistic regression; accepted by the user (2026-11-12) and noted in the entries.
+- The dashboard shows both budgets side by side and builds its "Not run" list from the database.
+
 **New on 2026-11-02 (results dashboard, [`docs/DASHBOARD.md`](docs/DASHBOARD.md)):** `uv run scripts/dashboard.py` shows every method, per dataset and across them, with live classification of a random test node. 20 earlier Amazon runs were backfilled into the results database (tag `backfill`), so every recorded setup now has its splits there.
 
 **Also recorded on 2026-11-02 (full-budget ladders from a second machine, `rtx4060-desktop`; tags `full`, `backfill`):** B, E1 and E2 at 6 classifiers and 100 trials on splits 0–2, run 2026-10-20 to 2026-10-22: Amazon with all 25 features and without #36 (18 runs) and YelpChi (9 runs), plus both verdict tables. README ("Results (full-budget ladders)") and RESEARCH_PLAN §11.
@@ -82,7 +89,7 @@ The details are in [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md) §11 (decisi
 - Tuned-embedding results for the graph methods, and full-budget graph results beyond split 0 without `f19`.
 - Which part of the pilot's tuning causes E7's and E8's shortfall on YelpChi (the trial count, the balanced-accuracy objective or the random internal CV).
 
-**Not run yet:** #36 check (e) (V1, the raw reviews; ask first); full-budget E7, E8 and GNN-round setups; full-budget no19 runs beyond split 0. Checks (c) and (d) ran on 2026-10-26 (RESEARCH_PLAN §11): `f19` is the only vote column left, so `no19` is the variant without vote-derived columns.
+**Not run yet:** #36 check (e) (V1, the raw reviews; ask first); full-budget E3, N1 and N2, and the other embedding sizes; verdicts for full-budget E7 − E1 and E8 − E1 beyond split 0 (E1's splits 1–2 are the desktop's, whose row-level outputs are not in this clone). Checks (c) and (d) ran on 2026-10-26 (RESEARCH_PLAN §11): `f19` is the only vote column left, so `no19` is the variant without vote-derived columns.
 
 **Where things are:**
 - **Code:** on `main`; the phase 3 plan and work (branches `claude/awesome-wozniak-wm548a` and `exp/phase3-feedback`) were merged with PR #39 (`f4175e3`). The work since 2026-10-26 (RQ1–RQ3 and the GNN round) reached `main` on 2026-11-02 by fast-forward from `exp/rq-plan`, the branch the WSL clone stays on.

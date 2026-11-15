@@ -1279,6 +1279,10 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
   - **Contrasts (B − A as written; rule of 2026-10-19 over 3 splits, labelled full budget):** Amazon `no19`: E1 − B, E2 − B, E2 − E1. Amazon all features: E7 − E7r, E8 − E7, E8 − E8s. YelpChi: E8 − E7.
   - **Descriptive only, split 0:** E7 − E1 and E8 − E1 on both datasets. E1's row-level outputs for splits 1–2 are on the group member's machine, so these get a verdict only if that machine's bundles arrive. Its E1 models also come from another machine, which the neighbour-mean columns tolerate (they differ only by rounding), but E7's embeddings are this machine's.
   - **Reading, fixed now:** whether full-budget E7 and E8 close YelpChi's pilot shortfall is read from E7 and E8 against E1; one split cannot settle it. No model or threshold changes because of these runs.
+- **2026-11-15 (sixth amendment: results).** The queue finished on 2026-11-15 (24 runs, 5 verdict tables; tags `full`, `full-queue`; README, "Results (full-budget queue)"). YelpChi E7 on splits 1 and 2 hit df-analyze's time limit while tuning logistic regression; the user accepted those runs as they are (2026-11-12), with a note in each entry. Model A was LightGBM in both. Two jobs stopped and were rerun before they were recorded: YelpChi E7 split 0 (a GANDALF DataLoader worker died in `select_model`; rerun from that stage) and YelpChi E8 split 0 (blocked by the split's pipeline state; rerun after it).
+  - **Verdicts, 3 splits:** Amazon `no19` E1 − B +0.163 ± 0.024 (p 3e-7, supported), E2 − B +0.119 ± 0.038 (p 1e-5, supported), E2 − E1 −0.044 ± 0.037 (p 0.062, worse, not significant). Amazon all features E7 − E7r −0.001 ± 0.003 (p 0.31), E8 − E7 −0.004 ± 0.007 (p 0.95), E8 − E8s −0.000 ± 0.008 (p 0.97), all worse but not significant. YelpChi E8 − E7 −0.061 ± 0.015 (p 3e-6, worse, significant).
+  - **Descriptive, split 0:** Amazon E7 − E1 +0.007, E8 − E1 −0.004; YelpChi E7 − E1 +0.008, E8 − E1 −0.052.
+  - **Reading (as fixed above):** E8's YelpChi shortfall is not closed by the full budget: it is below E7 on every split and below E1 on split 0, and its test score is below E1's on all three splits (−0.069 on average; a test-score difference, not a verdict). E7's is not settled: +0.008 over E1 on split 0, but its test score falls 0.033 below E1's on split 2. The `no19` answers match the pilot's. With all 25 Amazon features E7, E7r, E8 and E8s cannot be told apart.
 
 ## 12. Status and next steps
 
@@ -1286,7 +1290,7 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
 
 - **Which Amazon variant is the headline:** all 25 features or without f19. The dashboard opens on all 25 with a warning; RQ1 treats f19 as a likely leak.
 - **Which part of the pilot's tuning moves YelpChi's ranking:** the trial count, the balanced-accuracy objective or the random internal CV. None has been separated.
-- **Full-budget runs:** B, E1 and E2 have them on 3 splits, on Amazon (all 25 and without #36) and YelpChi (§11, "full-budget ladders: recorded"). On YelpChi the graph gains shrink at that budget; only E1 − B stays supported. E7, E8 and the no19 setups beyond split 0 have none.
+- **Full-budget runs:** B, E1 and E2 have them on 3 splits, on Amazon (all 25 and without #36) and YelpChi (§11, "full-budget ladders: recorded"). On YelpChi the graph gains shrink at that budget; only E1 − B stays supported. Since 2026-11-15 (§11, sixth amendment: results) the `no19` B, E1 and E2, Amazon's E7, E7r, E8 and E8s, and YelpChi's E7 and E8 have them too. E8 stays well below E1 and E7 on YelpChi; E7 against E1 is not settled.
 
 The rest of this section is the state as of 2026-10-20, kept for the record.
 
