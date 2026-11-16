@@ -381,12 +381,12 @@ The professor's feedback of 2026-11-03 asked for GAT and a bigger GNN. Pre-regis
 | E1: df-analyze + neighbour means | 0.933 ± 0.008 | 0.702 | 0.871 ± 0.013 |
 
 - **Bigger GraphSAGE does not help:** E5w − E5 is −0.002 (Amazon), −0.001 (YelpChi) and +0.007 without `f19`; not supported.
-- **Attention helps a little:** E10 beats E5 on all 11 splits compared (+0.012, +0.020, +0.015 without `f19`), but no p-value computed so far separates it from zero.
+- **Attention helps a little:** E10 beats E5 on all 11 splits compared (+0.012, +0.020, +0.015 without `f19`). Supported on YelpChi, also after Holm (p 0.001); on Amazon it passes the rule (p 0.037) but not Holm; without `f19`, p 0.50.
 - **`f19` hides the graph's value on Amazon.** With every feature, the real graph adds little to a GNN (real − rewired +0.013 for GAT over 5 splits, p 0.026, supported; +0.011 for SIGN, not distinguishable; edges − no edges about 0). Without `f19`, every GNN gains 0.13–0.16 from the real graph (all supported), and a rewired graph with the same degrees adds almost nothing: the gain is real structure, not degree.
 - **YelpChi needs the real graph:** real − rewired is +0.154 for GAT and +0.155 for SIGN (supported).
-- **No GNN beats df-analyze with neighbour means:** the best GNN trails E1 by 0.021 (GAT, Amazon), 0.085 (GAT, YelpChi) and 0.011 without `f19` (GAT; worse on every split, but close). Without `f19`, every real-graph GNN beats B by 0.14–0.15.
+- **No GNN beats df-analyze with neighbour means:** the best GNN (GAT on every split, by CV) trails E1 by 0.021 on Amazon (p 0.087), 0.085 on YelpChi (p 9e-07) and 0.011 without `f19` (p 0.16; worse on every split, but close). On YelpChi every GNN is also significantly below B. Without `f19`, GAT beats B by 0.153 (p 2e-05).
 - **Attention (split 0, all features):** close to uniform on both datasets. On Amazon it gives fraud neighbours 1.6–1.9× their equal share, mostly through U-S-U. On YelpChi it is nearly pure averaging and leans on the same-user relation.
-- **Machines and devices:** run on `rtx4060-desktop`. Amazon E5w (splits 0–2) and E10 split 0 ran on the CPU, the rest on the GPU. E5, E5g, E6, N3, B and E1 ran on the laptop, so contrasts against them still need its per-fold outputs for a p-value. With every feature, N9 on Amazon often stopped training at epoch 1–2 (splits 1–4), so its E9 − N9 is not meaningful; without `f19` this hardly happened.
+- **Machines and devices:** run on `rtx4060-desktop`. Amazon E5w (splits 0–2) and E10 split 0 ran on the CPU, the rest on the GPU. E5, E5g, E6, N3, B and E1 ran on the laptop; contrasts against them use its bundles (identical split files) and pair two machines. Holm-adjusted p-values are in GAT_DEEP_RESULTS.md. With every feature, N9 on Amazon often stopped training at epoch 1–2 (splits 1–4), so its E9 − N9 is not meaningful; without `f19` this hardly happened.
 
 ## Graph feature blocks (Models 2 and 5)
 

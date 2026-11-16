@@ -66,7 +66,7 @@ Not run: E1/N1/N2 on splits 3–4.
 **New on 2026-11-09 to 2026-11-11 (GAT and bigger-GNN round, branch `exp/bigger-gnn`, merged into `main` on 2026-11-16; [`docs/GAT_DEEP_RESULTS.md`](docs/GAT_DEEP_RESULTS.md); tags `gat-deep`, `gnn-no19`; RESEARCH_PLAN §11, the GNN-round sixth amendment and the seventh):** GAT (E10, N10), bigger GraphSAGE (E5w, E6w) and SIGN (E9, N9) on Amazon (5 splits) and YelpChi (3), plus every GNN classifier without `f19` on Amazon (splits 0–2), all on `rtx4060-desktop`, mostly on the GPU.
 - Bigger does not help; GAT beats E5 on every split by about 0.01–0.02 (no significant p so far); no GNN beats E1.
 - Without `f19`, every GNN gains 0.13–0.16 from the real Amazon graph (supported) and nothing from a rewired one; the best (GAT, 0.692) is within 0.011 of E1 (0.702).
-- Pending: p-values against laptop rungs (E5, B, E1 and their no19 versions) need the laptop's per-fold outputs; N9's early stopping on Amazon (all features) is for the group.
+- p-values against the laptop's rungs were computed on 2026-11-16 from its bundles: GAT − GraphSAGE is supported on YelpChi (also after Holm) and passes the rule on Amazon but not Holm. N9's early stopping on Amazon (all features) is for the group.
 
 The details are in [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md) §11 (decision log and every result) and §12 (next steps); a short summary is in the README ("Results").
 

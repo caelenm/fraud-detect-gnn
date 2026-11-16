@@ -12,8 +12,8 @@ Results of the round pre-registered in RESEARCH_PLAN §11 (sixth amendment, 2026
 - GAT fits and GPU fits are not bit-identical between runs (§11).
 
 **Verdict rule:** Δ test PR-AUC > 0 on every split, mean > SD, and Nadeau–Bengio p < 0.05 over the training CV folds of every split.
-- **Contrasts between two rungs run here** have full verdicts.
-- **Contrasts against a laptop rung** (E5, E1 or B with all features; B or E1 without `f19`) still need that rung's per-fold scores. Their p-value is pending, and the tables say where the first two conditions already decide the verdict.
+- **Every contrast has a full verdict.** Those against a laptop rung (E5, E1 or B, with all features or without `f19`) were computed on 2026-11-16 from the group member's bundles (split 0 from 2026-11-02, the other splits from 2026-11-16), whose split, test and fold files are byte-identical to this machine's. They pair runs from two machines.
+- **Holm** adjusts each pre-registered primary family of four contrasts per dataset; the tables give both p-values.
 
 ## Test PR-AUC per split, all features (mean ± SD)
 
@@ -36,18 +36,18 @@ The no-skill baseline (test positive rate) is 0.095 on Amazon and 0.145 on YelpC
 
 ## Pre-registered primary contrasts, all features (B − A as written)
 
-| Contrast | Dataset | Δ per split | Mean ± SD | p | Expected | Verdict |
-|---|---|---|---|---|---|---|
-| E5w − E5 | Amazon (5) | −0.003 / +0.007 / +0.009 / −0.003 / −0.018 | −0.002 ± 0.011 | pending | not supported | **not supported** (Δ < 0 on 3 splits) |
-| E5w − E5 | YelpChi (3) | −0.013 / +0.005 / +0.004 | −0.001 ± 0.010 | pending | not supported | **not supported** (Δ < 0 on split 0) |
-| E10 − E5 | Amazon (5) | +0.006 / +0.020 / +0.014 / +0.014 / +0.005 | +0.012 ± 0.006 | pending | not supported | positive on every split, mean > SD |
-| E10 − E5 | YelpChi (3) | +0.011 / +0.023 / +0.025 | +0.020 ± 0.007 | pending | not supported | positive on every split, mean > SD |
-| E10 − N10 | Amazon (5) | +0.020 / +0.008 / +0.016 / +0.008 / +0.013 | +0.013 ± 0.005 | 0.026 | not supported | **supported** (3 splits: p 0.067, not distinguishable) |
-| E10 − N10 | YelpChi (3) | +0.153 / +0.160 / +0.150 | +0.154 ± 0.005 | 9.4e-13 | supported | **supported** |
-| best of {E5w, E10} − E1 (E10 on every split, by CV) | Amazon (5) | −0.007 / −0.039 / −0.013 / −0.018 / −0.028 | −0.021 ± 0.013 | pending | not supported | **not supported** (worse on every split) |
-| best of {E5w, E10} − E1 | YelpChi (3) | −0.089 / −0.102 / −0.063 | −0.085 ± 0.020 | pending | not supported | **not supported** (worse on every split) |
+| Contrast | Dataset | Δ per split | Mean ± SD | p | Holm p | Expected | Verdict |
+|---|---|---|---|---|---|---|---|
+| E5w − E5 | Amazon (5) | −0.003 / +0.007 / +0.009 / −0.003 / −0.018 | −0.002 ± 0.011 | 0.81 | 0.81 | not supported | **not supported** (worse on average) |
+| E5w − E5 | YelpChi (3) | −0.013 / +0.005 / +0.004 | −0.001 ± 0.010 | 0.92 | 0.92 | not supported | **not supported** |
+| E10 − E5 | Amazon (5) | +0.006 / +0.020 / +0.014 / +0.014 / +0.005 | +0.012 ± 0.006 | 0.037 | 0.11 | not supported | **supported** by the rule; not after Holm |
+| E10 − E5 | YelpChi (3) | +0.011 / +0.023 / +0.025 | +0.020 ± 0.007 | 0.0010 | 0.0020 | not supported | **supported**, also after Holm |
+| E10 − N10 | Amazon (5) | +0.020 / +0.008 / +0.016 / +0.008 / +0.013 | +0.013 ± 0.005 | 0.026 | 0.10 | not supported | **supported** by the rule; not after Holm (3 splits: p 0.067) |
+| E10 − N10 | YelpChi (3) | +0.153 / +0.160 / +0.150 | +0.154 ± 0.005 | 9.4e-13 | 3.8e-12 | supported | **supported** |
+| best of {E5w, E10} − E1 (E10 on every split, by CV) | Amazon (5) | −0.007 / −0.039 / −0.013 / −0.018 / −0.028 | −0.021 ± 0.013 | 0.087 | 0.17 | not supported | **not supported** (worse on every split, not significantly) |
+| best of {E5w, E10} − E1 | YelpChi (3) | −0.089 / −0.102 / −0.063 | −0.085 ± 0.020 | 9.5e-07 | 2.8e-06 | not supported | **not supported** (significantly worse) |
 
-Holm adjustment within each dataset's family waits for the pending p-values. The Amazon 5-split verdicts replace the 3-split ones (§11 extension); the 3-split tables stay in the database (tag `splits3`).
+The Amazon 5-split verdicts replace the 3-split ones (§11 extension); the 3-split tables stay in the database (tag `splits3`). On Amazon, no primary contrast survives Holm.
 
 ## Secondary contrasts, all features
 
@@ -57,12 +57,14 @@ Holm adjustment within each dataset's family waits for the pending p-values. The
 | E5w − E6w | YelpChi (3) | +0.128 / +0.158 / +0.134 | +0.140 ± 0.016 | 1.3e-09 | **supported** |
 | E9 − N9 (SIGN, real vs rewired) | Amazon (5) | +0.025 / +0.012 / +0.019 / +0.001 / −0.000 | +0.011 ± 0.011 | 0.45 | not distinguishable from zero (see the N9 note) |
 | E9 − N9 | YelpChi (3) | +0.159 / +0.153 / +0.153 | +0.155 ± 0.003 | 5.2e-12 | **supported** |
-| E9 − E5 | Amazon (5) | +0.006 / +0.029 / +0.028 / +0.012 / +0.002 | +0.015 ± 0.013 | pending | positive on every split, mean > SD |
-| E9 − E5 | YelpChi (3) | −0.007 / −0.004 / +0.000 | −0.004 ± 0.003 | pending | not supported |
-| E9 − E1 | Amazon (5) | −0.007 / −0.031 / +0.000 / −0.020 / −0.032 | −0.018 ± 0.014 | pending | not supported |
-| E9 − E1 | YelpChi (3) | −0.107 / −0.130 / −0.087 | −0.108 ± 0.021 | pending | not supported |
-| E10 − B | Amazon (5) / YelpChi (3) | +0.002 / −0.020 / −0.010 / −0.011 / −0.014 and −0.058 / −0.048 / −0.048 | −0.011 and −0.051 | pending | not supported |
-| E9 − B | Amazon (5) / YelpChi (3) | +0.002 / −0.012 / +0.004 / −0.013 / −0.017 and −0.076 / −0.075 / −0.073 | −0.007 and −0.075 | pending | not supported |
+| E9 − E5 | Amazon (5) | +0.006 / +0.029 / +0.028 / +0.012 / +0.002 | +0.015 ± 0.013 | 0.54 | not distinguishable from zero |
+| E9 − E5 | YelpChi (3) | −0.007 / −0.004 / +0.000 | −0.004 ± 0.003 | 0.52 | worse (not significant) |
+| E9 − E1 | Amazon (5) | −0.007 / −0.031 / +0.000 / −0.020 / −0.032 | −0.018 ± 0.014 | 0.0022 | worse (significant) |
+| E9 − E1 | YelpChi (3) | −0.107 / −0.130 / −0.087 | −0.108 ± 0.021 | 7.1e-08 | worse (significant) |
+| E10 − B | Amazon (5) | +0.002 / −0.020 / −0.010 / −0.011 / −0.014 | −0.011 ± 0.008 | 0.56 | worse (not significant) |
+| E10 − B | YelpChi (3) | −0.058 / −0.048 / −0.048 | −0.051 ± 0.006 | 0.00046 | worse (significant) |
+| E9 − B | Amazon (5) | +0.002 / −0.012 / +0.004 / −0.013 / −0.017 | −0.007 ± 0.009 | 0.11 | worse (not significant) |
+| E9 − B | YelpChi (3) | −0.076 / −0.075 / −0.073 | −0.075 ± 0.002 | 2.8e-06 | worse (significant) |
 
 **N9 on Amazon (all features):** SIGN on the rewired graph often stopped at epoch 1–2: in 14, 7, 16 and 17 of 25 fits on splits 1–4. This did not happen on split 0, nor anywhere on YelpChi, nor (much) without `f19` (below); E9 itself stopped that early in at most 4 of 60 fits per split. It is an early-stopping failure that makes N9's CV folds erratic (CV PR-AUC 0.83–0.84 on splits 3–4 against test 0.90–0.92). So the Amazon E9 − N9 p is not meaningful. Whether to fix it is for the group.
 
@@ -87,14 +89,14 @@ Holm adjustment within each dataset's family waits for the pending p-values. The
 
 **Primary contrasts (Holm over these 4):**
 
-| Contrast | Δ 0 / 1 / 2 | Mean ± SD | p | Expected | Verdict |
-|---|---|---|---|---|---|
-| E5 − E6 (graph vs no edges) | +0.161 / +0.156 / +0.133 | +0.150 ± 0.015 | 1.3e-06 | supported | **supported** |
-| E5 − N3 (real vs rewired graph) | +0.143 / +0.170 / +0.148 | +0.154 ± 0.015 | 5.1e-09 | supported | **supported** |
-| best GNN − E1 (E10 on every split, by CV) | −0.019 / −0.008 / −0.005 | −0.011 ± 0.007 | pending | not supported | **not supported** (worse on every split) |
-| best GNN − B | +0.168 / +0.155 / +0.135 | +0.153 ± 0.017 | pending | supported | positive on every split, mean > SD |
+| Contrast | Δ 0 / 1 / 2 | Mean ± SD | p | Holm p | Expected | Verdict |
+|---|---|---|---|---|---|---|
+| E5 − E6 (graph vs no edges) | +0.161 / +0.156 / +0.133 | +0.150 ± 0.015 | 1.3e-06 | 3.9e-06 | supported | **supported** |
+| E5 − N3 (real vs rewired graph) | +0.143 / +0.170 / +0.148 | +0.154 ± 0.015 | 5.1e-09 | 2.0e-08 | supported | **supported** |
+| best GNN − E1 (E10 on every split, by CV) | −0.019 / −0.008 / −0.005 | −0.011 ± 0.007 | 0.16 | 0.16 | not supported | **not supported** (worse on every split, not significantly) |
+| best GNN − B | +0.168 / +0.155 / +0.135 | +0.153 ± 0.017 | 2.0e-05 | 4.0e-05 | supported | **supported** |
 
-Holm: the two p-values computed here (1.3e-06, 5.1e-09) stay below 0.05 after adjustment for 4 tests.
+All four verdicts are as pre-registered, and the three supported ones stay below 0.05 after Holm.
 
 **Secondary:**
 
@@ -115,15 +117,15 @@ Without `f19`, N9 stopped at epoch 1–2 in only 5, 1 and 3 of 25 fits, so this 
 ## Reading
 
 - **Bigger does not help.** E5w has 7–25× E5's parameters and scores the same on both datasets and without `f19` (−0.002, −0.001, +0.007). Model capacity is not what holds GraphSAGE back.
-- **Attention helps a little and consistently.** E10 beats E5 on all 11 splits it was compared on (+0.012 Amazon, +0.020 YelpChi, +0.015 without `f19`). The contrasts computed here cannot separate it from zero (without `f19`, p 0.50); the all-feature p-values are pending.
+- **Attention helps a little and consistently.** E10 beats E5 on all 11 splits it was compared on (+0.012 Amazon, +0.020 YelpChi, +0.015 without `f19`). On YelpChi this is supported, also after Holm (p 0.001). On Amazon it passes the rule (p 0.037) but not Holm, and without `f19` it is not distinguishable (p 0.50). That was not the pre-registered expectation.
 - **`f19` hides the graph's value on Amazon.**
-  - With every feature, Amazon's real graph adds little to a GNN: edges − no edges about 0, and real − rewired +0.011 to +0.013 (supported only for GAT, over 5 splits).
+  - With every feature, Amazon's real graph adds little to a GNN: edges − no edges about 0, and real − rewired +0.011 to +0.013 (supported only for GAT over 5 splits, and not after Holm).
   - Without `f19`, every GNN gains 0.13–0.16 from the real graph, all supported, and a rewired graph with the same degrees adds almost nothing (N3, N9, N10 are within about 0.03 of the edge-free models). So without the leak, the GNNs' graph gain is real structure, not degree.
   - This is a cleaner answer to RQ2 than df-analyze gave (degree +0.112 and structure +0.076 of E1's gain, 2026-10-27).
 - **On YelpChi the real graph is essential.** Every real-graph GNN beats its rewired or edge-free twin by 0.13–0.16 (supported every time). YelpChi's labels are per user, and the GNNs lean on the same-user relation (attention below).
 - **No end-to-end GNN beats df-analyze with neighbour means.**
-  - With every feature, the best GNN trails E1 by 0.018–0.021 (Amazon) and 0.085 (YelpChi); on YelpChi every GNN is also below B.
-  - Without `f19` the gap nearly closes: GAT and E5g reach 0.692 against E1's 0.702, and GAT trails by 0.005–0.019 on each split. Every real-graph GNN beats B without `f19` by 0.14–0.15.
+  - With every feature, the best GNN trails E1 by 0.018–0.021 on Amazon (SIGN significantly, p 0.002; GAT not, p 0.087) and by 0.085 on YelpChi (significant); on YelpChi every GNN is also significantly below B.
+  - Without `f19` the gap nearly closes: GAT and E5g reach 0.692 against E1's 0.702, and GAT trails by 0.005–0.019 on each split, not significantly (p 0.16). GAT beats B without `f19` by 0.153 (p 2e-05, supported).
   - The full-budget ladders (README) move B and E1 by at most a few hundredths, which does not change this order.
 
 ## Where GAT puts its attention (`scripts/gat_attention.py`, split 0, all features)
@@ -147,6 +149,5 @@ The dashboard's GAT attention page (`/attention`, [`DASHBOARD.md`](DASHBOARD.md)
 
 ## Not done yet
 
-- **p-values for every contrast against a laptop rung** (E5, E1, B with all features; B and E1 without `f19`), and the Holm-adjusted families. They need the laptop's `pilot_g5_sage`, `pilot_m2_own_nbr`, `pilot_m1_own` (splits 0–4 Amazon, 0–2 YelpChi), `pilot_m1_own_no19` and `pilot_m2_own_nbr_no19` (splits 0–2) outputs.
 - **Whether N9's early stopping on Amazon (all features) needs a fix**, for example a minimum number of epochs, is for the group. Changing it now would be a protocol change after the results.
 - **Without `f19` on splits 3–4 and on YelpChi** were not run (YelpChi has no `f19`).

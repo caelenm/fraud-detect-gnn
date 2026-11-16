@@ -1357,6 +1357,14 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
     - N9's early stopping hardly failed without f19 (5, 1 and 3 of 25 fits at epoch ≤ 2).
   - **Reading:** with f19, Amazon's graph adds little to a GNN; without it, every GNN gains 0.13–0.16 from the real graph and almost nothing from a rewired one, so the GNNs' graph gain is real structure rather than degree. The best GNN without f19 comes within 0.011 of E1.
 
+- **2026-11-16 (sixth and seventh amendments: the contrasts against the laptop's rungs).** The group member packed the laptop's other splits (bundles of 2026-11-16, Amazon splits 1–4 and YelpChi splits 1–2; split 0 from 2026-11-02). They were unpacked into a separate clone; their split, test and fold files are byte-identical to this machine's. Tables: [`GAT_DEEP_RESULTS.md`](GAT_DEEP_RESULTS.md); database tags `splits5`, `splits3`, `gnn-no19` (3 entries).
+  - **Primary, all features (Holm over 4 per dataset):**
+    - Amazon (5 splits): E5w − E5 −0.002 (p 0.81); E10 − E5 +0.012 (p 0.037, Holm 0.11); E10 − N10 +0.013 (p 0.026, Holm 0.10); best (E10) − E1 −0.021 (p 0.087). Two pass the rule, none survives Holm.
+    - YelpChi (3 splits): E5w − E5 −0.001 (p 0.92); E10 − E5 +0.020 (p 0.001, Holm 0.002), **supported**, against the expectation; E10 − N10 supported; best (E10) − E1 −0.085, significantly worse.
+  - **Primary, without f19 (Holm over 4):** best GNN (E10) − E1_no19 −0.011 (p 0.16), not supported, as expected; best GNN − B_no19 +0.153 (p 2e-05, Holm 4e-05), supported, as expected. With E5 − E6 and E5 − N3, all four verdicts are as pre-registered.
+  - **Secondary:** E9 − E1 is significantly worse on both datasets (Amazon p 0.002); E9 − E5 is not distinguishable (Amazon p 0.54); every new GNN is significantly below B on YelpChi and not distinguishable from it on Amazon.
+  - These contrasts pair runs from two machines (`rtx4060-laptop` and `rtx4060-desktop`).
+
 ---
 
 - **2026-11-08 (explanations: [`EXPLAINABILITY_PLAN.md`](EXPLAINABILITY_PLAN.md); results in the README).** Branch `exp/explain`, committed locally and not pushed. The user chose the best model per dataset and asked for the most important tabular features and graph nodes, kept distinct from attention; a literature review changed the plan (no claims of faithfulness by construction, additivity as an implementation check only, exact group Shapley next to summed SHAP, labelled SHAP modes, added quality tests).
