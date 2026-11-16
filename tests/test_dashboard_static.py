@@ -20,6 +20,7 @@ PAGES = {path: (STATIC_DIR / name).read_text("utf-8") for path, name in APP_PAGE
 OTHER_PAGES = {
     "/walkthrough": (STATIC_DIR / "walkthrough.html").read_text("utf-8"),
     "/explain": (STATIC_DIR / "explain.html").read_text("utf-8"),
+    "/attention": (STATIC_DIR / "attention.html").read_text("utf-8"),
 }
 ALL_PAGES = {**PAGES, **OTHER_PAGES}
 JS = (STATIC_DIR / "app.js").read_text("utf-8")

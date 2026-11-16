@@ -1,0 +1,39 @@
+/* The GAT attention page: only what dashboard.css and explain.css do not have.
+ * Fraud uses --series-2 and benign --series-1, the dashboard's blue/orange pair;
+ * nodes whose label the page does not show are grey. */
+.heat .col-label { font-size: 12px; font-weight: 600; fill: var(--text); }
+.heat .col-sub { font-size: 11px; fill: var(--muted); }
+.heat .row-label { font-size: 12.5px; fill: var(--text); }
+.heat .heat-bg { fill: var(--surface-2); }
+.heat .heat-up { fill: var(--series-2); }
+.heat .heat-down { fill: var(--series-1); }
+.heat .cell-value { font-size: 12.5px; font-family: var(--mono); fill: var(--text); pointer-events: none; }
+.heat .layer-rule { stroke: var(--border); stroke-width: 1.5; }
+.heat .cell:focus { outline: none; }
+.heat .cell:focus .heat-bg, .heat .cell:hover .heat-bg { stroke: var(--text); stroke-width: 1.5; }
+
+.map-toggles { display: flex; flex-wrap: wrap; gap: 10px 18px; margin: 10px 0 6px; }
+.ego-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-top: 10px; }
+.ego-box { margin: 0; min-width: 0; border: 1px solid var(--border); border-radius: 10px; padding: 10px; background: var(--surface); }
+.ego-box figcaption { font-size: 13px; margin-bottom: 4px; }
+.ego { width: 100%; height: auto; max-width: 340px; display: block; margin: 0 auto; }
+.ego .ring { fill: none; stroke: var(--border); stroke-dasharray: 3 4; }
+.ego .edge { stroke-linecap: round; stroke-opacity: .55; }
+.ego .edge.train_fraud { stroke: var(--series-2); }
+.ego .edge.train_benign { stroke: var(--series-1); }
+.ego .edge.test, .ego .edge.unlabelled { stroke: var(--faint); }
+.ego .target { fill: var(--text); stroke: var(--surface); stroke-width: 3; }
+.ego .node { stroke: var(--surface); stroke-width: 2; }
+.ego .node.train_fraud { fill: var(--series-2); }
+.ego .node.train_benign { fill: var(--series-1); }
+.ego .node.test { fill: var(--faint); }
+.ego .node.unlabelled { fill: var(--surface); stroke: var(--faint); stroke-width: 1.5; }
+.ego .weight { font-size: 11px; font-family: var(--mono); fill: var(--muted); pointer-events: none; }
+.ego .nbr:focus { outline: none; }
+.ego .nbr:focus .node, .ego .nbr:hover .node { stroke: var(--text); stroke-width: 2.5; }
+.ego .empty-note { font-size: 12.5px; fill: var(--muted); }
+.key-dot { display: inline-block; width: 11px; height: 11px; border-radius: 50%; vertical-align: -1px; }
+.key-dot.train_fraud { background: var(--series-2); }
+.key-dot.train_benign { background: var(--series-1); }
+.key-dot.test { background: var(--faint); }
+.key-dot.unlabelled { background: var(--surface); border: 1.5px solid var(--faint); }

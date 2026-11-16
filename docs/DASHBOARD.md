@@ -150,9 +150,10 @@ Each section has its own page, with the same row of page links at the top of eve
 6. **Classify a node (`/classify`).** See below.
 7. **Explain a node (`/walkthrough`).** See below.
 8. **Explanation details (`/explain`).** See below.
-9. **Checks (`/checks`).** Every check with its result, and anything started but not finished. A failed check also shows at the top of every page.
+9. **GAT attention (`/attention`).** See below.
+10. **Checks (`/checks`).** Every check with its result, and anything started but not finished. A failed check also shows at the top of every page.
 
-Pages 1–6 and 9 are drawn by one script (`static/app.js`), which draws whichever sections a page holds; the page list is `APP_PAGES` in `server.py`.
+Pages 1–6 and 10 are drawn by one script (`static/app.js`), which draws whichever sections a page holds; the page list is `APP_PAGES` in `server.py`.
 
 ### Reading the classify panel
 
@@ -186,6 +187,24 @@ A second page, linked from every page, at `http://127.0.0.1:8555/explain`. It sh
 - **Explain a random test node:** draw from all test nodes, by class, or by outcome at the training-chosen threshold (caught fraud, false alarm, missed fraud), with an optional seed. The card shows a log-odds waterfall from the base value to the node's score (it adds up exactly, and the gap is shown), the ten largest pushes with their prepared input values and overall rank, each block's summed SHAP and, for the 1,000 nodes in its sample, its exact group Shapley value, the neighbours whose removal moves the score most per relation (with the degree and means parts, and a flag when the removal leaves the training range), and the closest training nodes in SHAP space.
 - **The model overall:** mean |SHAP| per column with group-bootstrap intervals, for all test nodes or one stratum; blocks (summed SHAP beside group Shapley); the strongest interactions; issue #36's correlated columns as one group; the faithfulness tests (top-SHAP removal against random removal, label randomisation, refit stability, background sensitivity); and neighbour influence per relation, the most influential nodes, and whether degree alone reproduces their ranking.
 - **Not shown:** neighbour influence for YelpChi's full-budget E2, whose graph information goes through the DGI encoder (that was explained at the pilot budget only). Input values are df-analyze's prepared inputs, not raw features. The wording follows the explanations plan: "exact Shapley values of a stated game" and "necessity-style neighbour influence", never "faithful by construction" or "the important nodes".
+
+## The GAT attention page (`/attention`)
+
+Where E10, the 2-layer GAT with 4 heads per relation, puts its attention, on split 0 of each dataset (all features, as E10 was run). It reads what `scripts/gat_attention.py` saved under `outputs/<dataset>/pilot_g10_gat/attention/` and computes nothing new; like `/explain`, it needs no model worker and works with `--no-model`. It is row-level: group only.
+
+To build its files (about 9 minutes for Amazon and 7 for YelpChi on the desktop's CPU):
+
+```bash
+uv run scripts/gat_attention.py --dataset amazon --split 0
+uv run scripts/gat_attention.py --dataset yelpchi --split 0
+```
+
+- **The model overall:** a heatmap by layer and relation of four measures. **Focus** is the attention's entropy over log(degree), where 1 means equal weights, what GraphSAGE does. **Top weight vs 1 / degree** compares the largest weight with an equal share. **Relation term vs own-features term** shows how much the layer leans on that relation. **Fraud neighbours' share** compares attention on training-fraud neighbours with their share of the labelled neighbours, for fraud and for benign training targets. Hovering a cell gives the per-head values.
+- **A random test node:** draw from all test nodes, by class, or by outcome (the run's score at its training-chosen threshold), with an optional seed. For each relation, a map puts the node in the centre and its 12 strongest incoming neighbours around it. Line width is the attention weight, and each neighbour's number is its weight. A caption gives the degree, the share of the weight those neighbours carry, the equal weight, the node's focus and how much the layer leans on the relation. Buttons switch between layers 1 and 2 and between the head average and each head.
+- **It is a refit.** GAT fits are not bit-identical between runs, so the script refits E10's fold-0 model, trained on four of the five training folds, and the page refuses the read-out unless that model's held-out fold scores within 0.005 of the run's. The card shows both the run's score (5 seeds × 5 folds) and the refit model's.
+- **Labels:** a neighbour is coloured fraud or benign only if it is a training node. Test and unlabelled neighbours are grey, and no test label other than the drawn node's own leaves the server. The saved files hold no labels; the page reads training labels from `train_ids.csv`.
+- **Checks before any node is shown:** the read-out is split 0 of E10, and the refit matches; the mapped nodes are exactly the test nodes, none a training node; the saved files hold no label column; every node's weights over a relation sum to 1, and the neighbours shown carry the saved share; the mean weight is the mean over heads; the run's test scores line up with the test nodes. A failed check takes the dataset off the page.
+- **What it is not:** attention weights show where the model puts weight, not why it decides (Jain & Wallace, 2019).
 
 ## How the numbers are checked
 

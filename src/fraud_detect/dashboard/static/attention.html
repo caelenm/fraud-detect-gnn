@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GAT Attention</title>
+  <link rel="stylesheet" href="/report.css">
+  <link rel="stylesheet" href="/dashboard.css">
+  <link rel="stylesheet" href="/explain.css">
+  <link rel="stylesheet" href="/attention.css">
+  <script src="/attention.js" defer></script>
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <div>
+        <div class="eyebrow">CS555 course project · results dashboard</div>
+        <h1>Where does the GAT look?</h1>
+      </div>
+      <div class="meta" id="header-meta"></div>
+    </header>
+    <nav class="pages" aria-label="Dashboard pages">
+      <a href="/">Overview</a>
+      <a href="/questions">Research questions</a>
+      <a href="/methods">Methods</a>
+      <a href="/contrasts">Contrasts</a>
+      <a href="/datasets">Across datasets</a>
+      <a href="/classify">Classify a node</a>
+      <a href="/walkthrough">Explain a node</a>
+      <a href="/explain">Explanation details</a>
+      <a href="/attention" aria-current="page">GAT attention</a>
+      <a href="/checks">Checks</a>
+    </nav>
+
+    <form class="controls" id="controls" aria-label="Which dataset">
+      <fieldset class="control">
+        <legend>Dataset</legend>
+        <div class="segmented wrap-buttons" id="model-buttons"></div>
+      </fieldset>
+      <div class="control push">
+        <button type="button" class="ghost" id="theme-toggle">Theme: auto</button>
+      </div>
+    </form>
+
+    <noscript>
+      <p class="notice">This page draws its maps with JavaScript. The aggregate numbers are in docs/GAT_DEEP_RESULTS.md.</p>
+    </noscript>
+
+    <main>
+      <section id="read-first" aria-labelledby="read-first-title">
+        <h2 id="read-first-title">Read this first</h2>
+        <div class="grid-2">
+          <div class="panel panel-pad">
+            <h3 class="sub">What the map shows</h3>
+            <ul class="plain small">
+              <li><b>E10</b> is a 2-layer GAT. In each layer, every relation has 4 attention heads, and each head gives a node's incoming neighbours weights that sum to 1. GraphSAGE (E5) gives every neighbour the same weight, 1 / degree.</li>
+              <li><b>Thicker lines carry more weight.</b> The map shows each relation's strongest neighbours, ranked by the weight averaged over the heads, and says how much of the total weight they carry.</li>
+              <li><b>Focus</b> is the attention's entropy over log(degree): 1 means equal weight on every neighbour, what GraphSAGE does; lower means the weight is concentrated.</li>
+              <li><b>Layer 2</b> weighs the neighbours' layer-1 representations, which already mix in their own neighbours.</li>
+            </ul>
+          </div>
+          <div class="panel panel-pad">
+            <h3 class="sub">What it is not</h3>
+            <ul class="plain small">
+              <li>Attention weights show where the model puts weight, <b>not why it decides</b>. Other weightings can give the same score (Jain &amp; Wallace, 2019).</li>
+              <li>The map is of a <b>refit</b> of E10's fold-0 model, trained on four of the five training folds, because GAT fits are not bit-identical between runs. Its held-out fold scores within 0.005 of the run's (checked below). The node's run score is the 5-seed, 5-fold average.</li>
+              <li>A neighbour's label is shown only for <b>training nodes</b>, labels the model was trained on. Test and unlabelled neighbours are grey.</li>
+              <li>These models use every feature, including Amazon's <b>f19</b>, a probable label leak.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section id="model" aria-labelledby="model-title">
+        <h2 id="model-title">The model overall</h2>
+        <p class="lede" id="model-lede"></p>
+        <div id="model-state"></div>
+        <div class="stats" id="model-stats"></div>
+        <details class="more" id="model-checks-box">
+          <summary>Checks before any node is shown</summary>
+          <ul class="checks-list" id="model-checks"></ul>
+        </details>
+        <div class="panel panel-pad">
+          <h3 class="sub">Attention by layer and relation</h3>
+          <p class="small muted">Averaged over nodes with at least two neighbours in the relation (head-averaged weights). Shading shows how far each value is from what equal weights would give; hover a cell for the per-head values.</p>
+          <div class="legend" id="heat-legend"></div>
+          <div class="chart-scroll" id="heatmap"></div>
+        </div>
+      </section>
+
+      <section id="node" aria-labelledby="node-title">
+        <h2 id="node-title">Attention map of a random test node</h2>
+        <p class="lede">Draw a test node at random. Draws by outcome use the run's score and the threshold chosen on training predictions.</p>
+        <p class="group-banner">Group only: this section shows row-level test data. Do not upload, commit or host it.</p>
+        <div class="panel panel-pad">
+          <div class="actions draw-actions">
+            <div class="segmented wrap-buttons" id="draw-buttons" role="group" aria-label="Which kind of node"></div>
+            <label class="field"><span class="control-label">Seed (optional)</span><input id="seed-input" inputmode="numeric" autocomplete="off" placeholder="random"></label>
+            <button type="button" class="primary" id="draw-button">Draw a node</button>
+          </div>
+          <div class="history" id="draw-history" aria-label="Earlier draws"></div>
+        </div>
+        <div id="card"></div>
+      </section>
+    </main>
+
+    <footer id="page-footer"></footer>
+  </div>
+  <div class="tooltip" id="tooltip" role="status" hidden></div>
+</body>
+</html>

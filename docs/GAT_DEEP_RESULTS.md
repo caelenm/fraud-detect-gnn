@@ -143,6 +143,8 @@ On Amazon, GAT learned to up-weight fraud neighbours, mostly through U-S-U. On Y
 
 Training labels were used only to describe the model, never as an input. Attention weights describe where the model puts weight, not why it decides. Per-node attention statistics stay local (row-level).
 
+The dashboard's GAT attention page (`/attention`, [`DASHBOARD.md`](DASHBOARD.md)) draws this as a heatmap by layer and relation, and as a map of any test node's strongest neighbours per relation. It reads a later rerun of the same refit (2026-11-16), so its numbers can differ from this table in the third decimal.
+
 ## Not done yet
 
 - **p-values for every contrast against a laptop rung** (E5, E1, B with all features; B and E1 without `f19`), and the Holm-adjusted families. They need the laptop's `pilot_g5_sage`, `pilot_m2_own_nbr`, `pilot_m1_own` (splits 0–4 Amazon, 0–2 YelpChi), `pilot_m1_own_no19` and `pilot_m2_own_nbr_no19` (splits 0–2) outputs.

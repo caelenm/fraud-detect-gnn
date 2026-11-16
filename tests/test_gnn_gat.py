@@ -308,3 +308,24 @@ def test_attention_script_refits_the_rungs_own_fold_model(tmp_path):
     assert set(weights["relation"]) == {"aaa", "bbb"}
     assert (weights["relation_to_root"] >= 0).all()
     assert ((heads["entropy_ratio"] > 0) & (heads["entropy_ratio"] <= 1 + 1e-9)).all()
+
+    # The dashboard's map: test nodes only, no labels, the k strongest edges.
+    paths = get_paths({**config, "feature_set": "pilot_g10_gat"})
+    test_ids = set(pd.read_csv(paths.test_ids)["node_id"])
+    targets = pd.read_parquet(out / "attention_targets.parquet")
+    edges = pd.read_parquet(out / "attention_edges.parquet")
+    for frame in (targets, edges):
+        assert {"label", "node_id", "y"}.isdisjoint(frame.columns)
+    assert set(targets["target"]) == test_ids and set(edges["target"]) <= test_ids
+    assert len(targets) == len(test_ids) * 2 * 2  # layers x relations
+    assert (targets["n_shown"] == targets["degree"].clip(upper=meta["top_k"])).all()
+    full = targets[(targets["degree"] > 0) & (targets["degree"] <= meta["top_k"])]
+    assert np.allclose(full["shown_weight"], 1.0, atol=1e-6)  # a softmax: sums to 1
+    assert (targets["shown_weight"] <= 1 + 1e-6).all()
+    assert ((targets["refit_prob"] >= 0) & (targets["refit_prob"] <= 1)).all()
+    head_cols = [c for c in edges.columns if c.startswith("alpha_h")]
+    assert len(head_cols) == meta["heads"]
+    assert np.allclose(edges[head_cols].mean(axis=1), edges["alpha"])
+    for _, part in edges.groupby(["target", "layer", "relation"]):
+        assert list(part["rank"]) == list(range(1, len(part) + 1))
+        assert (np.diff(part["alpha"].to_numpy()) <= 1e-12).all()  # largest first

@@ -63,8 +63,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     threading.Thread(target=app.load_panels, daemon=True).start()
     threading.Thread(target=app.load_explain, daemon=True).start()
+    threading.Thread(target=app.load_attention, daemon=True).start()
     print(f"Dashboard: http://{HOST}:{server.server_address[1]} (Ctrl+C to stop)")
     print(f"Explanations: http://{HOST}:{server.server_address[1]}/explain")
+    print(f"GAT attention: http://{HOST}:{server.server_address[1]}/attention")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

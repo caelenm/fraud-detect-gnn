@@ -22,6 +22,7 @@ from urllib.parse import parse_qs, urlsplit
 import numpy as np
 
 from fraud_detect.config import REPO_ROOT, df_analyze_dir
+from fraud_detect.dashboard import attention as at
 from fraud_detect.dashboard import checks as checks_module
 from fraud_detect.dashboard import classify as cl
 from fraud_detect.dashboard import data, narrative
@@ -40,7 +41,8 @@ DEFAULT_PORT = 8555
 STATIC_DIR = Path(__file__).with_name("static")
 REPORT_CSS = Path(__file__).parent.parent / "report" / "report.css"
 # One page per section, each with the same page links; app.js draws whichever
-# sections a page holds. /walkthrough and /explain have their own scripts.
+# sections a page holds. /walkthrough, /explain and /attention have their own
+# scripts.
 APP_PAGES = {
     "/": "index.html",
     "/questions": "questions.html",
@@ -62,6 +64,9 @@ STATIC_FILES = {
     "/explain": (STATIC_DIR / "explain.html", "text/html; charset=utf-8"),
     "/explain.js": (STATIC_DIR / "explain.js", "text/javascript; charset=utf-8"),
     "/explain.css": (STATIC_DIR / "explain.css", "text/css; charset=utf-8"),
+    "/attention": (STATIC_DIR / "attention.html", "text/html; charset=utf-8"),
+    "/attention.js": (STATIC_DIR / "attention.js", "text/javascript; charset=utf-8"),
+    "/attention.css": (STATIC_DIR / "attention.css", "text/css; charset=utf-8"),
     "/dashboard.css": (STATIC_DIR / "dashboard.css", "text/css; charset=utf-8"),
     "/report.css": (REPORT_CSS, "text/css; charset=utf-8"),
 }
@@ -172,6 +177,10 @@ class App:
         self.explain_state: dict[str, tuple[str, str]] = {
             ex.target_key(d, v): (LOADING, "Loading the saved explanation.")
             for d, v, _ in ex.TARGETS
+        }
+        self.attention_models: dict[str, at.AttentionModel] = {}
+        self.attention_state: dict[str, tuple[str, str]] = {
+            d: (LOADING, "Loading the saved attention read-out.") for d in at.DATASETS
         }
         self._lock = threading.Lock()
 
@@ -489,6 +498,60 @@ class App:
         except ex.ExplainRequestError as e:
             raise BadRequest(str(e)) from e
 
+    # ---- GAT attention page ---------------------------------------------
+    def load_attention(self) -> None:
+        """Load each dataset's saved attention read-out; runs in the background.
+        One that cannot be loaded says why; the other still works."""
+        for dataset in at.DATASETS:
+            try:
+                model = at.load_model(self.config, dataset)
+            except at.AttentionUnavailable as e:
+                state = (UNAVAILABLE, str(e))
+            except Exception as e:  # one broken read-out must not take the other down
+                state = (UNAVAILABLE, f"{type(e).__name__}: {e}"[:500])
+            else:
+                with self._lock:
+                    self.attention_models[dataset] = model
+                state = (READY, "")
+            with self._lock:
+                self.attention_state[dataset] = state
+
+    def api_attention_models(self) -> dict[str, Any]:
+        with self._lock:
+            states = dict(self.attention_state)
+            models = dict(self.attention_models)
+        out = []
+        for dataset in at.DATASETS:
+            state, message = states[dataset]
+            entry: dict[str, Any] = {
+                "key": dataset,
+                "dataset": dataset,
+                "dataset_label": DATASET_LABELS.get(dataset, dataset),
+                "state": state,
+                "message": message,
+            }
+            if dataset in models:
+                entry.update(models[dataset].summary())
+            out.append(entry)
+        return {"models": out, "commit": self.commit}
+
+    def api_attention_node(self, body: Any) -> dict[str, Any]:
+        if not isinstance(body, dict):
+            raise BadRequest("The request body must be a JSON object")
+        key = str(body.get("model"))
+        with self._lock:
+            known = key in self.attention_state
+            state, message = self.attention_state.get(key, (UNAVAILABLE, ""))
+            model = self.attention_models.get(key)
+        if not known:
+            raise BadRequest(f"Unknown model {body.get('model')!r}")
+        if state != READY or model is None:
+            raise BadRequest(message or f"{key} is not ready yet")
+        try:
+            return model.draw(str(body.get("draw", "any")), body.get("seed"))
+        except at.AttentionRequestError as e:
+            raise BadRequest(str(e)) from e
+
     def close(self) -> None:
         if self.worker is not None:
             self.worker.close()
@@ -567,6 +630,7 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                 "/api/checks": app.api_checks,
                 "/api/status": app.api_status,
                 "/api/explain/models": app.api_explain_models,
+                "/api/attention/models": app.api_attention_models,
             }
             if url.path in routes:
                 self._answer(routes[url.path])
@@ -583,6 +647,7 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
             posts = {
                 "/api/classify": app.api_classify,
                 "/api/explain/node": app.api_explain_node,
+                "/api/attention/node": app.api_attention_node,
             }
             endpoint = posts.get(urlsplit(self.path).path)
             if endpoint is None:
