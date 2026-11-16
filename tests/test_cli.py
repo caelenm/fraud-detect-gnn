@@ -9,6 +9,7 @@ from fraud_detect.config import (
     DEFAULT_CONFIG,
     REPO_ROOT,
     ConfigError,
+    check_feature_sets,
     get_paths,
     load_config,
     with_dataset,
@@ -90,3 +91,27 @@ def test_paths_are_separate_per_dataset_and_feature_set():
     assert m5.block_spec("gnnssl").name == "gnnssl.spec.json"
     with pytest.raises(ConfigError, match="feature set"):
         with_dataset({**config, "feature_set": "m9_nothing"}, "yelpchi")
+
+
+def test_a_gnn_rung_may_carry_its_own_train_block_but_nothing_unknown():
+    import copy  # noqa: PLC0415
+
+    config = load_config(DEFAULT_CONFIG)
+    check_feature_sets(config)  # the larger rungs as configured are valid
+    rungs = config["gnn_models"]
+    assert rungs["pilot_g5w_sage_big"]["train"]["layers"] == 3
+    assert "train" not in rungs["pilot_g5_sage"]  # the 2026-10-31 rungs unchanged
+
+    bad = copy.deepcopy(config)
+    bad["gnn_models"]["pilot_g5w_sage_big"]["width"] = 3
+    with pytest.raises(ConfigError, match="unknown keys"):
+        check_feature_sets(bad)
+    bad = copy.deepcopy(config)
+    bad["gnn_models"]["pilot_g5w_sage_big"]["train"] = {"seeds": 1}
+    with pytest.raises(ConfigError, match="train"):
+        check_feature_sets(bad)
+    # A control that copies another rung's setting must be the same network.
+    bad = copy.deepcopy(config)
+    bad["gnn_models"]["pilot_g9n3_sign_rw"]["train"] = {"model": "sign", "hops": 2}
+    with pytest.raises(ConfigError, match="same train"):
+        check_feature_sets(bad)

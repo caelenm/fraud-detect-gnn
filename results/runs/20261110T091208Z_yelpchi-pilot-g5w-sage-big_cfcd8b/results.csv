@@ -1,0 +1,2 @@
+variant,contrast,a,b,test_delta_split0,test_delta_split1,test_delta_split2,test_delta_mean,test_delta_sd,test_pr_auc_a_mean,test_pr_auc_a_sd,test_pr_auc_b_mean,test_pr_auc_b_sd,cv_folds,cv_delta_mean,corrected_t,p,verdict
+-,g5w_sage_big - g6w_mlp_big,pilot_g6w_mlp_big,pilot_g5w_sage_big,0.1278512546820983,0.1576263980729716,0.1336147194335014,0.1396974573961904,0.0157920729110785,0.6258241263667662,0.0179364665618767,0.7655215837629568,0.0082541542569783,15,0.1395998646702008,13.974272485084372,1.2942937103498375e-09,supported

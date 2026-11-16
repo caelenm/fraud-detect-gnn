@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "run_id": "20261110T082308Z_yelpchi-pilot-g10-gat_18b8aa",
+  "recorded_utc": "2026-11-10T08:25:41Z",
+  "started_utc": "2026-11-10T08:23:08Z",
+  "finished_utc": "2026-11-10T08:25:41Z",
+  "duration_min": 2.5,
+  "device": "rtx4060-desktop",
+  "device_details": {
+    "os": "Linux",
+    "platform": "Linux-6.6.87.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "wsl": true,
+    "python": "3.13.16",
+    "cpu": "AMD Ryzen 7 7700 8-Core Processor",
+    "gpus": [
+      {
+        "name": "NVIDIA GeForce RTX 4060",
+        "driver": "621.01",
+        "memory": "8188 MiB"
+      }
+    ]
+  },
+  "description": "E10 - N10 (GAT, real vs rewired graph), YelpChi, 3 splits (pre-registered primary contrast)",
+  "kind": "compare",
+  "status": "ok",
+  "dataset": "yelpchi",
+  "feature_set": "pilot_g10_gat",
+  "split_repeat": null,
+  "seed": null,
+  "git_commit": "25bcde1694cb75362cfbdf3484467cbfe51e08b7",
+  "git_dirty": false,
+  "command": "uv run scripts/compare_report.py --dataset yelpchi --a pilot_g10n3_gat_rw --b pilot_g10_gat --repeat k (k=0..2); uv run scripts/repeat_summary.py --dataset yelpchi --repeats 3 --prefix pilot_ --pairs g10n3_gat_rw:g10_gat --name gat_vs_rewired",
+  "tags": [
+    "pilot",
+    "gat-deep",
+    "splits3"
+  ],
+  "source": "outputs/yelpchi/compare/gat_vs_rewired.csv",
+  "results_rows": 1,
+  "results_columns": [
+    "variant",
+    "contrast",
+    "a",
+    "b",
+    "test_delta_split0",
+    "test_delta_split1",
+    "test_delta_split2",
+    "test_delta_mean",
+    "test_delta_sd",
+    "test_pr_auc_a_mean",
+    "test_pr_auc_a_sd",
+    "test_pr_auc_b_mean",
+    "test_pr_auc_b_sd",
+    "cv_folds",
+    "cv_delta_mean",
+    "corrected_t",
+    "p",
+    "verdict"
+  ]
+}

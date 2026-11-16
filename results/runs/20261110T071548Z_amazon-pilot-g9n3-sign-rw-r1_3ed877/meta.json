@@ -1,0 +1,131 @@
+{
+  "schema_version": 1,
+  "run_id": "20261110T071548Z_amazon-pilot-g9n3-sign-rw-r1_3ed877",
+  "recorded_utc": "2026-11-10T07:17:27Z",
+  "started_utc": "2026-11-10T07:15:48Z",
+  "finished_utc": "2026-11-10T07:17:26Z",
+  "duration_min": 1.6,
+  "device": "rtx4060-desktop",
+  "device_details": {
+    "os": "Linux",
+    "platform": "Linux-6.6.87.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "wsl": true,
+    "python": "3.13.16",
+    "cpu": "AMD Ryzen 7 7700 8-Core Processor",
+    "gpus": [
+      {
+        "name": "NVIDIA GeForce RTX 4060",
+        "driver": "621.01",
+        "memory": "8188 MiB"
+      }
+    ]
+  },
+  "description": "N9: SIGN on the rewired graph (E9's setting), all 25 features, split 1, pilot (GAT / bigger-GNN round)",
+  "kind": "pipeline",
+  "status": "ok",
+  "dataset": "amazon",
+  "feature_set": "pilot_g9n3_sign_rw",
+  "split_repeat": 1,
+  "seed": 555,
+  "git_commit": "71e586c4988a7068c705be81865a400413c491cb",
+  "git_dirty": false,
+  "df_analyze_run": "gnn-20261110T071726Z",
+  "headline": {
+    "model_a": "SIGN (rewired graph) (gnn)",
+    "test_pr_auc": 0.8951624533889845,
+    "test_pr_auc_low": 0.8671997885119449,
+    "test_pr_auc_high": 0.919794018884811,
+    "test_auroc": 0.9746584742062254,
+    "test_auroc_low": 0.9656694811081808,
+    "test_auroc_high": 0.9818354862055505,
+    "no_skill_pr_auc": 0.09490740740740741,
+    "cv_pr_auc": 0.8171545530687581,
+    "cv_pr_auc_std": 0.16904838694162566,
+    "f1": 0.8148148148148148,
+    "threshold": 0.620008137759864,
+    "n_train": 5183,
+    "n_test": 3456
+  },
+  "settings": {
+    "seed": 555,
+    "feature_set": "pilot_g9n3_sign_rw",
+    "split.repeat": 1,
+    "split.n_repeats": 3,
+    "df_analyze.classifiers": [
+      "lgbm",
+      "lr",
+      "catboost",
+      "gandalf",
+      "rf",
+      "knn"
+    ],
+    "df_analyze.htune_trials": 100,
+    "df_analyze.htune_cls_metric": "bal-acc",
+    "df_analyze.commit": "199e5638620693c267dac715784f1fd0e33fa796",
+    "gnn_embed": {
+      "layers": 2,
+      "hidden": 64,
+      "out_dim": 64,
+      "lr": 0.001,
+      "max_epochs": 300,
+      "patience": 20,
+      "pca_components": 8,
+      "device": "cpu",
+      "usu_edge_fraction": 1.0
+    },
+    "neighbour_agg": {
+      "statistics": [
+        "mean"
+      ],
+      "log1p_degree": true,
+      "rewire_swaps_per_edge": 10
+    },
+    "blocks": [
+      "own"
+    ]
+  },
+  "source": "outputs/amazon_repeat1/pilot_g9n3_sign_rw",
+  "command": "--dataset amazon --set split.n_repeats=3 --set split.repeat=1 --set feature_set=pilot_g9n3_sign_rw --set gnn_classify.device=cuda",
+  "packages": {
+    "numpy": "2.5.3",
+    "pandas": "3.0.6",
+    "pyarrow": "25.0.1",
+    "scikit-learn": "1.9.1",
+    "scipy": "1.18.1",
+    "pyyaml": "6.0.3",
+    "torch": "2.9.1",
+    "torch-geometric": "2.8.1"
+  },
+  "tags": [
+    "pilot",
+    "gat-deep"
+  ],
+  "results_rows": 1,
+  "results_columns": [
+    "model",
+    "selection",
+    "embed_selector",
+    "cv_pr_auc",
+    "cv_pr_auc_std",
+    "cv_auroc",
+    "cv_auroc_std",
+    "tuning_metric",
+    "pr_auc",
+    "auroc",
+    "f1",
+    "precision",
+    "recall",
+    "accuracy",
+    "balanced_accuracy",
+    "tp",
+    "fp",
+    "fn",
+    "tn",
+    "threshold",
+    "f1_at_05",
+    "precision_at_05",
+    "recall_at_05",
+    "accuracy_at_05",
+    "balanced_accuracy_at_05"
+  ]
+}

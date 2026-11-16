@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "run_id": "20261110T071843Z_amazon_214f29",
+  "recorded_utc": "2026-11-10T07:20:47Z",
+  "started_utc": "2026-11-10T07:18:43Z",
+  "finished_utc": "2026-11-10T07:20:39Z",
+  "duration_min": 1.9,
+  "device": "rtx4060-desktop",
+  "device_details": {
+    "os": "Linux",
+    "platform": "Linux-6.6.87.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "wsl": true,
+    "python": "3.13.16",
+    "cpu": "AMD Ryzen 7 7700 8-Core Processor",
+    "gpus": [
+      {
+        "name": "NVIDIA GeForce RTX 4060",
+        "driver": "621.01",
+        "memory": "8188 MiB"
+      }
+    ]
+  },
+  "description": "Amazon secondary contrasts, 3 splits: E9 - N9 (SIGN real vs rewired) +0.019 +/- 0.006, p 0.57; E5w - E6w (edges in the bigger GraphSAGE) +0.002 +/- 0.014, p 0.75; both not distinguishable from zero",
+  "kind": "compare",
+  "status": "ok",
+  "dataset": "amazon",
+  "feature_set": null,
+  "split_repeat": null,
+  "seed": null,
+  "git_commit": "10d875160a68703e0316a9c7cc595c4b30eef630",
+  "git_dirty": false,
+  "command": "uv run scripts/compare_report.py (E9 vs N9, E5w vs E6w; repeats 0-2); uv run scripts/repeat_summary.py --dataset amazon --repeats 3 --prefix pilot_ --pairs g9n3_sign_rw:g9_sign g6w_mlp_big:g5w_sage_big --name sign_and_e5w_controls",
+  "tags": [
+    "pilot",
+    "gat-deep",
+    "splits3"
+  ],
+  "notes": "N9 (SIGN on the rewired graph) stopped at epoch 1-2 in 14 of 25 fits on split 1 and 7 of 25 on split 2 (none on split 0; E9 at most 1 of 60 per split): an early-stopping failure that lowers N9 and widens the CV deltas (one N9 fold 0.515), so E9 - N9 overstates the real-structure gain and its p is inflated.",
+  "source": "outputs/amazon/compare/sign_and_e5w_controls.csv",
+  "results_rows": 2,
+  "results_columns": [
+    "variant",
+    "contrast",
+    "a",
+    "b",
+    "test_delta_split0",
+    "test_delta_split1",
+    "test_delta_split2",
+    "test_delta_mean",
+    "test_delta_sd",
+    "test_pr_auc_a_mean",
+    "test_pr_auc_a_sd",
+    "test_pr_auc_b_mean",
+    "test_pr_auc_b_sd",
+    "cv_folds",
+    "cv_delta_mean",
+    "corrected_t",
+    "p",
+    "verdict"
+  ]
+}

@@ -1265,6 +1265,98 @@ Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` at
   - **Two runs of one split:** Amazon B on split 0 (all 25 and without #36) already had full-budget entries from the laptop (0.919 and 0.518). The desktop reran both (0.916 and 0.523; df-analyze's feature selection is not seeded), and the verdict table above used the reruns. With the user's agreement, both are kept: the dashboard now counts the earliest separate df-analyze run of a (dataset, feature set, split) and keeps later ones as replications (in the database and the duplicate check's summary, not in its numbers); the same run recorded twice still fails its duplicate check. Its contrast check accepts a delta that matches any recorded run of each side. The dashboard's best setups are unchanged (all chosen at the pilot budget, which is the only one with every setup).
   - **Results DB:** 27 pipeline entries and two compare entries, tags `full` and `backfill` (and `splits3` for the verdict tables).
 
+- **Note on numbering (added when `exp/bigger-gnn` was merged into `main`, 2026-11-16).** Two amendments written on 2026-11-09 on separate machines both carry the number six: the **GNN-round sixth amendment** (bigger GNNs, SIGN and GAT, `rtx4060-desktop`, with its extension to Amazon splits 3–4 and the seventh amendment for the GNNs without f19) and the **full-budget sixth amendment** (the full-budget queue, `rtx4060-laptop`, below). They cover different rungs and neither changes the other; the numbers are kept because commits and database entries cite them.
+
+- **2026-11-09 (sixth amendment: bigger GNNs, SIGN and GAT; written ~03:55 UTC, committed as `3eb4294` before any run of this round; the queue started at 03:57 UTC).** The user's decisions (2026-11-08/09): add a GAT rung ([`GAT_DEEP_PLAN.md`](GAT_DEEP_PLAN.md)); run the larger rungs of [`BIGGER_GNN_PLAN.md`](BIGGER_GNN_PLAN.md) (a teammate's draft on `exp/bigger-gnn`, which this branch builds on); 3 splits per dataset; on the CPU; in the order below. This answers the professor's feedback of 2026-11-03 ("try adding GAT", "bigger GNN").
+  - **Feature variant:** every feature (Amazon all 25, YelpChi all 32), as in the fifth amendment.
+  - **Splits:** 0–2 on both datasets (`split.n_repeats: 3`, `split.repeat: k`), the same splits and test nodes as E5, E6, E1 and B on those splits (checked: same test sizes). Amazon's E5 round had 5 splits; these contrasts use splits 0–2 only.
+  - **Setups** (`configs/default.yaml`; every rung is scored by `gnn_classify` with the fifth amendment's GNN protocol: out-of-fold predictions on the saved folds, early stopping on a grouped fifth of each fit's nodes, 5 seeds, grid chosen per rung and split by mean fold PR-AUC with seed 0, threshold max F1 on the out-of-fold predictions):
+
+    | ID | Feature set | What | Grid |
+    |---|---|---|---|
+    | E5w | `pilot_g5w_sage_big` | E5's layer, 3 layers, residual, LayerNorm, jumping knowledge | hidden {256, 512} × dropout {0.3, 0.5} × lr {1e-3, 5e-3} |
+    | E10 | `pilot_g10_gat` | GAT: E5 with each relation's mean replaced by 4-head attention (2 layers) | E5's: hidden {64, 128} × dropout {0, 0.3} × lr {1e-3, 5e-3} |
+    | N10 | `pilot_g10n3_gat_rw` | E10 on N2's rewired graph, with E10's setting | – |
+    | E6w | `pilot_g6w_mlp_big` | E5w without edges | as E5w |
+    | E9 | `pilot_g9_sign` | SIGN: x and 1–3-hop means per relation, a branch per input, 3 layers, LayerNorm | as E5w |
+    | N9 | `pilot_g9n3_sign_rw` | E9 on N2's rewired graph, with E9's setting | – |
+
+    BIGGER_GNN_PLAN §3 proposed dropping hidden 512 if one Amazon fit took over 5 minutes. That rule is not applied: the user approved the grid as configured, with the timing in GAT_DEEP_PLAN §4.
+  - **Device change (2026-11-09 21:04 UTC, the user's decision after checking with the group; no contrast changes):** every job from Amazon E10 split 1 on runs on the GPU (`gnn_classify.device: cuda`). Amazon E5w splits 0–2 and E10 split 0 ran on the CPU. CUDA fits differ slightly between runs, and so do GAT fits on the CPU (the backward pass of its per-edge score gather is a parallel scatter-add; found when the attention read-out's refit of E10's fold-0 model scored 0.9513 on its held-out fold against 0.9506). E10 split 1 had finished 2 of 12 units on the CPU; they were discarded and the split restarted on the GPU.
+  - **Order (one job at a time, `rtx4060-desktop`; CPU until the device change above):** Amazon E5w splits 0–2, Amazon E10 0–2, YelpChi E5w 0–2, YelpChi E10 0–2; then Amazon N10, E6w, E9, N9 (0–2 each), then the same on YelpChi. Estimated 75–140 h for the first four blocks (GAT_DEEP_PLAN §4), so the later rungs will not finish before the 2026-11-11 presentation; whatever has finished then is reported descriptively.
+  - **Primary contrasts and expectations** (B − A as written; verdict rule of 2026-10-19 over 3 splits; Holm within each dataset's family):
+
+    | Family | Contrast | Question | Expected |
+    |---|---|---|---|
+    | Amazon, YelpChi (3 splits each) | E5w − E5 | does a bigger GraphSAGE help? | not supported |
+    | | E10 − E5 | does attention beat mean aggregation? | not supported |
+    | | E10 − N10 | does GAT use real structure? | Amazon not supported (E5 − N3 +0.013 there); YelpChi supported |
+    | | best of {E5w, E10} − E1 | does a better GNN reach df-analyze with neighbour means? Best chosen per split by mean CV PR-AUC, never test | not supported (E5 trails E1 by 0.033 on Amazon and 0.104 on YelpChi) |
+
+  - **Secondary** (verdicts reported, no family): E9 − E5, E9 − N9, E5w − E6w, E10 − E5w, E9 − E1, and each new rung − B.
+  - **Scoring:** `scripts/repeat_summary.py` from both sides' saved outputs (the same procedure as the fifth amendment). E5, E6, E1 and B on splits 0–2 ran on `rtx4060-laptop`, so their outputs must be copied here before the contrasts are computed. CPU fits are bit-identical for a seed on one machine; across machines, floating-point results may differ slightly, so a contrast between a laptop rung and a desktop rung mixes two machines (noted with the results).
+  - **What was known when this was written** (GNN_RESULTS.md, pilot, test PR-AUC):
+    - Amazon (5 splits): E5 0.900, E6 0.898, N3 0.887, E1 0.933, B 0.922.
+    - YelpChi (3 splits): E5 0.767, E6 0.630, E1 0.871, B 0.838.
+    - No result of E5w, E6w, E9, N9, E10 or N10 existed. The only fits run were timing fits on split 0 (one outer fold each, to early stopping), whose scores were not looked at.
+
+- **2026-11-10 (sixth amendment, results for E5w and E10).** The queue ran from 03:57 UTC on 2026-11-09 to 05:28 UTC on 2026-11-10 for these 12 jobs. Amazon E5w and E10 split 0 ran on the CPU, the rest on the GPU (device change above). Every result is in the results database (tag `gat-deep`). Tables and the attention analysis: [`GAT_DEEP_RESULTS.md`](GAT_DEEP_RESULTS.md).
+  - **Amazon** (no skill 0.095): E10 0.909 ± 0.010, E5w 0.900 ± 0.013; on the same splits E5 0.895, B 0.918, E1 0.929.
+  - **YelpChi** (no skill 0.145): E10 0.786 ± 0.007, E5w 0.766 ± 0.008; E5 0.767, B 0.838, E1 0.871.
+  - **Primary contrasts:**
+    - E5w − E5 is not supported on either dataset (Δ < 0 on split 0 of each; means +0.004 and −0.001), as expected.
+    - E10 − E5 is positive on all six splits (means +0.013 and +0.020, each mean > SD), against the expectation "not supported". Its p-value is pending: it needs E5's per-fold outputs from `rtx4060-laptop`.
+    - Best of {E5w, E10} (E10 on every split by CV) − E1 is worse on every split (−0.020 and −0.085): not supported, as expected.
+    - E10 − N10 is waiting for N10.
+  - **Attention** (`scripts/gat_attention.py`, E10's fold-0 model on split 0, refit within 0.005 of the run's held-out fold score): attention is close to uniform on both datasets. On Amazon, fraud neighbours get 1.6–1.9× their equal share (layer 1 U-S-U). On YelpChi it is within ±0.02 of equal, and layer-2 R-T-R and R-S-R attention is uniform.
+
+- **2026-11-10 (sixth amendment, results for the controls and SIGN; queue finished 10:41 UTC).** All 36 jobs are done and recorded (tag `gat-deep`), with 4 verdict tables (tag `splits3`). Full tables: [`GAT_DEEP_RESULTS.md`](GAT_DEEP_RESULTS.md).
+  - **New scores** (test PR-AUC, mean of splits 0–2):
+    - Amazon: E9 0.916, N10 0.894, N9 0.898, E6w 0.898.
+    - YelpChi: E9 0.763, N10 0.632, N9 0.608, E6w 0.626.
+  - **E10 − N10, primary:**
+    - Amazon: +0.014 ± 0.006, p 0.067, not distinguishable from zero (expected: not supported).
+    - YelpChi: +0.154 ± 0.005, p 9.4e-13, supported (expected: supported).
+  - **Secondary:**
+    - E9 − N9: YelpChi +0.155, p 5.2e-12, supported. Amazon +0.019, p 0.57, not distinguishable; on Amazon, N9 stopped at epoch 1–2 in 14 of 25 fits on split 1 and 7 of 25 on split 2, an early-stopping failure that inflates this Δ and its CV variance.
+    - E5w − E6w: YelpChi +0.140, p 1.3e-09, supported. Amazon +0.002, p 0.75, not distinguishable.
+    - E9 − E5: Amazon +0.021 (positive on every split), YelpChi −0.004. Both p-values pending.
+  - **Still pending:** p-values and Holm for every contrast against E5, E1 or B. They need the laptop's per-fold outputs.
+
+- **2026-11-10 (sixth amendment extended: Amazon splits 3–4; the user's request, written before any split 3–4 result of these rungs existed).** E5w, E10, N10, E6w, E9 and N9 also run on Amazon splits 3 and 4, so the Amazon contrasts cover the same 5 splits as E5, E6 and N3 (2026-10-31). YelpChi stays at 3 splits.
+  - **Unchanged:** the contrasts, the verdict rule, the expected verdicts, the rungs' settings and grids, and seed 555 with split seed = seed + 1000 × repeat (the same splits as the laptop's E5 runs; checked by train and test sizes).
+  - **Run on** `rtx4060-desktop`, GPU (`gnn_classify.device: cuda`), one job at a time, in the order E5w, E10, N10, E6w, E9, N9, splits 3 then 4.
+  - **Reporting:** the 5-split Amazon verdicts replace the 3-split ones once all 12 jobs are done (as on 2026-10-29); the 3-split tables stay in the database (tag `splits3`). If the queue stops early, the 3-split verdicts stand and the extra splits are reported as descriptive.
+  - **N9's early stopping is not changed** (left for the group), so N9 on splits 3–4 runs as on splits 0–2.
+
+- **2026-11-10 (seventh amendment: the GNN classifiers without f19, Amazon; the user's request, written before any of these runs existed).** Every GNN classifier rung is also run without `own__f19` (`pilot_<rung>_no19`, block `own_no19`), so the end-to-end GNNs can be compared with df-analyze's no19 rungs (B, E1, E2; 2026-10-27/29). This lifts the 2026-10-31 "every feature only" choice for these rungs; the all-feature runs stay as they are.
+  - **Rungs:** E5, E5g, E6, N3, E5w, E6w, E9, N9, E10, N10, with their usual settings and grids. Leaving f19 out of each node's input also leaves it out of every neighbour message, hop mean and attention score. Each control (N3, N9, N10) takes its no19 sibling's chosen setting. None is a `gnn_oof` candidate.
+  - **Splits 0–2** (seed 555), the splits E1_no19 has. GPU (`gnn_classify.device: cuda`) on `rtx4060-desktop`, one job at a time, after the Amazon split 3–4 queue, in the order E5, E6, N3, E9, N9, E10, N10, E5w, E6w, E5g.
+  - **Primary contrasts (no19, Holm over these 4):**
+
+    | Contrast | Question | Expected |
+    |---|---|---|
+    | E5 − E6 | does the graph help an end-to-end GNN without f19? | supported |
+    | E5 − N3 | is that real structure rather than degree? | supported |
+    | best GNN − E1 | does an end-to-end GNN reach df-analyze with neighbour means? Best of {E5, E5w, E9, E10} per split by mean CV PR-AUC, never test | not supported |
+    | best GNN − B | does it beat df-analyze on own features? | supported |
+
+  - **Secondary** (verdicts reported, no family): E10 − E5, E10 − N10, E9 − N9, E9 − E5, E5w − E5, E5w − E6w, E5g − E5, and each rung's all-feature − no19 difference (descriptive, as F4 is for B).
+  - **Same rule and scoring** as the sixth amendment. B_no19 and E1_no19 ran on `rtx4060-laptop`; their p-values need its per-fold outputs.
+  - **What was known when this was written:** B_no19 0.516 / 0.535 / 0.565 / 0.558 / 0.542 (splits 0–4), E1_no19 0.703 / 0.699 / 0.706 (splits 0–2), E2_no19 about 0.66. No GNN classifier had been run without f19.
+
+- **2026-11-11 (results: Amazon splits 3–4 and the GNNs without f19; 42 jobs, 2026-11-10 15:33 to 2026-11-11 01:10 UTC, all on the GPU).** Tables: [`GAT_DEEP_RESULTS.md`](GAT_DEEP_RESULTS.md); database tags `splits5` and `gnn-no19`.
+  - **Amazon, all features, 5 splits** (these verdicts replace the 3-split ones):
+    - E10 − N10 +0.013 ± 0.005, p 0.026, **supported** (3 splits: p 0.067); expected "not supported".
+    - E9 − N9 +0.011, p 0.45, not distinguishable (N9 stopped at epoch 1–2 in 16 and 17 of 25 fits on splits 3–4, so this p is not meaningful). E5w − E6w −0.001, p 0.97.
+    - Against laptop rungs (p pending): E5w − E5 −0.002 (Δ < 0 on 3 splits, not supported); E10 − E5 +0.012 ± 0.006, positive on every split; best of {E5w, E10} (E10 on every split) − E1 −0.021, worse on every split, not supported.
+  - **Amazon without f19, splits 0–2 (seventh amendment):**
+    - Means: E10 0.692, E5g 0.692, E9 0.683, E5w 0.683, E5 0.677, N9 0.551, N10 0.545, E6 0.527, N3 0.523, E6w 0.520 (B_no19 0.539, E1_no19 0.702).
+    - Primary: E5 − E6 +0.150, p 1.3e-06, **supported**; E5 − N3 +0.154, p 5.1e-09, **supported** (both as expected; both stay below 0.05 after Holm over 4). Best GNN (E10 on every split, by CV) − E1 −0.011 ± 0.007, worse on every split: **not supported**, as expected (p pending). Best GNN − B +0.153 ± 0.017, positive on every split, mean > SD (p pending).
+    - Secondary: E10 − N10 +0.148 (p 8.9e-05), E9 − N9 +0.133 (p 6.7e-04) and E5w − E6w +0.163 (p 1.3e-05) supported; E10 − E5 +0.015 (p 0.50), E9 − E5 +0.007, E5w − E5 +0.007 and E5g − E5 +0.015 not distinguishable.
+    - N9's early stopping hardly failed without f19 (5, 1 and 3 of 25 fits at epoch ≤ 2).
+  - **Reading:** with f19, Amazon's graph adds little to a GNN; without it, every GNN gains 0.13–0.16 from the real graph and almost nothing from a rewired one, so the GNNs' graph gain is real structure rather than degree. The best GNN without f19 comes within 0.011 of E1.
+
 ---
 
 - **2026-11-08 (explanations: [`EXPLAINABILITY_PLAN.md`](EXPLAINABILITY_PLAN.md); results in the README).** Branch `exp/explain`, committed locally and not pushed. The user chose the best model per dataset and asked for the most important tabular features and graph nodes, kept distinct from attention; a literature review changed the plan (no claims of faithfulness by construction, additivity as an implementation check only, exact group Shapley next to summed SHAP, labelled SHAP modes, added quality tests).

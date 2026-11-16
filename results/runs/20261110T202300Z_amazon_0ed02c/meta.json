@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "run_id": "20261110T202300Z_amazon_0ed02c",
+  "recorded_utc": "2026-11-10T20:24:39Z",
+  "started_utc": "2026-11-10T20:23:00Z",
+  "finished_utc": "2026-11-10T20:24:38Z",
+  "duration_min": 1.6,
+  "device": "rtx4060-desktop",
+  "device_details": {
+    "os": "Linux",
+    "platform": "Linux-6.6.87.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "wsl": true,
+    "python": "3.13.16",
+    "cpu": "AMD Ryzen 7 7700 8-Core Processor",
+    "gpus": [
+      {
+        "name": "NVIDIA GeForce RTX 4060",
+        "driver": "621.01",
+        "memory": "8188 MiB"
+      }
+    ]
+  },
+  "description": "Amazon without f19, 3 splits (seventh amendment, secondary): E9 - N9 +0.133 +/- 0.012, p 0.00067, supported; E9 - E5 +0.007 +/- 0.015, p 0.99, not distinguishable",
+  "kind": "compare",
+  "status": "ok",
+  "dataset": "amazon",
+  "feature_set": null,
+  "split_repeat": null,
+  "seed": null,
+  "git_commit": "e1f4b354f1aba57f45fb3ddb84c9a206c9102bf3",
+  "git_dirty": false,
+  "tags": [
+    "pilot",
+    "gnn-no19"
+  ],
+  "notes": "N9 without f19 stopped at epoch <=2 in 5, 1 and 3 of 25 fits (splits 0-2), far fewer than with f19, so this E9 - N9 is not affected the way the all-feature one is.",
+  "source": "outputs/amazon/compare/gnn_no19_sign.csv",
+  "results_rows": 2,
+  "results_columns": [
+    "variant",
+    "contrast",
+    "a",
+    "b",
+    "test_delta_split0",
+    "test_delta_split1",
+    "test_delta_split2",
+    "test_delta_mean",
+    "test_delta_sd",
+    "test_pr_auc_a_mean",
+    "test_pr_auc_a_sd",
+    "test_pr_auc_b_mean",
+    "test_pr_auc_b_sd",
+    "cv_folds",
+    "cv_delta_mean",
+    "corrected_t",
+    "p",
+    "verdict"
+  ]
+}
